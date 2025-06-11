@@ -1,6 +1,6 @@
 name: resqlink
 description: "A new Flutter project."
-publish_to: 'none'
+publish_to: "none"
 version: 0.1.0
 
 environment:
@@ -19,3 +19,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/1.png
+  fonts:
+    - family: Ubuntu
+      fonts:
+        - asset: assets/fonts/Ubuntu-Bold.ttf
+        - asset: assets/fonts/Ubuntu-Regular.ttf
