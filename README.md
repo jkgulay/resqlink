@@ -37,10 +37,9 @@
 ```
 lib/
 ├── main.dart
-├── screens/
-│   ├── home_screen.dart
-│   ├── message_screen.dart
-│   └── location_screen.dart
+│   ├── gps_page.dart
+│   ├── messages_page.dart
+│   └── settings_page.dart
 ├── services/
 │   ├── wifi_direct_service.dart
 │   ├── gps_service.dart
