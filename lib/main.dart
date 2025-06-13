@@ -95,8 +95,8 @@ class LandingPage extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Image.asset('assets/1.png', height: 120, fit: BoxFit.contain),
-            const SizedBox(height: 20),
+            Image.asset('assets/1.png', height: 300, fit: BoxFit.contain),
+            const SizedBox(height: 30),
             const Text(
               'Welcome to ResQLink',
               style: TextStyle(

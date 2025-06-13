@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../main.dart';
 
 class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final appState = context.watch<MyAppState>();
-
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(

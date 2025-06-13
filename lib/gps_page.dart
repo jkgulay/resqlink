@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import '../main.dart';
 
 class GpsPage extends StatefulWidget {
   @override
@@ -20,14 +18,12 @@ class _GpsPageState extends State<GpsPage> {
 
   @override
   Widget build(BuildContext context) {
-    var appState = context.watch<MyAppState>();
-
     return Scaffold(
       appBar: AppBar(title: const Text('GPS Offline Map')),
       body: FlutterMap(
         options: MapOptions(
-          center: LatLng(37.4219983, -122.084),
-          zoom: 13.0,
+          initialCenter: LatLng(37.4219983, -122.084),
+          initialZoom: 13.0,
           onLongPress: _saveLocation,
         ),
         children: [
