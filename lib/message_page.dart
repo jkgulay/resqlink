@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 
 class MessagePage extends StatefulWidget {
   const MessagePage({super.key});
@@ -17,25 +18,31 @@ class _MessagePageState extends State<MessagePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Messages')),
-      body: ListView.builder(
+      appBar: AppBar(title: const Text('Emergency Chats')),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(12),
         itemCount: chats.length,
+        separatorBuilder: (_, __) => const Divider(),
         itemBuilder: (context, index) {
           final chat = chats[index];
-          return Hero(
-            tag: 'chat_${chat['name']}',
-            child: Material(
-              type: MaterialType.transparency,
-              child: ListTile(
-                leading: CircleAvatar(child: Text(chat['name']![0])),
-                title: Text(chat['name']!),
-                subtitle: Text(chat['lastMessage']!),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ChatScreen(userName: chat['name']!),
-                  ),
-                ),
+          return ListTile(
+            leading: CircleAvatar(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              child: Text(
+                chat['name']![0],
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+            title: Text(
+              chat['name']!,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text(chat['lastMessage']!),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ChatScreen(userName: chat['name']!),
               ),
             ),
           );
@@ -54,79 +61,129 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final List<String> messages = [];
+  final List<Map<String, dynamic>> messages = [];
   final TextEditingController _controller = TextEditingController();
+  Timer? responseTimer;
 
   void _sendMessage() {
-    final text = _controller.text;
+    final text = _controller.text.trim();
     if (text.isNotEmpty) {
       setState(() {
-        messages.add(text);
+        messages.add({"text": text, "isMe": true});
         _controller.clear();
       });
+
+      responseTimer?.cancel();
+      responseTimer = Timer(const Duration(seconds: 2), _simulateIncoming);
     }
+  }
+
+  void _simulateIncoming() {
+    final replies = [
+      "Got it!",
+      "Stay safe!",
+      "I'm nearby.",
+      "Checking location now.",
+      "I'll help you soon.",
+    ];
+    final reply = (replies..shuffle()).first;
+    setState(() {
+      messages.add({"text": reply, "isMe": false});
+    });
+  }
+
+  @override
+  void dispose() {
+    responseTimer?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Hero(
-          tag: 'chat_${widget.userName}',
-          child: Material(
-            type: MaterialType.transparency,
-            child: Text("Chat with ${widget.userName}"),
-          ),
+        title: Row(
+          children: [
+            const Icon(Icons.message, size: 20),
+            const SizedBox(width: 8),
+            Text("Chat with ${widget.userName}"),
+          ],
         ),
       ),
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: messages.length,
-              itemBuilder: (_, index) => Align(
-                alignment: Alignment.centerRight,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 10,
-                    horizontal: 14,
+            child: messages.isEmpty
+                ? const Center(child: Text('Start your conversation'))
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: messages.length,
+                    itemBuilder: (_, index) {
+                      final msg = messages[index];
+                      return Align(
+                        alignment: msg['isMe']
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 10,
+                            horizontal: 14,
+                          ),
+                          decoration: BoxDecoration(
+                            color: msg['isMe']
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.grey[700],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            msg['text'],
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onPrimary,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    messages[index],
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onPrimary,
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              border: const Border(top: BorderSide(color: Colors.grey)),
+            ),
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Type a message...',
-                      border: OutlineInputBorder(),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                      ),
                     ),
                     onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
                 const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.send),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                  ),
                   onPressed: _sendMessage,
+                  child: const Icon(Icons.send, size: 20),
                 ),
               ],
             ),
