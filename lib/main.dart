@@ -81,27 +81,61 @@ class LandingPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
+      body: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0B192C), Color(0xFF1E3E62)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            const Icon(Icons.sos, size: 80, color: Color(0xFFFF6500)),
+            Image.asset('assets/1.png', height: 120, fit: BoxFit.contain),
             const SizedBox(height: 20),
             const Text(
               'Welcome to ResQLink',
-              style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 10),
-            const Text('Tap below to enter the app'),
-            const SizedBox(height: 30),
-            ElevatedButton(
+            const Text(
+              'Offline Emergency CommunicationUsing Geolocation & Wi-Fi Direct',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, color: Colors.white70),
+            ),
+            const SizedBox(height: 40),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF6500),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              icon: const Icon(Icons.power_settings_new),
+              label: const Text(
+                'Enter App',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
               onPressed: () {
                 Navigator.pushReplacement(
                   context,
                   MaterialPageRoute(builder: (_) => HomePage()),
                 );
               },
-              child: const Text('Enter App'),
             ),
           ],
         ),
