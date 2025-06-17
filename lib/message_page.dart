@@ -22,7 +22,7 @@ class _MessagePageState extends State<MessagePage> {
       body: ListView.separated(
         padding: const EdgeInsets.all(12),
         itemCount: chats.length,
-        separatorBuilder: (_, __) => const Divider(),
+        separatorBuilder: (_, _) => const Divider(),
         itemBuilder: (context, index) {
           final chat = chats[index];
           return ListTile(
