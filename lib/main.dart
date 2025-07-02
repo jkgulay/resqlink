@@ -3,13 +3,13 @@ import 'package:provider/provider.dart';
 import 'package:english_words/english_words.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
-import 'home_page.dart'; // Import the HomePage widget
-import 'firebase_auth_helper.dart'; // Import FirebaseAuthHelper for Firebase (mock)
+import 'home_page.dart'; 
+import 'firebase_auth_helper.dart'; 
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform, // Add this line
+    options: DefaultFirebaseOptions.currentPlatform, 
   );
   runApp(const MyApp());
 }
