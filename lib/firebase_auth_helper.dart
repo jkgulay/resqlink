@@ -14,11 +14,12 @@ class FirebaseAuthHelper {
     try {
       print("Attempting to register user with email: $email");
       print("Password length: ${password.length}");
-      
-      final UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      );
+
+      final UserCredential userCredential = await _auth
+          .createUserWithEmailAndPassword(
+            email: email.trim(),
+            password: password,
+          );
       print("User registered successfully!");
       print("User ID: ${userCredential.user?.uid}");
       return userCredential.user;
@@ -27,19 +28,25 @@ class FirebaseAuthHelper {
       print("Error Code: ${e.code}");
       print("Error Message: ${e.message}");
       print("Error Details: $e");
-      
+
       // Handle specific Firebase Auth errors
       switch (e.code) {
         case 'weak-password':
-          throw Exception('The password provided is too weak. Use at least 6 characters.');
+          throw Exception(
+            'The password provided is too weak. Use at least 6 characters.',
+          );
         case 'email-already-in-use':
           throw Exception('An account already exists for this email.');
         case 'invalid-email':
           throw Exception('The email address is not valid.');
         case 'operation-not-allowed':
-          throw Exception('Email/password accounts are not enabled in Firebase Console.');
+          throw Exception(
+            'Email/password accounts are not enabled in Firebase Console.',
+          );
         case 'network-request-failed':
-          throw Exception('Network error. Please check your internet connection.');
+          throw Exception(
+            'Network error. Please check your internet connection.',
+          );
         default:
           throw Exception('Registration failed: ${e.message ?? e.code}');
       }
@@ -54,11 +61,9 @@ class FirebaseAuthHelper {
   static Future<User?> loginUser(String email, String password) async {
     try {
       print("Attempting to login user with email: $email");
-      
-      final UserCredential userCredential = await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      );
+
+      final UserCredential userCredential = await _auth
+          .signInWithEmailAndPassword(email: email.trim(), password: password);
       print("User logged in successfully!");
       print("User ID: ${userCredential.user?.uid}");
       return userCredential.user;
@@ -67,7 +72,7 @@ class FirebaseAuthHelper {
       print("Error Code: ${e.code}");
       print("Error Message: ${e.message}");
       print("Error Details: $e");
-      
+
       // Handle specific Firebase Auth errors
       switch (e.code) {
         case 'user-not-found':
@@ -79,11 +84,15 @@ class FirebaseAuthHelper {
         case 'user-disabled':
           throw Exception('This user account has been disabled.');
         case 'too-many-requests':
-          throw Exception('Too many failed login attempts. Please try again later.');
+          throw Exception(
+            'Too many failed login attempts. Please try again later.',
+          );
         case 'invalid-credential':
           throw Exception('Invalid email or password.');
         case 'network-request-failed':
-          throw Exception('Network error. Please check your internet connection.');
+          throw Exception(
+            'Network error. Please check your internet connection.',
+          );
         default:
           throw Exception('Login failed: ${e.message ?? e.code}');
       }
@@ -111,8 +120,10 @@ class FirebaseAuthHelper {
       await _auth.sendPasswordResetEmail(email: email);
       print("Password reset email sent!");
     } on FirebaseAuthException catch (e) {
-      print("Firebase Auth Error during password reset: ${e.code} - ${e.message}");
-      
+      print(
+        "Firebase Auth Error during password reset: ${e.code} - ${e.message}",
+      );
+
       switch (e.code) {
         case 'user-not-found':
           throw Exception('No user found for this email.');
@@ -138,8 +149,10 @@ class FirebaseAuthHelper {
         throw Exception("No user is currently logged in.");
       }
     } on FirebaseAuthException catch (e) {
-      print("Firebase Auth Error during account deletion: ${e.code} - ${e.message}");
-      
+      print(
+        "Firebase Auth Error during account deletion: ${e.code} - ${e.message}",
+      );
+
       switch (e.code) {
         case 'requires-recent-login':
           throw Exception('Please log in again before deleting your account.');
@@ -157,14 +170,19 @@ class FirebaseAuthHelper {
     try {
       final User? user = _auth.currentUser;
       if (user != null) {
-        await user.updateEmail(newEmail);
-        print("Email updated successfully!");
+        // Send verification email to new address
+        await user.verifyBeforeUpdateEmail(newEmail);
+        print(
+          "Verification email sent to $newEmail! Please check your inbox and verify before the email is updated.",
+        );
       } else {
         throw Exception("No user is currently logged in.");
       }
     } on FirebaseAuthException catch (e) {
-      print("Firebase Auth Error during email update: ${e.code} - ${e.message}");
-      
+      print(
+        "Firebase Auth Error during email update: ${e.code} - ${e.message}",
+      );
+
       switch (e.code) {
         case 'requires-recent-login':
           throw Exception('Please log in again before updating your email.');
@@ -172,6 +190,8 @@ class FirebaseAuthHelper {
           throw Exception('This email is already in use by another account.');
         case 'invalid-email':
           throw Exception('The email address is not valid.');
+        case 'too-many-requests':
+          throw Exception('Too many requests. Please try again later.');
         default:
           throw Exception('Email update failed: ${e.message}');
       }
@@ -192,8 +212,10 @@ class FirebaseAuthHelper {
         throw Exception("No user is currently logged in.");
       }
     } on FirebaseAuthException catch (e) {
-      print("Firebase Auth Error during password update: ${e.code} - ${e.message}");
-      
+      print(
+        "Firebase Auth Error during password update: ${e.code} - ${e.message}",
+      );
+
       switch (e.code) {
         case 'requires-recent-login':
           throw Exception('Please log in again before updating your password.');
