@@ -3,13 +3,25 @@ import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:convert';
 import 'message_page.dart';
+import 'dart:typed_data';
 import 'gps_page.dart';
 import 'package:resqlink/settings_page.dart';
+import 'package:resqlink/wifi_direct_wrapper.dart';
 
 // WiFi Direct Service Class
-class WiFiDirectService {
+class WiFiDirectService with ChangeNotifier {
+  final Map<String, List<Map<String, dynamic>>> messageHistory = {};
   static const String serviceId = "com.example.resqlink.emergency";
   static const Strategy strategy = Strategy.P2P_CLUSTER;
+  final NearbyWrapper _nearbyWrapper = NearbyWrapper();
+
+  void _addToHistory(String endpointId, Map<String, dynamic> data, bool isMe) {
+    if (!messageHistory.containsKey(endpointId)) {
+      messageHistory[endpointId] = [];
+    }
+    messageHistory[endpointId]!.add({...data, 'isMe': isMe});
+    notifyListeners(); // This will now work
+  }
 
   String? _localUserName;
   Map<String, String> _discoveredEndpoints = {};
@@ -41,13 +53,17 @@ class WiFiDirectService {
   // Start advertising (become discoverable)
   Future<void> startAdvertising() async {
     try {
-      bool success = await Nearby().startAdvertising(
-        _localUserName!,
-        strategy,
+      // Ensure _localUserName is not null
+      if (_localUserName == null) {
+        print("Cannot start advertising without a username");
+        return;
+      }
+
+      bool success = await _nearbyWrapper.startAdvertising(
+        _localUserName!, // Use ! to assert non-null
         onConnectionInitiated: _onConnectionInitiated,
         onConnectionResult: _onConnectionResult,
         onDisconnected: _onDisconnected,
-        serviceId: serviceId,
       );
 
       if (success) {
@@ -59,13 +75,17 @@ class WiFiDirectService {
   }
 
   // Start discovery (find other devices)
+
+  // Update startDiscovery
   Future<void> startDiscovery() async {
     try {
-      bool success = await Nearby().startDiscovery(
-        serviceId,
-        strategy,
-        onEndpointFound: _onEndpointFound,
-        onEndpointLost: _onEndpointLost,
+      bool success = await _nearbyWrapper.startDiscovery(
+        onEndpointFound: (endpointId, endpointName, serviceId) {
+          _onEndpointFound(endpointId, endpointName, serviceId);
+        },
+        onEndpointLost: (endpointId) {
+          _onEndpointLost(endpointId);
+        },
       );
 
       if (success) {
@@ -79,7 +99,12 @@ class WiFiDirectService {
   // Connect to a discovered device
   Future<void> connectToDevice(String endpointId) async {
     try {
-      bool success = await Nearby().requestConnection(
+      if (_localUserName == null) {
+        print("Cannot connect without a username");
+        return;
+      }
+
+      bool success = await _nearbyWrapper.requestConnection(
         _localUserName!,
         endpointId,
         onConnectionInitiated: _onConnectionInitiated,
@@ -98,17 +123,18 @@ class WiFiDirectService {
   // Send message to connected device
   Future<void> sendMessage(String endpointId, String message) async {
     try {
-      await Nearby().sendBytesPayload(
-        endpointId,
-        utf8.encode(
-          jsonEncode({
-            'type': 'message',
-            'from': _localUserName,
-            'message': message,
-            'timestamp': DateTime.now().millisecondsSinceEpoch,
-          }),
-        ),
-      );
+      final data = {
+        'type': 'message',
+        'from': _localUserName,
+        'message': message,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+
+      // Convert to Uint8List
+      final bytes = Uint8List.fromList(utf8.encode(jsonEncode(data)));
+
+      await _nearbyWrapper.sendBytesPayload(endpointId, bytes);
+      _addToHistory(endpointId, data, true);
     } catch (e) {
       print("Error sending message: $e");
     }
@@ -133,16 +159,17 @@ class WiFiDirectService {
     // Send to all connected devices with retries
     for (String endpointId in _connectedEndpoints.keys) {
       for (int i = 0; i < 3; i++) {
-        // 3 retries
         try {
-          await Nearby().sendBytesPayload(
-            endpointId,
+          // Convert to Uint8List
+          final bytes = Uint8List.fromList(
             utf8.encode(jsonEncode(emergencyData)),
           );
-          break; // Success, exit retry loop
+          await _nearbyWrapper.sendBytesPayload(endpointId, bytes);
+          break;
         } catch (e) {
-          if (i == 2)
+          if (i == 2) {
             print("Failed to send emergency to $endpointId after 3 attempts");
+          }
         }
       }
     }
@@ -159,15 +186,17 @@ class WiFiDirectService {
     print("Found endpoint: $endpointName ($endpointId)");
   }
 
-  void _onEndpointLost(
-    String endpointId,
-    String endpointName,
-    String serviceId,
-  ) {
+  void _onEndpointLost(String endpointId) {
     String? endpointNameRemoved = _discoveredEndpoints.remove(endpointId);
     print(
       "Lost endpoint: $endpointId${endpointNameRemoved != null ? ' ($endpointNameRemoved)' : ''}",
     );
+
+    // Also remove from connected endpoints if present
+    if (_connectedEndpoints.containsKey(endpointId)) {
+      _connectedEndpoints.remove(endpointId);
+      onDeviceDisconnected?.call(endpointId);
+    }
   }
 
   void _onConnectionInitiated(String endpointId, ConnectionInfo info) {
@@ -209,10 +238,7 @@ class WiFiDirectService {
       try {
         String dataString = utf8.decode(payload.bytes!);
         Map<String, dynamic> data = jsonDecode(dataString);
-
-        if (data['type'] == 'message' || data['type'] == 'emergency') {
-          onMessageReceived?.call(endpointId, dataString);
-        }
+        _addToHistory(endpointId, data, false);
       } catch (e) {
         print("Error processing payload: $e");
       }
@@ -252,7 +278,7 @@ class _HomePageState extends State<HomePage> {
     pages = [
       EmergencyHomePage(wifiDirectService: _wifiDirectService),
       GpsPage(),
-      MessagePage(),
+      MessagePage(wifiDirectService: _wifiDirectService),
       SettingsPage(),
     ];
   }
