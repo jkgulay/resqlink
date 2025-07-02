@@ -21,6 +21,9 @@ dependencies:
   firebase_database: ^11.3.7 # For Firebase authentication
   cloud_firestore: ^5.6.9 # For Firebase Firestore (if needed)
   firebase_auth: ^5.6.0
+  wifi_iot: ^0.3.19
+  nearby_connections: ^4.3.0
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
