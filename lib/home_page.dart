@@ -317,12 +317,6 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
-        actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 16.0),
-            child: CircleAvatar(child: ProfileIcon()),
-          ),
-        ],
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -1442,41 +1436,6 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _messageController.dispose();
     super.dispose();
-  }
-}
-
-// Profile Icon Component
-class ProfileIcon extends StatelessWidget {
-  const ProfileIcon({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<Menu>(
-      icon: const Icon(Icons.person),
-      offset: const Offset(0, 40),
-      onSelected: (Menu item) {
-        // Handle menu selections
-        switch (item) {
-          case Menu.itemOne:
-            // Handle Account
-            break;
-          case Menu.itemTwo:
-            // Handle Settings
-            break;
-          case Menu.itemThree:
-            // Handle Sign Out
-            break;
-        }
-      },
-      itemBuilder: (BuildContext context) => <PopupMenuEntry<Menu>>[
-        const PopupMenuItem<Menu>(value: Menu.itemOne, child: Text('Account')),
-        const PopupMenuItem<Menu>(value: Menu.itemTwo, child: Text('Settings')),
-        const PopupMenuItem<Menu>(
-          value: Menu.itemThree,
-          child: Text('Sign Out'),
-        ),
-      ],
-    );
   }
 }
 
