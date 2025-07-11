@@ -4,7 +4,7 @@ import 'chat_screen.dart'; // Import the new unified chat screen
 
 class MessagePage extends StatefulWidget {
   final WiFiDirectService wifiDirectService;
-  
+
   const MessagePage({super.key, required this.wifiDirectService});
 
   @override
@@ -32,7 +32,6 @@ class _MessagePageState extends State<MessagePage> {
     final messageHistory = widget.wifiDirectService.messageHistory;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Emergency Chats')),
       body: ListView.builder(
         padding: const EdgeInsets.all(12),
         itemCount: connectedDevices.length,
@@ -40,7 +39,9 @@ class _MessagePageState extends State<MessagePage> {
           final endpointId = connectedDevices.keys.elementAt(index);
           final userName = connectedDevices[endpointId]!;
           final history = messageHistory[endpointId] ?? [];
-          final lastMessage = history.isNotEmpty ? history.last['message'] : 'No messages yet';
+          final lastMessage = history.isNotEmpty
+              ? history.last['message']
+              : 'No messages yet';
 
           return ListTile(
             leading: CircleAvatar(

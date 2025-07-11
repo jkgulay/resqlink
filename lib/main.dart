@@ -3,14 +3,27 @@ import 'package:provider/provider.dart';
 import 'package:english_words/english_words.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
-import 'home_page.dart'; 
-import 'firebase_auth_helper.dart'; 
+import 'home_page.dart';
+import 'services/auth_service.dart';
+import 'services/database_service.dart';
+import 'widgets/connection_status_widget.dart';
+import 'models/user_model.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform, 
-  );
+
+  // Initialize Firebase (but handle errors gracefully for offline use)
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    print('Firebase initialization failed: $e');
+  }
+
+  // Initialize local database
+  await DatabaseService.database;
+
   runApp(const MyApp());
 }
 
@@ -56,9 +69,54 @@ class MyApp extends StatelessWidget {
             bodyMedium: TextStyle(color: Colors.white),
           ),
         ),
-        home: const LandingPage(),
+        home: const AuthWrapper(),
       ),
     );
+  }
+}
+
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  UserModel? currentUser;
+  bool isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthStatus();
+  }
+
+  Future<void> _checkAuthStatus() async {
+    try {
+      final user = await AuthService.getCurrentUser();
+      setState(() {
+        currentUser = user;
+        isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (currentUser != null) {
+      return HomePage();
+    } else {
+      return const LandingPage();
+    }
   }
 }
 
@@ -85,7 +143,6 @@ class MyAppState extends ChangeNotifier {
 class LandingPage extends StatelessWidget {
   const LandingPage({super.key});
 
-  // Method to show Login/Register dialog
   void _showLoginDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -112,6 +169,12 @@ class LandingPage extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // Connection status indicator
+            const Positioned(
+              top: 50,
+              right: 24,
+              child: ConnectionStatusWidget(),
+            ),
             Image.asset('assets/1.png', height: 300, fit: BoxFit.contain),
             const SizedBox(height: 30),
             const Text(
@@ -128,6 +191,30 @@ class LandingPage extends StatelessWidget {
               'Offline Emergency Communication Using Wi-Fi Direct & Geolocation Services',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16, color: Colors.white70),
+            ),
+            const SizedBox(height: 20),
+            // Offline capability indicator
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green, width: 1),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.offline_bolt, color: Colors.green, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Works Offline for Emergency Use',
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 40),
             ElevatedButton.icon(
@@ -148,7 +235,7 @@ class LandingPage extends StatelessWidget {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               onPressed: () {
-                _showLoginDialog(context); // Show the login/register dialog
+                _showLoginDialog(context);
               },
             ),
           ],
@@ -158,7 +245,6 @@ class LandingPage extends StatelessWidget {
   }
 }
 
-// Separate StatefulWidget for the dialog to manage state properly
 class LoginRegisterDialog extends StatefulWidget {
   const LoginRegisterDialog({super.key});
 
@@ -170,8 +256,8 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
-  bool isLogin = true; // Toggle between login and register
-  bool isLoading = false; // Loading state
+  bool isLogin = true;
+  bool isLoading = false;
 
   @override
   void dispose() {
@@ -184,7 +270,6 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
   void _toggleMode() {
     setState(() {
       isLogin = !isLogin;
-      // Clear fields when switching modes
       emailController.clear();
       passwordController.clear();
       confirmPasswordController.clear();
@@ -196,7 +281,6 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
     String password = passwordController.text;
     String confirmPassword = confirmPasswordController.text;
 
-    // Validate input
     if (email.isEmpty || password.isEmpty) {
       _showSnackBar('Please enter all fields');
       return;
@@ -212,39 +296,33 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
     });
 
     try {
+      AuthResult result;
       if (isLogin) {
-        // Use FirebaseAuthHelper to login
-        try {
-          await FirebaseAuthHelper.loginUser(email, password);
-          print("Logged in!");
-          if (mounted) {
-            Navigator.of(context).pop(); // Close the dialog
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => HomePage()),
-            );
-          }
-        } catch (e) {
-          _showSnackBar("Login failed. Please check your credentials.");
+        result = await AuthService.login(email, password);
+      } else {
+        result = await AuthService.register(email, password);
+      }
+
+      if (result.isSuccess) {
+        if (mounted) {
+          Navigator.of(context).pop();
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => HomePage()),
+          );
+
+          // Show success message with connection status
+          String methodText = result.method == AuthMethod.online
+              ? 'Online'
+              : 'Offline';
+          String actionText = isLogin ? 'Login' : 'Registration';
+          _showSnackBar('$actionText successful ($methodText mode)');
         }
       } else {
-        // Use FirebaseAuthHelper to register
-        try {
-          await FirebaseAuthHelper.registerUser(email, password);
-          print("User registered!");
-          if (mounted) {
-            Navigator.of(context).pop(); // Close the dialog
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => HomePage()),
-            );
-          }
-        } catch (e) {
-          _showSnackBar("Registration failed. Please try again.");
-        }
+        _showSnackBar(result.errorMessage ?? 'Authentication failed');
       }
     } catch (e) {
-      _showSnackBar("An error occurred: ${e.toString()}");
+      _showSnackBar('An error occurred: ${e.toString()}');
     } finally {
       if (mounted) {
         setState(() {
@@ -272,13 +350,19 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              isLogin ? "Login" : "Register",
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  isLogin ? "Login" : "Register",
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const ConnectionStatusWidget(),
+              ],
             ),
             const SizedBox(height: 20),
             TextField(
@@ -329,6 +413,20 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
                 style: const TextStyle(color: Colors.white),
                 obscureText: true,
               ),
+            const SizedBox(height: 15),
+            // Info text about offline capability
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                'This app works offline for emergency use. Your credentials are stored securely on your device.',
+                style: TextStyle(color: Colors.blue, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ),
             const SizedBox(height: 20),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
