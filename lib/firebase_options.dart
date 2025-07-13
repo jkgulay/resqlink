@@ -55,9 +55,9 @@ class DefaultFirebaseOptions {
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyChIntQ7ZsE7MVBWzwUrz7qa538QGaV55Q',
     appId:
-        '1:YOUR_APP_ID:android:YOUR_ANDROID_APP_ID', // Replace with your actual app ID
-    messagingSenderId: 'YOUR_SENDER_ID', // Replace with your actual sender ID
-    projectId: 'YOUR_PROJECT_ID', // Replace with your actual project ID
+        '1:1056797390668:android:74c09cc7186b11c0aa81e9', // Replace with your actual app ID
+    messagingSenderId: '1056797390668', // Replace with your actual sender ID
+    projectId: 'resqlink-2e060', // Replace with your actual project ID
     authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
     storageBucket: 'YOUR_PROJECT_ID.appspot.com',
   );

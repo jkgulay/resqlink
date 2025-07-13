@@ -22,11 +22,6 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        elevation: 0,
-        backgroundColor: Theme.of(context).colorScheme.surface,
-      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -696,31 +691,6 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
       ],
-    );
-  }
-
-  void _showLogoutDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              // Close the dialog
-              Navigator.pop(context);
-              // Navigate back to landing page and clear navigation stack
-              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-            },
-            child: const Text('Logout'),
-          ),
-        ],
-      ),
     );
   }
 }
