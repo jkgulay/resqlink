@@ -67,6 +67,24 @@ class AuthService {
     }
   }
 
+  static Future<UserModel?> trySilentFirebaseLogin() async {
+  final firebaseUser = FirebaseAuthHelper.currentUser;
+  if (firebaseUser != null) {
+    final email = firebaseUser.email!;
+    final localUser = await DatabaseService.loginUser(email, ''); // dummy for lookup
+    if (localUser != null) {
+      await _setCurrentUser(localUser);
+      return localUser;
+    }
+  }
+  return null;
+}
+
+static Future<UserModel?> tryOfflineLogin() async {
+  return await getCurrentUser();
+}
+
+
   static Future<AuthResult> login(String email, String password) async {
     try {
       final connected = await isConnected;
@@ -175,3 +193,4 @@ class AuthResult {
       user = null,
       method = null;
 }
+
