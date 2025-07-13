@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/services/auth_service.dart';
+import 'package:vibration/vibration.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class SettingsPage extends StatefulWidget {
   @override
@@ -18,6 +20,16 @@ class _SettingsPageState extends State<SettingsPage> {
       "Emergency! I need help. This is my last known location.";
   double _broadcastRadius = 500.0; // meters
   int _locationUpdateInterval = 30; // seconds
+
+  Future<void> _triggerEmergencyFeedback() async {
+    if (_soundAlerts) {
+      final player = AudioPlayer();
+      await player.play(AssetSource('sounds/emergency_alert.mp3'));
+    }
+    if ((await Vibration.hasVibrator()) == true && _vibrationAlerts) {
+      Vibration.vibrate(duration: 800);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

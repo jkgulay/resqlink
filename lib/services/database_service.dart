@@ -18,37 +18,35 @@ class DatabaseService {
 
   static Future<Database> _initDB() async {
     String path = join(await getDatabasesPath(), 'resqlink.db');
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: _createDB,
-    );
+    return await openDatabase(path, version: 1, onCreate: _createDB);
   }
 
   static Future<void> _createDB(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE $_userTable (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        display_name TEXT,
-        created_at TEXT NOT NULL,
-        last_login TEXT NOT NULL,
-        is_online_user INTEGER DEFAULT 0
-      )
-    ''');
+    CREATE TABLE $_userTable (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      display_name TEXT,
+      created_at TEXT NOT NULL,
+      last_login TEXT NOT NULL,
+      is_online_user INTEGER DEFAULT 0
+    )
+  ''');
 
     await db.execute('''
-      CREATE TABLE $_messageTable (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        endpoint_id TEXT NOT NULL,
-        from_user TEXT NOT NULL,
-        message TEXT NOT NULL,
-        is_me INTEGER NOT NULL,
-        is_emergency INTEGER NOT NULL,
-        timestamp INTEGER NOT NULL
-      )
-    ''');
+  CREATE TABLE $_messageTable (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint_id TEXT NOT NULL,
+    from_user TEXT NOT NULL,
+    message TEXT NOT NULL,
+    is_me INTEGER NOT NULL,
+    is_emergency INTEGER NOT NULL,
+    timestamp INTEGER NOT NULL,
+    synced INTEGER DEFAULT 0
+    synced_to_firebase INTEGER DEFAULT 0
+  )
+''');
   }
 
   static String _hashPassword(String password) {
@@ -57,7 +55,11 @@ class DatabaseService {
     return digest.toString();
   }
 
-  static Future<UserModel?> createUser(String email, String password, {bool isOnlineUser = false}) async {
+  static Future<UserModel?> createUser(
+    String email,
+    String password, {
+    bool isOnlineUser = false,
+  }) async {
     try {
       final db = await database;
       final now = DateTime.now();
@@ -76,6 +78,11 @@ class DatabaseService {
       print('Error creating user: $e');
       return null;
     }
+  }
+
+  static Future<void> deleteDatabaseFile() async {
+    final path = join(await getDatabasesPath(), 'resqlink.db');
+    await deleteDatabase(path);
   }
 
   static Future<UserModel?> loginUser(String email, String password) async {
@@ -156,6 +163,20 @@ class DatabaseService {
     }
   }
 
+  static Future<List<MessageModel>> getUnsyncedMessages() async {
+    try {
+      final db = await database;
+      final result = await db.query(
+        _messageTable,
+        where: 'synced_to_firebase IS NULL OR synced_to_firebase = 0',
+      );
+      return result.map((e) => MessageModel.fromMap(e)).toList();
+    } catch (e) {
+      print('Error loading unsynced messages: $e');
+      return [];
+    }
+  }
+
   static Future<List<MessageModel>> getMessages(String endpointId) async {
     try {
       final db = await database;
@@ -172,10 +193,22 @@ class DatabaseService {
     }
   }
 
-  static Future<void> syncMessageToFirebaseIfOnline(MessageModel message, Future<bool> Function() isConnected, Future<void> Function(MessageModel) syncFn) async {
+  static Future<void> syncMessageToFirebaseIfOnline(
+    MessageModel message,
+    Future<bool> Function() isConnected,
+    Future<void> Function(MessageModel) syncFn,
+  ) async {
     if (await isConnected()) {
       try {
         await syncFn(message);
+
+        final db = await database;
+        await db.update(
+          _messageTable,
+          {'synced_to_firebase': 1},
+          where: 'id = ?',
+          whereArgs: [message.id],
+        );
       } catch (e) {
         print('Error syncing message to Firebase: $e');
       }
