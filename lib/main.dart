@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:english_words/english_words.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'home_page.dart';
 import 'services/auth_service.dart';
@@ -9,21 +12,87 @@ import 'services/database_service.dart';
 import 'widgets/connection_status_widget.dart';
 import 'models/user_model.dart';
 
+final _secureStorage = FlutterSecureStorage();
+
+Future<void> saveToken(
+  String idToken,
+  String refreshToken,
+  DateTime expiresAt,
+) async {
+  await _secureStorage.write(key: 'idToken', value: idToken);
+  await _secureStorage.write(key: 'refreshToken', value: refreshToken);
+  await _secureStorage.write(
+    key: 'expiresAt',
+    value: expiresAt.toIso8601String(),
+  );
+}
+
+Future<String?> loadIdToken() async =>
+    await _secureStorage.read(key: 'idToken');
+Future<String?> loadRefreshToken() async =>
+    await _secureStorage.read(key: 'refreshToken');
+Future<DateTime?> loadExpiresAt() async {
+  final val = await _secureStorage.read(key: 'expiresAt');
+  return val != null ? DateTime.tryParse(val) : null;
+}
+
+Future<void> clearTokens() async {
+  await _secureStorage.deleteAll();
+}
+
+Future<bool> isOnline() async {
+  final conn = await Connectivity().checkConnectivity();
+  return conn == ConnectivityResult.mobile || conn == ConnectivityResult.wifi;
+}
+
+Future<String?> refreshIdToken() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user != null) {
+    await user.reload();
+    final newToken = await user.getIdToken();
+    final expiration = DateTime.now().add(const Duration(hours: 1));
+    await saveToken(newToken!, '', expiration);
+    return newToken;
+  }
+  return null;
+}
+
+Future<UserModel?> trySilentFirebaseLogin() async {
+  final idToken = await loadIdToken();
+  final expiresAt = await loadExpiresAt();
+  final firebaseUser = FirebaseAuth.instance.currentUser;
+
+  if (idToken != null &&
+      expiresAt != null &&
+      DateTime.now().isBefore(expiresAt)) {
+    if (firebaseUser != null && firebaseUser.email != null) {
+      final email = firebaseUser.email!;
+      final localUser = await DatabaseService.loginUser(
+        email,
+        '',
+      ); // dummy login to lookup
+      if (localUser != null) {
+        return localUser;
+      }
+    }
+  }
+  return null;
+}
+
+Future<UserModel?> tryOfflineLogin() async {
+  return await AuthService.getCurrentUser();
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize Firebase (but handle errors gracefully for offline use)
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
   } catch (e) {
-    print('Firebase initialization failed: $e');
+    debugPrint('Firebase init failed (offline?): \$e');
   }
-
-  // Initialize local database
   await DatabaseService.database;
-
   runApp(const MyApp());
 }
 
@@ -33,47 +102,50 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (context) => MyAppState(),
+      create: (_) => MyAppState(),
       child: MaterialApp(
+        debugShowCheckedModeBanner: false,
         title: 'ResQLink',
-        theme: ThemeData(
-          fontFamily: 'Ubuntu',
-          useMaterial3: true,
-          brightness: Brightness.dark,
-          colorScheme:
-              ColorScheme.fromSeed(
-                seedColor: const Color(0xFFFF6500),
-                brightness: Brightness.dark,
-                surface: const Color(0xFF0B192C),
-                surfaceContainerHighest: const Color(0xFF1E3E62),
-              ).copyWith(
-                primary: const Color(0xFFFF6500),
-                onPrimary: Colors.white,
-                onSurface: Colors.white,
-                onSecondary: Colors.white,
-              ),
-          scaffoldBackgroundColor: Colors.black,
-          appBarTheme: const AppBarTheme(
-            backgroundColor: Color(0xFF0B192C),
-            foregroundColor: Colors.white,
-          ),
-          elevatedButtonTheme: ElevatedButtonThemeData(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6500),
-              foregroundColor: Colors.white,
-            ),
-          ),
-          iconTheme: const IconThemeData(color: Colors.white),
-          textTheme: const TextTheme(
-            bodyLarge: TextStyle(color: Colors.white),
-            bodyMedium: TextStyle(color: Colors.white),
-          ),
-        ),
+        theme: _darkTheme,
         home: const AuthWrapper(),
       ),
     );
   }
 }
+
+final _darkTheme = ThemeData(
+  fontFamily: 'Ubuntu',
+  useMaterial3: true,
+  brightness: Brightness.dark,
+  colorScheme:
+      ColorScheme.fromSeed(
+        seedColor: const Color(0xFFFF6500),
+        brightness: Brightness.dark,
+        surface: const Color(0xFF0B192C),
+        surfaceContainerHighest: const Color(0xFF1E3E62),
+      ).copyWith(
+        primary: const Color(0xFFFF6500),
+        onPrimary: Colors.white,
+        onSurface: Colors.white,
+        onSecondary: Colors.white,
+      ),
+  scaffoldBackgroundColor: Colors.black,
+  appBarTheme: const AppBarTheme(
+    backgroundColor: Color(0xFF0B192C),
+    foregroundColor: Colors.white,
+  ),
+  elevatedButtonTheme: ElevatedButtonThemeData(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: const Color(0xFFFF6500),
+      foregroundColor: Colors.white,
+    ),
+  ),
+  iconTheme: const IconThemeData(color: Colors.white),
+  textTheme: const TextTheme(
+    bodyLarge: TextStyle(color: Colors.white),
+    bodyMedium: TextStyle(color: Colors.white),
+  ),
+);
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
@@ -83,59 +155,53 @@ class AuthWrapper extends StatefulWidget {
 }
 
 class _AuthWrapperState extends State<AuthWrapper> {
-  UserModel? currentUser;
-  bool isLoading = true;
+  UserModel? _currentUser;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _checkAuthStatus();
+    _bootstrap();
   }
 
-  Future<void> _checkAuthStatus() async {
-    try {
-      final user = await AuthService.getCurrentUser();
-      setState(() {
-        currentUser = user;
-        isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        isLoading = false;
-      });
+  Future<void> _bootstrap() async {
+    if (await isOnline()) {
+      try {
+        _currentUser = await trySilentFirebaseLogin();
+      } catch (e) {
+        debugPrint('Silent Firebase login failed: \$e');
+      }
     }
+
+    if (_currentUser == null) {
+      _currentUser = await tryOfflineLogin();
+    }
+
+    setState(() => _loading = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (isLoading) {
+    if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-
-    if (currentUser != null) {
-      return HomePage();
-    } else {
-      return const LandingPage();
-    }
+    return _currentUser != null ? HomePage() : const LandingPage();
   }
 }
 
 class MyAppState extends ChangeNotifier {
   var current = WordPair.random();
+  final favorites = <WordPair>[];
 
   void getNext() {
     current = WordPair.random();
     notifyListeners();
   }
 
-  var favorites = <WordPair>[];
-
   void toggleFavorite() {
-    if (favorites.contains(current)) {
-      favorites.remove(current);
-    } else {
-      favorites.add(current);
-    }
+    favorites.contains(current)
+        ? favorites.remove(current)
+        : favorites.add(current);
     notifyListeners();
   }
 }
