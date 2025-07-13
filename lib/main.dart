@@ -92,6 +92,7 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Firebase init failed (offline?): \$e');
   }
+  await DatabaseService.deleteDatabaseFile(); // ⚠️ dev only
   await DatabaseService.database;
   runApp(const MyApp());
 }

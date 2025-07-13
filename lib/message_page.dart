@@ -35,8 +35,14 @@ class _MessagePageState extends State<MessagePage> {
       body: FutureBuilder<List<MessageModel>>(
         future: _loadAllMessages(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text('No messages yet.'));
           }
 
           final grouped = <String, List<MessageModel>>{};
@@ -87,9 +93,14 @@ class _MessagePageState extends State<MessagePage> {
   }
 
   Future<List<MessageModel>> _loadAllMessages() async {
-    final db = await DatabaseService.database;
-    final result = await db.query('messages', orderBy: 'timestamp ASC');
-    return result.map((e) => MessageModel.fromMap(e)).toList();
+    try {
+      final db = await DatabaseService.database;
+      final result = await db.query('messages', orderBy: 'timestamp ASC');
+      return result.map((e) => MessageModel.fromMap(e)).toList();
+    } catch (e) {
+      print('Error loading messages: $e');
+      rethrow;
+    }
   }
 }
 
