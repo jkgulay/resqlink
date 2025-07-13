@@ -7,6 +7,8 @@ import 'dart:typed_data';
 import 'gps_page.dart';
 import 'package:resqlink/settings_page.dart';
 import 'package:resqlink/wifi_direct_wrapper.dart';
+import 'package:vibration/vibration.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 // WiFi Direct Service Class
 class WiFiDirectService with ChangeNotifier {
@@ -21,6 +23,21 @@ class WiFiDirectService with ChangeNotifier {
     }
     messageHistory[endpointId]!.add({...data, 'isMe': isMe});
     notifyListeners(); // This will now work
+  }
+
+  Future<void> _triggerEmergencyFeedback() async {
+    try {
+      // Vibrate if possible
+      if (await Vibration.hasVibrator() ?? false) {
+        Vibration.vibrate(duration: 1200);
+      }
+
+      // Play emergency alert sound
+      final player = AudioPlayer();
+      await player.play(AssetSource('sounds/emergency_alert.mp3'));
+    } catch (e) {
+      print('Emergency feedback error: $e');
+    }
   }
 
   String? _localUserName;
@@ -238,12 +255,18 @@ class WiFiDirectService with ChangeNotifier {
       try {
         String dataString = utf8.decode(payload.bytes!);
         Map<String, dynamic> data = jsonDecode(dataString);
-        _addToHistory(endpointId, data, false);
+
+        if (data['type'] == 'emergency') {
+          _triggerEmergencyFeedback(); // play sound/vibrate
+        }
+
+        _addToHistory(endpointId, data, false); // still save it
       } catch (e) {
         print("Error processing payload: $e");
       }
     }
   }
+
 
   // Stop all operations
   Future<void> stop() async {
