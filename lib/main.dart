@@ -174,9 +174,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       }
     }
 
-    if (_currentUser == null) {
-      _currentUser = await tryOfflineLogin();
-    }
+    _currentUser ??= await tryOfflineLogin();
 
     setState(() => _loading = false);
   }

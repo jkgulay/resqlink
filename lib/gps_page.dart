@@ -4,9 +4,11 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
+import 'package:path/path.dart' as p;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
+
+enum LocationType { normal, emergency }
 
 class LocationModel {
   final int? id;
@@ -15,6 +17,7 @@ class LocationModel {
   final DateTime timestamp;
   final bool synced;
   final String? userId;
+  final LocationType type;
 
   LocationModel({
     this.id,
@@ -23,6 +26,7 @@ class LocationModel {
     required this.timestamp,
     this.synced = false,
     this.userId,
+    this.type = LocationType.normal,
   });
 
   Map<String, dynamic> toMap() {
@@ -33,6 +37,7 @@ class LocationModel {
       'timestamp': timestamp.millisecondsSinceEpoch,
       'synced': synced ? 1 : 0,
       'userId': userId,
+      'type': type.index,
     };
   }
 
@@ -44,6 +49,7 @@ class LocationModel {
       timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp']),
       synced: map['synced'] == 1,
       userId: map['userId'],
+      type: LocationType.values[map['type'] ?? 0],
     );
   }
 
@@ -53,7 +59,31 @@ class LocationModel {
       'longitude': longitude,
       'timestamp': Timestamp.fromDate(timestamp),
       'userId': userId,
+      'type': type.name,
     };
+  }
+
+  // Helper method to get color based on recency and type
+  Color getMarkerColor() {
+    final now = DateTime.now();
+    final age = now.difference(timestamp);
+
+    if (type == LocationType.emergency) {
+      return Colors.red;
+    }
+
+    if (age.inMinutes < 5) {
+      return Colors.green;
+    } else if (age.inMinutes < 30) {
+      return Colors.orange;
+    } else {
+      return Colors.grey;
+    }
+  }
+
+  // Helper method to get icon based on type
+  IconData getMarkerIcon() {
+    return type == LocationType.emergency ? Icons.warning : Icons.location_on;
   }
 }
 
@@ -68,10 +98,10 @@ class LocationService {
   }
 
   static Future<Database> _initDB() async {
-    String path = join(await getDatabasesPath(), 'locations.db');
+    String path = p.join(await getDatabasesPath(), 'locations.db');
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) {
         return db.execute('''
           CREATE TABLE $_tableName(
@@ -80,9 +110,17 @@ class LocationService {
             longitude REAL NOT NULL,
             timestamp INTEGER NOT NULL,
             synced INTEGER NOT NULL DEFAULT 0,
-            userId TEXT
+            userId TEXT,
+            type INTEGER NOT NULL DEFAULT 0
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) {
+        if (oldVersion < 2) {
+          db.execute(
+            'ALTER TABLE $_tableName ADD COLUMN type INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       },
     );
   }
@@ -94,7 +132,10 @@ class LocationService {
 
   static Future<List<LocationModel>> getLocations() async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(_tableName);
+    final List<Map<String, dynamic>> maps = await db.query(
+      _tableName,
+      orderBy: 'timestamp ASC',
+    );
     return List.generate(maps.length, (i) => LocationModel.fromMap(maps[i]));
   }
 
@@ -129,6 +170,11 @@ class LocationService {
       return LocationModel.fromMap(maps.first);
     }
     return null;
+  }
+
+  static Future<void> clearAllLocations() async {
+    final db = await database;
+    await db.delete(_tableName);
   }
 }
 
@@ -170,13 +216,16 @@ class GpsPage extends StatefulWidget {
 }
 
 class _GpsPageState extends State<GpsPage> {
-  final List<LatLng> savedLocations = [];
+  final List<LocationModel> savedLocations = [];
   final MapController _mapController = MapController();
   LocationModel? _lastKnownLocation;
   LatLng? _currentLocation;
   bool _isLocationServiceEnabled = false;
   bool _isConnected = false;
+  bool _emergencyMode = false;
+  String _statusMessage = '';
   Timer? _locationTimer;
+  Timer? _emergencyTimer;
   StreamSubscription<Position>? _positionStream;
   StreamSubscription<ConnectivityResult>? _connectivitySubscription;
 
@@ -192,9 +241,26 @@ class _GpsPageState extends State<GpsPage> {
   @override
   void dispose() {
     _locationTimer?.cancel();
+    _emergencyTimer?.cancel();
     _positionStream?.cancel();
     _connectivitySubscription?.cancel();
     super.dispose();
+  }
+
+  void _showMessage(String message, {Color? backgroundColor}) {
+    if (mounted) {
+      setState(() {
+        _statusMessage = message;
+      });
+      // Clear message after 3 seconds
+      Timer(const Duration(seconds: 3), () {
+        if (mounted) {
+          setState(() {
+            _statusMessage = '';
+          });
+        }
+      });
+    }
   }
 
   Future<void> _initializeServices() async {
@@ -261,9 +327,7 @@ class _GpsPageState extends State<GpsPage> {
     if (mounted) {
       setState(() {
         savedLocations.clear();
-        savedLocations.addAll(
-          locations.map((loc) => LatLng(loc.latitude, loc.longitude)),
-        );
+        savedLocations.addAll(locations);
       });
     }
   }
@@ -273,12 +337,17 @@ class _GpsPageState extends State<GpsPage> {
       result,
     ) {
       if (mounted) {
+        final wasConnected = _isConnected;
         setState(() {
           _isConnected = result != ConnectivityResult.none;
         });
 
-        if (_isConnected) {
+        // When coming back online, sync all unsynced locations
+        if (!wasConnected && _isConnected) {
           _syncLocationsToFirebase();
+          _showMessage('Back online! Syncing saved locations...');
+        } else if (wasConnected && !_isConnected) {
+          _showMessage('Offline mode - locations will be saved locally');
         }
       }
     });
@@ -287,17 +356,16 @@ class _GpsPageState extends State<GpsPage> {
   void _startLocationTracking() {
     if (!_isLocationServiceEnabled) return;
 
-    _positionStream =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 10,
-          ),
-        ).listen((Position position) {
-          if (mounted) {
-            _updateCurrentLocation(position);
-          }
-        });
+    _positionStream = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      ),
+    ).listen((Position position) {
+      if (mounted) {
+        _updateCurrentLocation(position);
+      }
+    });
 
     // Also update location every 30 seconds when app is active
     _locationTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
@@ -305,6 +373,68 @@ class _GpsPageState extends State<GpsPage> {
         _getCurrentLocation();
       }
     });
+  }
+
+  void _toggleEmergencyMode() {
+    setState(() {
+      _emergencyMode = !_emergencyMode;
+    });
+
+    if (_emergencyMode) {
+      _startEmergencyTracking();
+      _showMessage('Emergency mode activated! Location sharing every 2 minutes.');
+    } else {
+      _stopEmergencyTracking();
+      _showMessage('Emergency mode deactivated.');
+    }
+  }
+
+  void _startEmergencyTracking() {
+    _emergencyTimer = Timer.periodic(const Duration(minutes: 2), (timer) {
+      if (_emergencyMode && mounted) {
+        _shareEmergencyLocation();
+      }
+    });
+  }
+
+  void _stopEmergencyTracking() {
+    _emergencyTimer?.cancel();
+    _emergencyTimer = null;
+  }
+
+  void _shareEmergencyLocation() async {
+    if (_currentLocation != null) {
+      final emergencyLocation = LocationModel(
+        latitude: _currentLocation!.latitude,
+        longitude: _currentLocation!.longitude,
+        timestamp: DateTime.now(),
+        userId: widget.userId,
+        type: LocationType.emergency,
+      );
+
+      // Always save to local SQLite database first (works offline)
+      await LocationService.insertLocation(emergencyLocation);
+
+      // Only sync to Firebase if connected
+      if (_isConnected) {
+        await FirebaseLocationService.syncLocation(emergencyLocation);
+      }
+
+      // Share via callback
+      if (widget.onLocationShare != null) {
+        widget.onLocationShare!(emergencyLocation);
+      }
+
+      // Reload saved locations to show the new emergency marker
+      await _loadSavedLocations();
+
+      // Show notification
+      _showMessage(
+        _isConnected
+            ? 'Emergency location shared and synced!'
+            : 'Emergency location saved! Will sync when online.',
+      );
+    }
   }
 
   Future<void> _getCurrentLocation() async {
@@ -331,6 +461,7 @@ class _GpsPageState extends State<GpsPage> {
       longitude: position.longitude,
       timestamp: DateTime.now(),
       userId: widget.userId,
+      type: LocationType.normal,
     );
 
     setState(() {
@@ -338,13 +469,13 @@ class _GpsPageState extends State<GpsPage> {
       _lastKnownLocation = locationModel;
     });
 
-    // Save to local database
-    LocationService.insertLocation(locationModel);
-
-    // Sync to Firebase if connected
-    if (_isConnected) {
-      FirebaseLocationService.syncLocation(locationModel);
-    }
+    // Always save to local SQLite database first (works offline)
+    LocationService.insertLocation(locationModel).then((_) {
+      // Only sync to Firebase if connected
+      if (_isConnected) {
+        FirebaseLocationService.syncLocation(locationModel);
+      }
+    });
   }
 
   Future<void> _syncLocationsToFirebase() async {
@@ -363,31 +494,28 @@ class _GpsPageState extends State<GpsPage> {
       longitude: latLng.longitude,
       timestamp: DateTime.now(),
       userId: widget.userId,
+      type: LocationType.normal,
     );
 
     setState(() {
-      savedLocations.add(latLng);
+      savedLocations.add(locationModel);
     });
 
-    // Save to local database
-    LocationService.insertLocation(locationModel);
-
-    // Sync to Firebase if connected
-    if (_isConnected) {
-      FirebaseLocationService.syncLocation(locationModel);
-    }
+    // Always save to local SQLite database first (works offline)
+    LocationService.insertLocation(locationModel).then((_) {
+      // Only sync to Firebase if connected
+      if (_isConnected) {
+        FirebaseLocationService.syncLocation(locationModel);
+      }
+    });
   }
 
-  void _shareCurrentLocation(BuildContext context) {
+  void _shareCurrentLocation() {
     if (_lastKnownLocation != null && widget.onLocationShare != null) {
       widget.onLocationShare!(_lastKnownLocation!);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Location shared!')));
+      _showMessage('Location shared!');
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No location available to share')),
-      );
+      _showMessage('No location available to share');
     }
   }
 
@@ -397,22 +525,119 @@ class _GpsPageState extends State<GpsPage> {
     }
   }
 
+  void _clearAllLocations() {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('Clear All Locations'),
+          content: const Text(
+            'Are you sure you want to clear all saved locations? This action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await LocationService.clearAllLocations();
+                await _loadSavedLocations();
+                Navigator.of(dialogContext).pop();
+                _showMessage('All locations cleared!');
+              },
+              child: const Text('Clear', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showConnectivityStatus() {
+    _showMessage(_isConnected ? 'Online' : 'Offline');
+  }
+
+  List<LatLng> _getRoutePoints() {
+    return savedLocations
+        .map((loc) => LatLng(loc.latitude, loc.longitude))
+        .toList();
+  }
+
+  void _showLocationDetails(LocationModel location) {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text(
+          location.type == LocationType.emergency
+              ? 'Emergency Location'
+              : 'Saved Location',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Latitude: ${location.latitude.toStringAsFixed(6)}'),
+            Text('Longitude: ${location.longitude.toStringAsFixed(6)}'),
+            Text('Time: ${location.timestamp.toString().substring(0, 19)}'),
+            Text('Type: ${location.type.name.toUpperCase()}'),
+            Text('Synced: ${location.synced ? 'Yes' : 'No'}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('GPS Tracker'),
         actions: [
+          // Emergency mode toggle
+          IconButton(
+            icon: Icon(
+              _emergencyMode ? Icons.emergency : Icons.emergency_outlined,
+              color: _emergencyMode ? Colors.red : Colors.grey,
+            ),
+            onPressed: _toggleEmergencyMode,
+            tooltip: _emergencyMode
+                ? 'Disable Emergency Mode'
+                : 'Enable Emergency Mode',
+          ),
+          // Connectivity status
           IconButton(
             icon: Icon(
               _isConnected ? Icons.cloud_done : Icons.cloud_off,
               color: _isConnected ? Colors.green : Colors.red,
             ),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(_isConnected ? 'Online' : 'Offline')),
-              );
+            onPressed: _showConnectivityStatus,
+          ),
+          // Clear all locations
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'clear') {
+                _clearAllLocations();
+              }
             },
+            itemBuilder: (BuildContext context) => [
+              const PopupMenuItem<String>(
+                value: 'clear',
+                child: Row(
+                  children: [
+                    Icon(Icons.clear_all, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('Clear All Locations'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -421,42 +646,68 @@ class _GpsPageState extends State<GpsPage> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: _currentLocation ?? LatLng(37.4219983, -122.084),
+              initialCenter: _currentLocation ?? const LatLng(37.4219983, -122.084),
               initialZoom: 13.0,
               onLongPress: _saveLocation,
             ),
             children: [
               TileLayer(
-                urlTemplate:
-                    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                urlTemplate: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                 subdomains: const ['a', 'b', 'c'],
               ),
+              // Route line (polyline connecting all saved locations)
+              if (savedLocations.length > 1)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: _getRoutePoints(),
+                      strokeWidth: 4.0,
+                      color: Colors.orange,
+                    ),
+                  ],
+                ),
               MarkerLayer(
                 markers: [
-                  // Current location marker
+                  // Current location marker (blue dot)
                   if (_currentLocation != null)
                     Marker(
                       width: 80,
                       height: 80,
                       point: _currentLocation!,
                       rotate: false,
-                      child: const Icon(
-                        Icons.my_location,
-                        color: Colors.blue,
-                        size: 40,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.blue,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.my_location,
+                          color: Colors.white,
+                          size: 30,
+                        ),
                       ),
                     ),
-                  // Saved locations markers
-                  for (final point in savedLocations)
+                  // Saved locations markers (color-coded by recency and type)
+                  for (final location in savedLocations)
                     Marker(
                       width: 80,
                       height: 80,
-                      point: point,
+                      point: LatLng(location.latitude, location.longitude),
                       rotate: false,
-                      child: const Icon(
-                        Icons.location_on,
-                        color: Colors.red,
-                        size: 40,
+                      child: GestureDetector(
+                        onTap: () => _showLocationDetails(location),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: location.getMarkerColor(),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          child: Icon(
+                            location.getMarkerIcon(),
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
                       ),
                     ),
                 ],
@@ -474,7 +725,7 @@ class _GpsPageState extends State<GpsPage> {
                 borderRadius: BorderRadius.circular(8),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
+                    color: Colors.black.withOpacity(0.2),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
@@ -488,12 +739,8 @@ class _GpsPageState extends State<GpsPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        _isLocationServiceEnabled
-                            ? Icons.gps_fixed
-                            : Icons.gps_off,
-                        color: _isLocationServiceEnabled
-                            ? Colors.green
-                            : Colors.red,
+                        _isLocationServiceEnabled ? Icons.gps_fixed : Icons.gps_off,
+                        color: _isLocationServiceEnabled ? Colors.green : Colors.red,
                         size: 16,
                       ),
                       const SizedBox(width: 4),
@@ -506,23 +753,111 @@ class _GpsPageState extends State<GpsPage> {
                       ),
                     ],
                   ),
+                  if (_emergencyMode)
+                    const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.emergency, color: Colors.red, size: 16),
+                        SizedBox(width: 4),
+                        Text(
+                          'EMERGENCY',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
                   if (_lastKnownLocation != null)
                     Text(
                       'Last: ${_lastKnownLocation!.timestamp.toString().substring(0, 19)}',
                       style: const TextStyle(fontSize: 10),
                     ),
+                  Text(
+                    'Saved: ${savedLocations.length} locations',
+                    style: const TextStyle(fontSize: 10),
+                  ),
                 ],
               ),
             ),
           ),
+          // Legend
+          Positioned(
+            top: 10,
+            right: 10,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Legend',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  _buildLegendItem(Icons.my_location, Colors.blue, 'Current'),
+                  _buildLegendItem(Icons.location_on, Colors.green, 'Recent (<5m)'),
+                  _buildLegendItem(Icons.location_on, Colors.orange, 'Old (<30m)'),
+                  _buildLegendItem(Icons.warning, Colors.red, 'Emergency'),
+                  _buildLegendItem(Icons.remove, Colors.orange, 'Route'),
+                ],
+              ),
+            ),
+          ),
+          // Status message overlay
+          if (_statusMessage.isNotEmpty)
+            Positioned(
+              bottom: 100,
+              left: 20,
+              right: 20,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _statusMessage,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
         ],
       ),
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           FloatingActionButton(
+            heroTag: "emergency_toggle",
+            onPressed: _toggleEmergencyMode,
+            tooltip: _emergencyMode ? 'Disable Emergency Mode' : 'Enable Emergency Mode',
+            backgroundColor: _emergencyMode ? Colors.red : Colors.grey,
+            child: Icon(
+              _emergencyMode ? Icons.emergency : Icons.emergency_outlined,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton(
             heroTag: "share_location",
-            onPressed: () => _shareCurrentLocation(context),
+            onPressed: _shareCurrentLocation,
             tooltip: 'Share Current Location',
             child: const Icon(Icons.share_location),
           ),
@@ -533,6 +868,20 @@ class _GpsPageState extends State<GpsPage> {
             tooltip: 'Center on Current Location',
             child: const Icon(Icons.my_location),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegendItem(IconData icon, Color color, String label) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 12),
+          const SizedBox(width: 4),
+          Text(label, style: const TextStyle(fontSize: 10)),
         ],
       ),
     );

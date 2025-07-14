@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/services/auth_service.dart';
-import 'package:vibration/vibration.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/services.dart';
 
 class SettingsPage extends StatefulWidget {
   @override
   _SettingsPageState createState() => _SettingsPageState();
+}
+
+const MethodChannel _vibrationChannel = MethodChannel('resqlink/vibration');
+
+Future<void> triggerEmergencyFeedback() async {
+  try {
+    await _vibrationChannel.invokeMethod('vibrate');
+  } catch (e) {
+    print('Emergency feedback error: $e');
+  }
 }
 
 class _SettingsPageState extends State<SettingsPage> {
@@ -20,16 +29,6 @@ class _SettingsPageState extends State<SettingsPage> {
       "Emergency! I need help. This is my last known location.";
   double _broadcastRadius = 500.0; // meters
   int _locationUpdateInterval = 30; // seconds
-
-  Future<void> _triggerEmergencyFeedback() async {
-    if (_soundAlerts) {
-      final player = AudioPlayer();
-      await player.play(AssetSource('sounds/emergency_alert.mp3'));
-    }
-    if ((await Vibration.hasVibrator()) == true && _vibrationAlerts) {
-      Vibration.vibrate(duration: 800);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -114,7 +113,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               title: const Text('Broadcast Radius'),
               subtitle: Text('${_broadcastRadius.toInt()} meters'),
-              trailing: Container(
+              trailing: SizedBox(
                 width: 100,
                 child: Slider(
                   value: _broadcastRadius,
@@ -229,7 +228,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             title: const Text('Location Update Interval'),
             subtitle: Text('$_locationUpdateInterval seconds'),
-            trailing: Container(
+            trailing: SizedBox(
               width: 100,
               child: Slider(
                 value: _locationUpdateInterval.toDouble(),
@@ -420,7 +419,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildLogoutButton() {
-    return Container(
+    return SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
         icon: const Icon(Icons.logout),
