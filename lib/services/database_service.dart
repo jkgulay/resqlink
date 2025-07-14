@@ -43,7 +43,7 @@ class DatabaseService {
     is_me INTEGER NOT NULL,
     is_emergency INTEGER NOT NULL,
     timestamp INTEGER NOT NULL,
-    synced INTEGER DEFAULT 0
+    synced INTEGER DEFAULT 0,
     synced_to_firebase INTEGER DEFAULT 0
   )
 ''');

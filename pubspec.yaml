@@ -29,8 +29,8 @@ dependencies:
   shared_preferences: ^2.2.2
   flutter_secure_storage: ^9.0.0
   audioplayers: ^5.2.1
-  vibration: ^1.8.4
-
+  flutter_background_service: ^3.0.2
+  flutter_background_service_android: ^4.0.2
 
 dev_dependencies:
   flutter_test:
