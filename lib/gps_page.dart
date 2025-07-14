@@ -247,7 +247,7 @@ class _GpsPageState extends State<GpsPage> {
     super.dispose();
   }
 
-  void _showMessage(String message, {Color? backgroundColor}) {
+  void _showMessage(String message) {
     if (mounted) {
       setState(() {
         _statusMessage = message;
@@ -543,11 +543,9 @@ class _GpsPageState extends State<GpsPage> {
               child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () async {
-                await LocationService.clearAllLocations();
-                await _loadSavedLocations();
+              onPressed: () {
                 Navigator.of(dialogContext).pop();
-                _showMessage('All locations cleared!');
+                _confirmClearLocations();
               },
               child: const Text('Clear', style: TextStyle(color: Colors.red)),
             ),
@@ -555,6 +553,15 @@ class _GpsPageState extends State<GpsPage> {
         );
       },
     );
+  }
+
+  Future<void> _confirmClearLocations() async {
+    await LocationService.clearAllLocations();
+    await _loadSavedLocations();
+
+    if (!mounted) return; // ✅ Safe to use `context` now
+
+    _showMessage('All locations cleared!');
   }
 
   void _showConnectivityStatus() {
@@ -730,7 +737,7 @@ class _GpsPageState extends State<GpsPage> {
                 borderRadius: BorderRadius.circular(8),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
+                    color: Colors.black.withOpacity(0.1),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
