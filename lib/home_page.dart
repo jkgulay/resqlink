@@ -8,7 +8,6 @@ import 'gps_page.dart';
 import 'package:resqlink/settings_page.dart';
 import 'package:resqlink/wifi_direct_wrapper.dart';
 
-
 // WiFi Direct Service Class
 class WiFiDirectService with ChangeNotifier {
   final Map<String, List<Map<String, dynamic>>> messageHistory = {};
@@ -23,7 +22,6 @@ class WiFiDirectService with ChangeNotifier {
     messageHistory[endpointId]!.add({...data, 'isMe': isMe});
     notifyListeners(); // This will now work
   }
-
 
   String? _localUserName;
   Map<String, String> _discoveredEndpoints = {};
@@ -235,24 +233,22 @@ class WiFiDirectService with ChangeNotifier {
     }
   }
 
-void _onPayloadReceived(String endpointId, Payload payload) {
-  if (payload.type == PayloadType.BYTES) {
-    try {
-      String dataString = utf8.decode(payload.bytes!);
-      Map<String, dynamic> data = jsonDecode(dataString);
+  void _onPayloadReceived(String endpointId, Payload payload) {
+    if (payload.type == PayloadType.BYTES) {
+      try {
+        String dataString = utf8.decode(payload.bytes!);
+        Map<String, dynamic> data = jsonDecode(dataString);
 
-      if (data['type'] == 'emergency') {
-        triggerEmergencyFeedback(); 
+        if (data['type'] == 'emergency') {
+          triggerEmergencyFeedback();
+        }
+
+        _addToHistory(endpointId, data, false);
+      } catch (e) {
+        print("Error processing payload: $e");
       }
-
-      _addToHistory(endpointId, data, false);
-    } catch (e) {
-      print("Error processing payload: $e");
     }
   }
-}
-
-
 
   // Stop all operations
   Future<void> stop() async {
@@ -403,10 +399,30 @@ class _HomePageState extends State<HomePage> {
 }
 
 // Enhanced Emergency Home Page with WiFi Direct Integration
-class EmergencyHomePage extends StatelessWidget {
+class EmergencyHomePage extends StatefulWidget {
   final WiFiDirectService wifiDirectService;
 
   const EmergencyHomePage({super.key, required this.wifiDirectService});
+
+  @override
+  State<EmergencyHomePage> createState() => _EmergencyHomePageState();
+}
+
+class _EmergencyHomePageState extends State<EmergencyHomePage> {
+  LocationModel? _latestLocation;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLatestLocation();
+  }
+
+  Future<void> _loadLatestLocation() async {
+    final loc = await LocationService.getLastKnownLocation();
+    if (mounted) {
+      setState(() => _latestLocation = loc);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -433,7 +449,20 @@ class EmergencyHomePage extends StatelessWidget {
             ),
             const SizedBox(height: 30),
 
-            // WiFi Direct Chat Button (Primary)
+            if (_latestLocation != null) ...[
+              Text(
+                "Last Location:",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text("Lat: \${_latestLocation!.latitude}"),
+              Text("Lon: \${_latestLocation!.longitude}"),
+              Text(
+                "Time: \${_latestLocation!.timestamp.toString().substring(0, 19)}",
+              ),
+              Text("Type: \${_latestLocation!.type.name.toUpperCase()}"),
+              const SizedBox(height: 20),
+            ],
+
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -448,8 +477,9 @@ class EmergencyHomePage extends StatelessWidget {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>
-                          WiFiDirectPage(wifiDirectService: wifiDirectService),
+                      builder: (_) => WiFiDirectPage(
+                        wifiDirectService: widget.wifiDirectService,
+                      ),
                     ),
                   );
                 },
@@ -458,7 +488,6 @@ class EmergencyHomePage extends StatelessWidget {
 
             const SizedBox(height: 16),
 
-            // Quick Emergency Broadcast Button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -477,7 +506,6 @@ class EmergencyHomePage extends StatelessWidget {
 
             const SizedBox(height: 16),
 
-            // Scan for Devices Button (Secondary)
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -491,7 +519,7 @@ class EmergencyHomePage extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (_) => NearbyDevicesPage(
-                        wifiDirectService: wifiDirectService,
+                        wifiDirectService: widget.wifiDirectService,
                       ),
                     ),
                   );
@@ -501,7 +529,6 @@ class EmergencyHomePage extends StatelessWidget {
 
             const SizedBox(height: 24),
 
-            // Status Card
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -557,12 +584,11 @@ class EmergencyHomePage extends StatelessWidget {
               ),
               onPressed: () {
                 Navigator.of(context).pop();
-                // Navigate to WiFi Direct page and trigger emergency
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => WiFiDirectPage(
-                      wifiDirectService: wifiDirectService,
+                      wifiDirectService: widget.wifiDirectService,
                       autoEmergency: true,
                     ),
                   ),
