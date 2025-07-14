@@ -219,91 +219,119 @@ class LandingPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final isSmall = size.height < 600;
+
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF0B192C), Color(0xFF1E3E62)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // Connection status indicator
-            const Positioned(
-              top: 50,
-              right: 24,
-              child: ConnectionStatusWidget(),
-            ),
-            Image.asset('assets/1.png', height: 300, fit: BoxFit.contain),
-            const SizedBox(height: 30),
-            const Text(
-              'Welcome to ResQLink',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Offline Emergency Communication Using Wi-Fi Direct & Geolocation Services',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: Colors.white70),
-            ),
-            const SizedBox(height: 20),
-            // Offline capability indicator
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green, width: 1),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.offline_bolt, color: Colors.green, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    'Works Offline for Emergency Use',
-                    style: TextStyle(
-                      color: Colors.green,
-                      fontWeight: FontWeight.bold,
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: size.width * 0.06,
+                      vertical: size.height * 0.04,
+                    ),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF0B192C), Color(0xFF1E3E62)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const ConnectionStatusWidget(),
+                        SizedBox(
+                          height: isSmall ? 200 : size.height * 0.3,
+                          child: Image.asset(
+                            'assets/1.png',
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          'Welcome to ResQLink',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: isSmall ? 22 : 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Offline Emergency Communication Using Wi-Fi Direct & Geolocation Services',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: isSmall ? 14 : 16,
+                            color: Colors.white70,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.green, width: 1),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.offline_bolt,
+                                color: Colors.green,
+                                size: 20,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Works Offline for Emergency Use',
+                                style: TextStyle(
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 30),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF6500),
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: size.width * 0.1,
+                              vertical: 16,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          icon: const Icon(Icons.power_settings_new),
+                          label: const Text(
+                            'Enter App',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          onPressed: () => _showLoginDialog(context),
+                        ),
+                        if (isSmall) const SizedBox(height: 10),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 40),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6500),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 16,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
-              icon: const Icon(Icons.power_settings_new),
-              label: const Text(
-                'Enter App',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              onPressed: () {
-                _showLoginDialog(context);
-              },
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -356,9 +384,7 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
       return;
     }
 
-    setState(() {
-      isLoading = true;
-    });
+    setState(() => isLoading = true);
 
     try {
       AuthResult result;
@@ -375,12 +401,10 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
             context,
             MaterialPageRoute(builder: (_) => HomePage()),
           );
-
-          // Show success message with connection status
-          String methodText = result.method == AuthMethod.online
+          final methodText = result.method == AuthMethod.online
               ? 'Online'
               : 'Offline';
-          String actionText = isLogin ? 'Login' : 'Registration';
+          final actionText = isLogin ? 'Login' : 'Registration';
           _showSnackBar('$actionText successful ($methodText mode)');
         }
       } else {
@@ -389,11 +413,7 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
     } catch (e) {
       _showSnackBar('An error occurred: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-      }
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -408,125 +428,129 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
+      insetPadding: const EdgeInsets.all(20),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       backgroundColor: const Color(0xFF1E3E62),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  isLogin ? "Login" : "Register",
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                const ConnectionStatusWidget(),
-              ],
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: emailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: InputDecoration(
-                labelText: "Email",
-                filled: true,
-                fillColor: const Color(0xFF0B192C),
-                labelStyle: const TextStyle(color: Colors.white70),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-              style: const TextStyle(color: Colors.white),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: passwordController,
-              decoration: InputDecoration(
-                labelText: "Password",
-                filled: true,
-                fillColor: const Color(0xFF0B192C),
-                labelStyle: const TextStyle(color: Colors.white70),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-              style: const TextStyle(color: Colors.white),
-              obscureText: true,
-            ),
-            const SizedBox(height: 10),
-            if (!isLogin)
-              TextField(
-                controller: confirmPasswordController,
-                decoration: InputDecoration(
-                  labelText: "Confirm Password",
-                  filled: true,
-                  fillColor: const Color(0xFF0B192C),
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-                style: const TextStyle(color: Colors.white),
-                obscureText: true,
-              ),
-            const SizedBox(height: 15),
-            // Info text about offline capability
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text(
-                'This app works offline for emergency use. Your credentials are stored securely on your device.',
-                style: TextStyle(color: Colors.blue, fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6500),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 14,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onPressed: isLoading ? null : _handleSubmit,
-              child: isLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: constraints.maxWidth),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isLogin ? "Login" : "Register",
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
-                    )
-                  : Text(isLogin ? "Login" : "Register"),
-            ),
-            const SizedBox(height: 10),
-            TextButton(
-              onPressed: isLoading ? null : _toggleMode,
-              child: Text(
-                isLogin
-                    ? "Need an Account? Register"
-                    : "Already have an Account? Login",
-                style: const TextStyle(color: Colors.white),
+                      const ConnectionStatusWidget(),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  _buildTextField(
+                    controller: emailController,
+                    label: "Email",
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 10),
+                  _buildTextField(
+                    controller: passwordController,
+                    label: "Password",
+                    obscureText: true,
+                  ),
+                  if (!isLogin) ...[
+                    const SizedBox(height: 10),
+                    _buildTextField(
+                      controller: confirmPasswordController,
+                      label: "Confirm Password",
+                      obscureText: true,
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'This app works offline for emergency use. Your credentials are stored securely on your device.',
+                      style: TextStyle(color: Colors.blue, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6500),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 14,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: isLoading ? null : _handleSubmit,
+                    child: isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          )
+                        : Text(isLogin ? "Login" : "Register"),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton(
+                    onPressed: isLoading ? null : _toggleMode,
+                    child: Text(
+                      isLogin
+                          ? "Need an Account? Register"
+                          : "Already have an Account? Login",
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    TextInputType keyboardType = TextInputType.text,
+    bool obscureText = false,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        labelText: label,
+        filled: true,
+        fillColor: const Color(0xFF0B192C),
+        labelStyle: const TextStyle(color: Colors.white70),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
         ),
       ),
     );

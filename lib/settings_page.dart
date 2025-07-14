@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 
 class SettingsPage extends StatefulWidget {
   @override
-  _SettingsPageState createState() => _SettingsPageState();
+  SettingsPageState createState() => SettingsPageState();
 }
 
 const MethodChannel _vibrationChannel = MethodChannel('resqlink/vibration');
@@ -17,7 +17,7 @@ Future<void> triggerEmergencyFeedback() async {
   }
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+class SettingsPageState extends State<SettingsPage> {
   bool _wifiDirectEnabled = true;
   bool _locationServicesEnabled = true;
   bool _emergencyNotifications = true;
@@ -430,17 +430,18 @@ class _SettingsPageState extends State<SettingsPage> {
           foregroundColor: Colors.white,
         ),
         onPressed: () async {
-          // Show a confirmation dialog before logging out
           bool? confirmLogout = await _showLogoutConfirmationDialog(context);
           if (confirmLogout == true) {
             try {
-              await AuthService.logout(); // Call the logout method
-              Navigator.of(context).pushNamedAndRemoveUntil(
-                '/',
-                (route) => false,
-              ); // Navigate to the landing page
+              await AuthService.logout();
+
+              if (!mounted) return; // ✅ Check before using context
+
+              Navigator.of(
+                context,
+              ).pushNamedAndRemoveUntil('/', (route) => false);
             } catch (e) {
-              // Handle any errors that occur during logout
+              if (!mounted) return; // ✅ Another check
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Logout failed: ${e.toString()}')),
               );
