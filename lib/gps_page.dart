@@ -356,16 +356,17 @@ class _GpsPageState extends State<GpsPage> {
   void _startLocationTracking() {
     if (!_isLocationServiceEnabled) return;
 
-    _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
-      ),
-    ).listen((Position position) {
-      if (mounted) {
-        _updateCurrentLocation(position);
-      }
-    });
+    _positionStream =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 10,
+          ),
+        ).listen((Position position) {
+          if (mounted) {
+            _updateCurrentLocation(position);
+          }
+        });
 
     // Also update location every 30 seconds when app is active
     _locationTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
@@ -382,7 +383,9 @@ class _GpsPageState extends State<GpsPage> {
 
     if (_emergencyMode) {
       _startEmergencyTracking();
-      _showMessage('Emergency mode activated! Location sharing every 2 minutes.');
+      _showMessage(
+        'Emergency mode activated! Location sharing every 2 minutes.',
+      );
     } else {
       _stopEmergencyTracking();
       _showMessage('Emergency mode deactivated.');
@@ -646,13 +649,15 @@ class _GpsPageState extends State<GpsPage> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: _currentLocation ?? const LatLng(37.4219983, -122.084),
+              initialCenter:
+                  _currentLocation ?? const LatLng(37.4219983, -122.084),
               initialZoom: 13.0,
               onLongPress: _saveLocation,
             ),
             children: [
               TileLayer(
-                urlTemplate: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                urlTemplate:
+                    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                 subdomains: const ['a', 'b', 'c'],
               ),
               // Route line (polyline connecting all saved locations)
@@ -739,8 +744,12 @@ class _GpsPageState extends State<GpsPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        _isLocationServiceEnabled ? Icons.gps_fixed : Icons.gps_off,
-                        color: _isLocationServiceEnabled ? Colors.green : Colors.red,
+                        _isLocationServiceEnabled
+                            ? Icons.gps_fixed
+                            : Icons.gps_off,
+                        color: _isLocationServiceEnabled
+                            ? Colors.green
+                            : Colors.red,
                         size: 16,
                       ),
                       const SizedBox(width: 4),
@@ -809,8 +818,16 @@ class _GpsPageState extends State<GpsPage> {
                   ),
                   const SizedBox(height: 4),
                   _buildLegendItem(Icons.my_location, Colors.blue, 'Current'),
-                  _buildLegendItem(Icons.location_on, Colors.green, 'Recent (<5m)'),
-                  _buildLegendItem(Icons.location_on, Colors.orange, 'Old (<30m)'),
+                  _buildLegendItem(
+                    Icons.location_on,
+                    Colors.green,
+                    'Recent (<5m)',
+                  ),
+                  _buildLegendItem(
+                    Icons.location_on,
+                    Colors.orange,
+                    'Old (<30m)',
+                  ),
                   _buildLegendItem(Icons.warning, Colors.red, 'Emergency'),
                   _buildLegendItem(Icons.remove, Colors.orange, 'Route'),
                 ],
@@ -831,10 +848,7 @@ class _GpsPageState extends State<GpsPage> {
                 ),
                 child: Text(
                   _statusMessage,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                  ),
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -847,7 +861,9 @@ class _GpsPageState extends State<GpsPage> {
           FloatingActionButton(
             heroTag: "emergency_toggle",
             onPressed: _toggleEmergencyMode,
-            tooltip: _emergencyMode ? 'Disable Emergency Mode' : 'Enable Emergency Mode',
+            tooltip: _emergencyMode
+                ? 'Disable Emergency Mode'
+                : 'Enable Emergency Mode',
             backgroundColor: _emergencyMode ? Colors.red : Colors.grey,
             child: Icon(
               _emergencyMode ? Icons.emergency : Icons.emergency_outlined,
