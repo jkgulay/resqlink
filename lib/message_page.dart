@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/services/database_service.dart';
 import 'package:resqlink/models/message_model.dart';
-import 'home_page.dart'; // Where WiFiDirectService is defined
+import 'home_page.dart'; 
 
 class MessagePage extends StatefulWidget {
   final WiFiDirectService wifiDirectService;
@@ -58,7 +58,7 @@ class _MessagePageState extends State<MessagePage> {
               final history = grouped[endpointId]!;
               final last = history.last;
               final userName =
-                  connectedDevices[endpointId] ?? last.fromUser ?? 'Unknown';
+                  connectedDevices[endpointId] ?? last.fromUser;
 
               return ListTile(
                 leading: CircleAvatar(

@@ -7,8 +7,7 @@ import 'dart:typed_data';
 import 'gps_page.dart';
 import 'package:resqlink/settings_page.dart';
 import 'package:resqlink/wifi_direct_wrapper.dart';
-import 'package:vibration/vibration.dart';
-import 'package:audioplayers/audioplayers.dart';
+
 
 // WiFi Direct Service Class
 class WiFiDirectService with ChangeNotifier {
@@ -25,20 +24,6 @@ class WiFiDirectService with ChangeNotifier {
     notifyListeners(); // This will now work
   }
 
-  Future<void> _triggerEmergencyFeedback() async {
-    try {
-      // Vibrate if possible
-      if (await Vibration.hasVibrator() ?? false) {
-        Vibration.vibrate(duration: 1200);
-      }
-
-      // Play emergency alert sound
-      final player = AudioPlayer();
-      await player.play(AssetSource('sounds/emergency_alert.mp3'));
-    } catch (e) {
-      print('Emergency feedback error: $e');
-    }
-  }
 
   String? _localUserName;
   Map<String, String> _discoveredEndpoints = {};
@@ -250,22 +235,23 @@ class WiFiDirectService with ChangeNotifier {
     }
   }
 
-  void _onPayloadReceived(String endpointId, Payload payload) {
-    if (payload.type == PayloadType.BYTES) {
-      try {
-        String dataString = utf8.decode(payload.bytes!);
-        Map<String, dynamic> data = jsonDecode(dataString);
+void _onPayloadReceived(String endpointId, Payload payload) {
+  if (payload.type == PayloadType.BYTES) {
+    try {
+      String dataString = utf8.decode(payload.bytes!);
+      Map<String, dynamic> data = jsonDecode(dataString);
 
-        if (data['type'] == 'emergency') {
-          _triggerEmergencyFeedback(); // play sound/vibrate
-        }
-
-        _addToHistory(endpointId, data, false); // still save it
-      } catch (e) {
-        print("Error processing payload: $e");
+      if (data['type'] == 'emergency') {
+        triggerEmergencyFeedback(); 
       }
+
+      _addToHistory(endpointId, data, false);
+    } catch (e) {
+      print("Error processing payload: $e");
     }
   }
+}
+
 
 
   // Stop all operations
