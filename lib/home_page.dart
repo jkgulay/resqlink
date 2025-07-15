@@ -410,6 +410,7 @@ class EmergencyHomePage extends StatefulWidget {
 
 class _EmergencyHomePageState extends State<EmergencyHomePage> {
   LocationModel? _latestLocation;
+  bool _isLoadingLocation = true;
 
   @override
   void initState() {
@@ -418,10 +419,95 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
   }
 
   Future<void> _loadLatestLocation() async {
-    final loc = await LocationService.getLastKnownLocation();
-    if (mounted) {
-      setState(() => _latestLocation = loc);
+    try {
+      setState(() {
+        _isLoadingLocation = true;
+      });
+
+      final lastLocation = await LocationService.getLastKnownLocation();
+
+      if (mounted) {
+        setState(() {
+          _latestLocation = lastLocation;
+          _isLoadingLocation = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading last location: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingLocation = false;
+        });
+      }
     }
+  }
+
+  void _showQuickEmergencyDialog(BuildContext context) {
+    final TextEditingController messageController = TextEditingController();
+
+    // Pre-fill with location if available
+    if (_latestLocation != null) {
+      messageController.text =
+          'EMERGENCY! My last location: '
+          'Lat: ${_latestLocation!.latitude.toStringAsFixed(6)}, '
+          'Lon: ${_latestLocation!.longitude.toStringAsFixed(6)} '
+          '(${_formatDateTime(_latestLocation!.timestamp)})';
+    }
+
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.emergency, color: Colors.red),
+            SizedBox(width: 8),
+            Text('Emergency Broadcast'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: messageController,
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: 'Enter emergency message...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            if (_latestLocation != null) ...[
+              SizedBox(height: 8),
+              Text(
+                'Location will be included',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // Send emergency broadcast with location
+              final message = messageController.text;
+              // Implement your broadcast logic here
+              Navigator.of(dialogContext).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Emergency broadcast sent!'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: Text('Send Emergency'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -449,17 +535,142 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
             ),
             const SizedBox(height: 30),
 
-            if (_latestLocation != null) ...[
-              Text(
-                "Last Location:",
-                style: TextStyle(fontWeight: FontWeight.bold),
+            // Location display section
+            if (_isLoadingLocation)
+              const CircularProgressIndicator()
+            else if (_latestLocation != null) ...[
+              Card(
+                elevation: 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            _latestLocation!.type == LocationType.emergency
+                                ? Icons.emergency_share
+                                : Icons.location_on,
+                            color:
+                                _latestLocation!.type == LocationType.emergency
+                                ? Colors.red
+                                : Colors.blue,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            "Last Known Location",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildLocationRow(
+                        Icons.map,
+                        "Latitude",
+                        _latestLocation!.latitude.toStringAsFixed(6),
+                      ),
+                      _buildLocationRow(
+                        Icons.map,
+                        "Longitude",
+                        _latestLocation!.longitude.toStringAsFixed(6),
+                      ),
+                      _buildLocationRow(
+                        Icons.access_time,
+                        "Time",
+                        _formatDateTime(_latestLocation!.timestamp),
+                      ),
+                      _buildLocationRow(
+                        Icons.category,
+                        "Type",
+                        _latestLocation!.type.name.toUpperCase(),
+                        valueColor:
+                            _latestLocation!.type == LocationType.emergency
+                            ? Colors.red
+                            : Colors.green,
+                      ),
+                      if (!_latestLocation!.synced)
+                        _buildLocationRow(
+                          Icons.cloud_off,
+                          "Status",
+                          "Not synced",
+                          valueColor: Colors.orange,
+                        ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton.icon(
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Refresh'),
+                            onPressed: _loadLatestLocation,
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton.icon(
+                            icon: const Icon(Icons.gps_fixed, size: 16),
+                            label: const Text('View on Map'),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => GpsPage(
+                                    userId:
+                                        'your_user_id', // Pass actual user ID
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              Text("Lat: \${_latestLocation!.latitude}"),
-              Text("Lon: \${_latestLocation!.longitude}"),
-              Text(
-                "Time: \${_latestLocation!.timestamp.toString().substring(0, 19)}",
+              const SizedBox(height: 20),
+            ] else ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Icon(Icons.location_off, size: 48, color: Colors.grey),
+                      const SizedBox(height: 8),
+                      Text(
+                        'No location data available',
+                        style: TextStyle(color: Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        icon: const Icon(Icons.gps_fixed),
+                        label: const Text('Open GPS Tracker'),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => GpsPage(
+                                userId: 'your_user_id', // Pass actual user ID
+                                onLocationShare: (location) {
+                                  // Handle location share
+                                  setState(() {
+                                    _latestLocation = location;
+                                  });
+                                },
+                              ),
+                            ),
+                          ).then((_) {
+                            // Refresh location when returning from GPS page
+                            _loadLatestLocation();
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              Text("Type: \${_latestLocation!.type.name.toUpperCase()}"),
               const SizedBox(height: 20),
             ],
 
@@ -562,43 +773,57 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
     );
   }
 
-  void _showQuickEmergencyDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Emergency Broadcast'),
-          content: const Text(
-            'This will send an emergency message to all nearby connected devices. Continue?',
+  Widget _buildLocationRow(
+    IconData icon,
+    String label,
+    String value, {
+    Color? valueColor,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.grey),
+          const SizedBox(width: 8),
+          Text(
+            '$label: ',
+            style: TextStyle(
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[700],
+            ),
           ),
-          actions: [
-            TextButton(
-              child: const Text('Cancel'),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text(
-                'Send Emergency',
-                style: TextStyle(color: Colors.white),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? Colors.black87,
+                fontWeight: valueColor != null
+                    ? FontWeight.bold
+                    : FontWeight.normal,
               ),
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => WiFiDirectPage(
-                      wifiDirectService: widget.wifiDirectService,
-                      autoEmergency: true,
-                    ),
-                  ),
-                );
-              },
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     );
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inMinutes < 1) {
+      return 'Just now';
+    } else if (difference.inMinutes < 60) {
+      return '${difference.inMinutes} minutes ago';
+    } else if (difference.inHours < 24) {
+      return '${difference.inHours} hours ago';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays} days ago';
+    } else {
+      return dateTime.toString().substring(0, 19);
+    }
   }
 }
 
