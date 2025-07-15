@@ -8,6 +8,129 @@ import 'package:path/path.dart' as p;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 
+// Responsive utilities class
+class ResponsiveUtils {
+  static const double mobileBreakpoint = 600.0;
+  static const double tabletBreakpoint = 1024.0;
+
+  static bool isMobile(BuildContext context) {
+    return MediaQuery.of(context).size.width < mobileBreakpoint;
+  }
+
+  static bool isTablet(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    return width >= mobileBreakpoint && width < tabletBreakpoint;
+  }
+
+  static bool isDesktop(BuildContext context) {
+    return MediaQuery.of(context).size.width >= tabletBreakpoint;
+  }
+
+  static bool isLandscape(BuildContext context) {
+    return MediaQuery.of(context).orientation == Orientation.landscape;
+  }
+
+  static double getResponsiveFontSize(
+    BuildContext context,
+    double baseFontSize,
+  ) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < mobileBreakpoint) {
+      return baseFontSize * 0.9;
+    } else if (screenWidth < tabletBreakpoint) {
+      return baseFontSize * 1.1;
+    } else {
+      return baseFontSize * 1.2;
+    }
+  }
+
+  static double getResponsiveSpacing(BuildContext context, double baseSpacing) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < mobileBreakpoint) {
+      return baseSpacing * 0.8;
+    } else if (screenWidth < tabletBreakpoint) {
+      return baseSpacing * 1.0;
+    } else {
+      return baseSpacing * 1.2;
+    }
+  }
+
+  static double getResponsiveButtonWidth(
+    BuildContext context,
+    double maxWidth,
+  ) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (isMobile(context)) {
+      return screenWidth * 0.8;
+    } else if (isTablet(context)) {
+      return screenWidth * 0.6;
+    } else {
+      return maxWidth;
+    }
+  }
+
+  static double getResponsiveDialogWidth(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (isMobile(context)) {
+      return screenWidth * 0.9;
+    } else if (isTablet(context)) {
+      return screenWidth * 0.7;
+    } else {
+      return 500.0;
+    }
+  }
+
+  static EdgeInsets getResponsivePadding(BuildContext context) {
+    if (isMobile(context)) {
+      return const EdgeInsets.all(12.0);
+    } else if (isTablet(context)) {
+      return const EdgeInsets.all(16.0);
+    } else {
+      return const EdgeInsets.all(20.0);
+    }
+  }
+
+  static EdgeInsets getResponsiveMargin(BuildContext context) {
+    if (isMobile(context)) {
+      return const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0);
+    } else if (isTablet(context)) {
+      return const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0);
+    } else {
+      return const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0);
+    }
+  }
+
+  static double getResponsiveIconSize(BuildContext context, double baseSize) {
+    if (isMobile(context)) {
+      return baseSize * 0.9;
+    } else if (isTablet(context)) {
+      return baseSize * 1.1;
+    } else {
+      return baseSize * 1.2;
+    }
+  }
+
+  static double getResponsiveMarkerSize(BuildContext context) {
+    if (isMobile(context)) {
+      return 60.0;
+    } else if (isTablet(context)) {
+      return 80.0;
+    } else {
+      return 100.0;
+    }
+  }
+
+  static double getResponsiveFloatingActionButtonSize(BuildContext context) {
+    if (isMobile(context)) {
+      return 48.0;
+    } else if (isTablet(context)) {
+      return 56.0;
+    } else {
+      return 64.0;
+    }
+  }
+}
+
 enum LocationType { normal, emergency }
 
 class LocationModel {
@@ -533,21 +656,43 @@ class _GpsPageState extends State<GpsPage> {
       context: context,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
-          title: const Text('Clear All Locations'),
-          content: const Text(
-            'Are you sure you want to clear all saved locations? This action cannot be undone.',
+          title: Text(
+            'Clear All Locations',
+            style: TextStyle(
+              fontSize: ResponsiveUtils.getResponsiveFontSize(context, 18),
+            ),
+          ),
+          content: SizedBox(
+            width: ResponsiveUtils.getResponsiveDialogWidth(context),
+            child: Text(
+              'Are you sure you want to clear all saved locations? This action cannot be undone.',
+              style: TextStyle(
+                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
+              ),
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
+                ),
+              ),
             ),
             TextButton(
               onPressed: () {
                 Navigator.of(dialogContext).pop();
                 _confirmClearLocations();
               },
-              child: const Text('Clear', style: TextStyle(color: Colors.red)),
+              child: Text(
+                'Clear',
+                style: TextStyle(
+                  color: Colors.red,
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
+                ),
+              ),
             ),
           ],
         );
@@ -559,7 +704,7 @@ class _GpsPageState extends State<GpsPage> {
     await LocationService.clearAllLocations();
     await _loadSavedLocations();
 
-    if (!mounted) return; // ✅ Safe to use `context` now
+    if (!mounted) return;
 
     _showMessage('All locations cleared!');
   }
@@ -582,22 +727,58 @@ class _GpsPageState extends State<GpsPage> {
           location.type == LocationType.emergency
               ? 'Emergency Location'
               : 'Saved Location',
+          style: TextStyle(
+            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 18),
+          ),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Latitude: ${location.latitude.toStringAsFixed(6)}'),
-            Text('Longitude: ${location.longitude.toStringAsFixed(6)}'),
-            Text('Time: ${location.timestamp.toString().substring(0, 19)}'),
-            Text('Type: ${location.type.name.toUpperCase()}'),
-            Text('Synced: ${location.synced ? 'Yes' : 'No'}'),
-          ],
+        content: SizedBox(
+          width: ResponsiveUtils.getResponsiveDialogWidth(context),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Latitude: ${location.latitude.toStringAsFixed(6)}',
+                style: TextStyle(
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                ),
+              ),
+              Text(
+                'Longitude: ${location.longitude.toStringAsFixed(6)}',
+                style: TextStyle(
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                ),
+              ),
+              Text(
+                'Time: ${location.timestamp.toString().substring(0, 19)}',
+                style: TextStyle(
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                ),
+              ),
+              Text(
+                'Type: ${location.type.name.toUpperCase()}',
+                style: TextStyle(
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                ),
+              ),
+              Text(
+                'Synced: ${location.synced ? 'Yes' : 'No'}',
+                style: TextStyle(
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Close'),
+            child: Text(
+              'Close',
+              style: TextStyle(
+                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
+              ),
+            ),
           ),
         ],
       ),
@@ -606,15 +787,25 @@ class _GpsPageState extends State<GpsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = ResponsiveUtils.isMobile(context);
+    final responsivePadding = ResponsiveUtils.getResponsivePadding(context);
+    final responsiveSpacing = ResponsiveUtils.getResponsiveSpacing(context, 10);
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('GPS Tracker'),
+        title: Text(
+          'GPS Tracker',
+          style: TextStyle(
+            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
+          ),
+        ),
         actions: [
           // Emergency mode toggle
           IconButton(
             icon: Icon(
               _emergencyMode ? Icons.emergency : Icons.emergency_outlined,
               color: _emergencyMode ? Colors.red : Colors.grey,
+              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
             ),
             onPressed: _toggleEmergencyMode,
             tooltip: _emergencyMode
@@ -626,6 +817,7 @@ class _GpsPageState extends State<GpsPage> {
             icon: Icon(
               _isConnected ? Icons.cloud_done : Icons.cloud_off,
               color: _isConnected ? Colors.green : Colors.red,
+              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
             ),
             onPressed: _showConnectivityStatus,
           ),
@@ -637,13 +829,25 @@ class _GpsPageState extends State<GpsPage> {
               }
             },
             itemBuilder: (BuildContext context) => [
-              const PopupMenuItem<String>(
+              PopupMenuItem<String>(
                 value: 'clear',
                 child: Row(
                   children: [
-                    Icon(Icons.clear_all, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Clear All Locations'),
+                    Icon(
+                      Icons.clear_all,
+                      color: Colors.red,
+                      size: ResponsiveUtils.getResponsiveIconSize(context, 20),
+                    ),
+                    SizedBox(width: responsiveSpacing),
+                    Text(
+                      'Clear All Locations',
+                      style: TextStyle(
+                        fontSize: ResponsiveUtils.getResponsiveFontSize(
+                          context,
+                          14,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -673,7 +877,9 @@ class _GpsPageState extends State<GpsPage> {
                   polylines: [
                     Polyline(
                       points: _getRoutePoints(),
-                      strokeWidth: 4.0,
+                      strokeWidth: ResponsiveUtils.isMobile(context)
+                          ? 3.0
+                          : 4.0,
                       color: Colors.orange,
                     ),
                   ],
@@ -683,8 +889,8 @@ class _GpsPageState extends State<GpsPage> {
                   // Current location marker (blue dot)
                   if (_currentLocation != null)
                     Marker(
-                      width: 80,
-                      height: 80,
+                      width: ResponsiveUtils.getResponsiveMarkerSize(context),
+                      height: ResponsiveUtils.getResponsiveMarkerSize(context),
                       point: _currentLocation!,
                       rotate: false,
                       child: Container(
@@ -692,18 +898,21 @@ class _GpsPageState extends State<GpsPage> {
                           color: Colors.blue,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.my_location,
                           color: Colors.white,
-                          size: 30,
+                          size: ResponsiveUtils.getResponsiveIconSize(
+                            context,
+                            30,
+                          ),
                         ),
                       ),
                     ),
                   // Saved locations markers (color-coded by recency and type)
                   for (final location in savedLocations)
                     Marker(
-                      width: 80,
-                      height: 80,
+                      width: ResponsiveUtils.getResponsiveMarkerSize(context),
+                      height: ResponsiveUtils.getResponsiveMarkerSize(context),
                       point: LatLng(location.latitude, location.longitude),
                       rotate: false,
                       child: GestureDetector(
@@ -717,7 +926,10 @@ class _GpsPageState extends State<GpsPage> {
                           child: Icon(
                             location.getMarkerIcon(),
                             color: Colors.white,
-                            size: 30,
+                            size: ResponsiveUtils.getResponsiveIconSize(
+                              context,
+                              30,
+                            ),
                           ),
                         ),
                       ),
@@ -726,12 +938,13 @@ class _GpsPageState extends State<GpsPage> {
               ),
             ],
           ),
-          // Status indicator
+          // Status indicator - responsive positioning
           Positioned(
-            top: 10,
-            left: 10,
+            top: responsiveSpacing,
+            left: responsiveSpacing,
             child: Container(
-              padding: const EdgeInsets.all(8),
+              padding: responsivePadding,
+              constraints: BoxConstraints(maxWidth: isMobile ? 200 : 300),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(8),
@@ -757,28 +970,51 @@ class _GpsPageState extends State<GpsPage> {
                         color: _isLocationServiceEnabled
                             ? Colors.green
                             : Colors.red,
-                        size: 16,
+                        size: ResponsiveUtils.getResponsiveIconSize(
+                          context,
+                          16,
+                        ),
                       ),
-                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: ResponsiveUtils.getResponsiveSpacing(context, 4),
+                      ),
                       Text(
                         _isLocationServiceEnabled ? 'GPS ON' : 'GPS OFF',
-                        style: const TextStyle(
-                          fontSize: 12,
+                        style: TextStyle(
+                          fontSize: ResponsiveUtils.getResponsiveFontSize(
+                            context,
+                            12,
+                          ),
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                     ],
                   ),
                   if (_emergencyMode)
-                    const Row(
+                    Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.emergency, color: Colors.red, size: 16),
-                        SizedBox(width: 4),
+                        Icon(
+                          Icons.emergency,
+                          color: Colors.red,
+                          size: ResponsiveUtils.getResponsiveIconSize(
+                            context,
+                            16,
+                          ),
+                        ),
+                        SizedBox(
+                          width: ResponsiveUtils.getResponsiveSpacing(
+                            context,
+                            4,
+                          ),
+                        ),
                         Text(
                           'EMERGENCY',
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: ResponsiveUtils.getResponsiveFontSize(
+                              context,
+                              12,
+                            ),
                             fontWeight: FontWeight.bold,
                             color: Colors.red,
                           ),
@@ -788,11 +1024,21 @@ class _GpsPageState extends State<GpsPage> {
                   if (_lastKnownLocation != null)
                     Text(
                       'Last: ${_lastKnownLocation!.timestamp.toString().substring(0, 19)}',
-                      style: const TextStyle(fontSize: 10),
+                      style: TextStyle(
+                        fontSize: ResponsiveUtils.getResponsiveFontSize(
+                          context,
+                          10,
+                        ),
+                      ),
                     ),
                   Text(
                     'Saved: ${savedLocations.length} locations',
-                    style: const TextStyle(fontSize: 10),
+                    style: TextStyle(
+                      fontSize: ResponsiveUtils.getResponsiveFontSize(
+                        context,
+                        10,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -800,10 +1046,10 @@ class _GpsPageState extends State<GpsPage> {
           ),
           // Legend
           Positioned(
-            top: 10,
-            right: 10,
+            top: ResponsiveUtils.getResponsiveSpacing(context, 10),
+            right: ResponsiveUtils.getResponsiveSpacing(context, 10),
             child: Container(
-              padding: const EdgeInsets.all(8),
+              padding: ResponsiveUtils.getResponsivePadding(context),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(8),
@@ -819,11 +1065,19 @@ class _GpsPageState extends State<GpsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
+                  Text(
                     'Legend',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: ResponsiveUtils.getResponsiveFontSize(
+                        context,
+                        12,
+                      ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(
+                    height: ResponsiveUtils.getResponsiveSpacing(context, 4),
+                  ),
                   _buildLegendItem(Icons.my_location, Colors.blue, 'Current'),
                   _buildLegendItem(
                     Icons.location_on,
@@ -844,18 +1098,24 @@ class _GpsPageState extends State<GpsPage> {
           // Status message overlay
           if (_statusMessage.isNotEmpty)
             Positioned(
-              bottom: 100,
-              left: 20,
-              right: 20,
+              bottom: ResponsiveUtils.isDesktop(context) ? 120 : 100,
+              left: ResponsiveUtils.getResponsiveSpacing(context, 20),
+              right: ResponsiveUtils.getResponsiveSpacing(context, 20),
               child: Container(
-                padding: const EdgeInsets.all(12),
+                padding: ResponsiveUtils.getResponsivePadding(context),
                 decoration: BoxDecoration(
                   color: Colors.black87,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   _statusMessage,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: ResponsiveUtils.getResponsiveFontSize(
+                      context,
+                      14,
+                    ),
+                  ),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -865,31 +1125,62 @@ class _GpsPageState extends State<GpsPage> {
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          FloatingActionButton(
-            heroTag: "emergency_toggle",
-            onPressed: _toggleEmergencyMode,
-            tooltip: _emergencyMode
-                ? 'Disable Emergency Mode'
-                : 'Enable Emergency Mode',
-            backgroundColor: _emergencyMode ? Colors.red : Colors.grey,
-            child: Icon(
-              _emergencyMode ? Icons.emergency : Icons.emergency_outlined,
-              color: Colors.white,
+          SizedBox(
+            width: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
+              context,
+            ),
+            height: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
+              context,
+            ),
+            child: FloatingActionButton(
+              heroTag: "emergency_toggle",
+              onPressed: _toggleEmergencyMode,
+              tooltip: _emergencyMode
+                  ? 'Disable Emergency Mode'
+                  : 'Enable Emergency Mode',
+              backgroundColor: _emergencyMode ? Colors.red : Colors.grey,
+              child: Icon(
+                _emergencyMode ? Icons.emergency : Icons.emergency_outlined,
+                color: Colors.white,
+                size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+              ),
             ),
           ),
-          const SizedBox(height: 10),
-          FloatingActionButton(
-            heroTag: "share_location",
-            onPressed: _shareCurrentLocation,
-            tooltip: 'Share Current Location',
-            child: const Icon(Icons.share_location),
+          SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 10)),
+          SizedBox(
+            width: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
+              context,
+            ),
+            height: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
+              context,
+            ),
+            child: FloatingActionButton(
+              heroTag: "share_location",
+              onPressed: _shareCurrentLocation,
+              tooltip: 'Share Current Location',
+              child: Icon(
+                Icons.share_location,
+                size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+              ),
+            ),
           ),
-          const SizedBox(height: 10),
-          FloatingActionButton(
-            heroTag: "center_location",
-            onPressed: _centerOnCurrentLocation,
-            tooltip: 'Center on Current Location',
-            child: const Icon(Icons.my_location),
+          SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 10)),
+          SizedBox(
+            width: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
+              context,
+            ),
+            height: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
+              context,
+            ),
+            child: FloatingActionButton(
+              heroTag: "center_location",
+              onPressed: _centerOnCurrentLocation,
+              tooltip: 'Center on Current Location',
+              child: Icon(
+                Icons.my_location,
+                size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+              ),
+            ),
           ),
         ],
       ),
@@ -898,13 +1189,24 @@ class _GpsPageState extends State<GpsPage> {
 
   Widget _buildLegendItem(IconData icon, Color color, String label) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1),
+      padding: EdgeInsets.symmetric(
+        vertical: ResponsiveUtils.getResponsiveSpacing(context, 1),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: color, size: 12),
-          const SizedBox(width: 4),
-          Text(label, style: const TextStyle(fontSize: 10)),
+          Icon(
+            icon,
+            color: color,
+            size: ResponsiveUtils.getResponsiveIconSize(context, 12),
+          ),
+          SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 4)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: ResponsiveUtils.getResponsiveFontSize(context, 10),
+            ),
+          ),
         ],
       ),
     );
