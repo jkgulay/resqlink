@@ -14,6 +14,87 @@ import 'models/user_model.dart';
 
 final _secureStorage = FlutterSecureStorage();
 
+// Responsive utility class
+class ResponsiveUtils {
+  static const double mobileBreakpoint = 600;
+  static const double tabletBreakpoint = 1024;
+  static const double desktopBreakpoint = 1440;
+
+  static bool isMobile(BuildContext context) =>
+      MediaQuery.of(context).size.width < mobileBreakpoint;
+
+  static bool isTablet(BuildContext context) =>
+      MediaQuery.of(context).size.width >= mobileBreakpoint &&
+      MediaQuery.of(context).size.width < tabletBreakpoint;
+
+  static bool isDesktop(BuildContext context) =>
+      MediaQuery.of(context).size.width >= tabletBreakpoint;
+
+  static bool isLandscape(BuildContext context) =>
+      MediaQuery.of(context).orientation == Orientation.landscape;
+
+  static bool isSmallScreen(BuildContext context) =>
+      MediaQuery.of(context).size.height < 600;
+
+  static double getResponsiveFontSize(BuildContext context, double baseSize) {
+    final width = MediaQuery.of(context).size.width;
+    if (width < 360) return baseSize * 0.85;
+    if (width > tabletBreakpoint) return baseSize * 1.15;
+    if (width > mobileBreakpoint) return baseSize * 1.05;
+    return baseSize;
+  }
+
+  static double getResponsiveSpacing(BuildContext context, double baseSpacing) {
+    final width = MediaQuery.of(context).size.width;
+    if (width < 360) return baseSpacing * 0.8;
+    if (width > tabletBreakpoint) return baseSpacing * 1.5;
+    if (width > mobileBreakpoint) return baseSpacing * 1.2;
+    return baseSpacing;
+  }
+
+  static EdgeInsets getResponsivePadding(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    if (isDesktop(context)) {
+      return EdgeInsets.symmetric(
+        horizontal: size.width * 0.15,
+        vertical: size.height * 0.05,
+      );
+    } else if (isTablet(context)) {
+      return EdgeInsets.symmetric(
+        horizontal: size.width * 0.1,
+        vertical: size.height * 0.04,
+      );
+    } else {
+      return EdgeInsets.symmetric(
+        horizontal: size.width * 0.06,
+        vertical: size.height * 0.04,
+      );
+    }
+  }
+
+  static double getImageHeight(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    if (isLandscape(context)) {
+      return size.height * 0.4;
+    } else if (isSmallScreen(context)) {
+      return 180;
+    } else if (isDesktop(context)) {
+      return size.height * 0.35;
+    } else if (isTablet(context)) {
+      return size.height * 0.32;
+    } else {
+      return size.height * 0.28;
+    }
+  }
+
+  static double getMaxDialogWidth(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    if (isDesktop(context)) return 400;
+    if (isTablet(context)) return 350;
+    return width * 0.9;
+  }
+}
+
 Future<void> saveToken(
   String idToken,
   String refreshToken,
@@ -90,7 +171,7 @@ Future<void> main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
   } catch (e) {
-    debugPrint('Firebase init failed (offline?): \$e');
+    debugPrint('Firebase init failed (offline?): $e');
   }
   await DatabaseService.deleteDatabaseFile(); // ⚠️ dev only
   await DatabaseService.database;
@@ -170,7 +251,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       try {
         _currentUser = await trySilentFirebaseLogin();
       } catch (e) {
-        debugPrint('Silent Firebase login failed: \$e');
+        debugPrint('Silent Firebase login failed: $e');
       }
     }
 
@@ -219,23 +300,20 @@ class LandingPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isSmall = size.height < 600;
-
     return Scaffold(
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
+            final isLandscape = ResponsiveUtils.isLandscape(context);
+            final isDesktop = ResponsiveUtils.isDesktop(context);
+
             return SingleChildScrollView(
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: IntrinsicHeight(
                   child: Container(
                     width: double.infinity,
-                    padding: EdgeInsets.symmetric(
-                      horizontal: size.width * 0.06,
-                      vertical: size.height * 0.04,
-                    ),
+                    padding: ResponsiveUtils.getResponsivePadding(context),
                     decoration: const BoxDecoration(
                       gradient: LinearGradient(
                         colors: [Color(0xFF0B192C), Color(0xFF1E3E62)],
@@ -243,96 +321,191 @@ class LandingPage extends StatelessWidget {
                         end: Alignment.bottomCenter,
                       ),
                     ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        const ConnectionStatusWidget(),
-                        SizedBox(
-                          height: isSmall ? 200 : size.height * 0.3,
-                          child: Image.asset(
-                            'assets/1.png',
-                            fit: BoxFit.contain,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          'Welcome to ResQLink',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: isSmall ? 22 : 28,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          'Offline Emergency Communication Using Wi-Fi Direct & Geolocation Services',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: isSmall ? 14 : 16,
-                            color: Colors.white70,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green, width: 1),
-                          ),
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.offline_bolt,
-                                color: Colors.green,
-                                size: 20,
-                              ),
-                              SizedBox(width: 8),
-                              Text(
-                                'Works Offline for Emergency Use',
-                                style: TextStyle(
-                                  color: Colors.green,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFFF6500),
-                            foregroundColor: Colors.white,
-                            padding: EdgeInsets.symmetric(
-                              horizontal: size.width * 0.1,
-                              vertical: 16,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          icon: const Icon(Icons.power_settings_new),
-                          label: const Text(
-                            'Enter App',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          onPressed: () => _showLoginDialog(context),
-                        ),
-                        if (isSmall) const SizedBox(height: 10),
-                      ],
-                    ),
+                    child: isLandscape && !isDesktop
+                        ? _buildLandscapeLayout(context)
+                        : _buildPortraitLayout(context),
                   ),
                 ),
               ),
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _buildPortraitLayout(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const ConnectionStatusWidget(),
+        _buildImageSection(context),
+        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 20)),
+        _buildTitleSection(context),
+        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 20)),
+        _buildFeatureHighlight(context),
+        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 30)),
+        _buildEnterButton(context),
+      ],
+    );
+  }
+
+  Widget _buildLandscapeLayout(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          flex: 1,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const ConnectionStatusWidget(),
+              SizedBox(
+                height: ResponsiveUtils.getResponsiveSpacing(context, 20),
+              ),
+              _buildImageSection(context),
+            ],
+          ),
+        ),
+        SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 40)),
+        Expanded(
+          flex: 1,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildTitleSection(context),
+              SizedBox(
+                height: ResponsiveUtils.getResponsiveSpacing(context, 20),
+              ),
+              _buildFeatureHighlight(context),
+              SizedBox(
+                height: ResponsiveUtils.getResponsiveSpacing(context, 30),
+              ),
+              _buildEnterButton(context),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImageSection(BuildContext context) {
+    return SizedBox(
+      height: ResponsiveUtils.getImageHeight(context),
+      child: Image.asset('assets/1.png', fit: BoxFit.contain),
+    );
+  }
+
+  Widget _buildTitleSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment:
+          ResponsiveUtils.isLandscape(context) &&
+              !ResponsiveUtils.isDesktop(context)
+          ? CrossAxisAlignment.start
+          : CrossAxisAlignment.center,
+      children: [
+        Text(
+          'Welcome to ResQLink',
+          textAlign:
+              ResponsiveUtils.isLandscape(context) &&
+                  !ResponsiveUtils.isDesktop(context)
+              ? TextAlign.left
+              : TextAlign.center,
+          style: TextStyle(
+            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 28),
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 10)),
+        Text(
+          'Offline Emergency Communication Using Wi-Fi Direct & Geolocation Services',
+          textAlign:
+              ResponsiveUtils.isLandscape(context) &&
+                  !ResponsiveUtils.isDesktop(context)
+              ? TextAlign.left
+              : TextAlign.center,
+          style: TextStyle(
+            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
+            color: Colors.white70,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFeatureHighlight(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(
+        ResponsiveUtils.getResponsiveSpacing(context, 12),
+      ),
+      decoration: BoxDecoration(
+        color: Colors.green.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green, width: 1),
+      ),
+      child: Row(
+        mainAxisAlignment:
+            ResponsiveUtils.isLandscape(context) &&
+                !ResponsiveUtils.isDesktop(context)
+            ? MainAxisAlignment.start
+            : MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.offline_bolt,
+            color: Colors.green,
+            size: ResponsiveUtils.getResponsiveFontSize(context, 20),
+          ),
+          SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 8)),
+          Flexible(
+            child: Text(
+              'Works Offline for Emergency Use',
+              style: TextStyle(
+                color: Colors.green,
+                fontWeight: FontWeight.bold,
+                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEnterButton(BuildContext context) {
+    final buttonWidth = ResponsiveUtils.isDesktop(context)
+        ? 300.0
+        : ResponsiveUtils.isTablet(context)
+        ? 250.0
+        : MediaQuery.of(context).size.width * 0.8;
+
+    return SizedBox(
+      width: buttonWidth,
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFFFF6500),
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(
+            horizontal: ResponsiveUtils.getResponsiveSpacing(context, 24),
+            vertical: ResponsiveUtils.getResponsiveSpacing(context, 16),
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        icon: Icon(
+          Icons.power_settings_new,
+          size: ResponsiveUtils.getResponsiveFontSize(context, 20),
+        ),
+        label: Text(
+          'Enter App',
+          style: TextStyle(
+            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        onPressed: () => _showLoginDialog(context),
       ),
     );
   }
@@ -427,107 +600,156 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final maxWidth = ResponsiveUtils.getMaxDialogWidth(context);
+
     return Dialog(
-      insetPadding: const EdgeInsets.all(20),
+      insetPadding: EdgeInsets.all(
+        ResponsiveUtils.getResponsiveSpacing(context, 20),
+      ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       backgroundColor: const Color(0xFF1E3E62),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minWidth: constraints.maxWidth),
+      child: SizedBox(
+        width: maxWidth,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: EdgeInsets.all(
+                ResponsiveUtils.getResponsiveSpacing(context, 20),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        isLogin ? "Login" : "Register",
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const ConnectionStatusWidget(),
-                    ],
+                  _buildDialogHeader(context),
+                  SizedBox(
+                    height: ResponsiveUtils.getResponsiveSpacing(context, 20),
                   ),
-                  const SizedBox(height: 20),
                   _buildTextField(
                     controller: emailController,
                     label: "Email",
                     keyboardType: TextInputType.emailAddress,
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: ResponsiveUtils.getResponsiveSpacing(context, 12),
+                  ),
                   _buildTextField(
                     controller: passwordController,
                     label: "Password",
                     obscureText: true,
                   ),
                   if (!isLogin) ...[
-                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: ResponsiveUtils.getResponsiveSpacing(context, 12),
+                    ),
                     _buildTextField(
                       controller: confirmPasswordController,
                       label: "Confirm Password",
                       obscureText: true,
                     ),
                   ],
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Text(
-                      'This app works offline for emergency use. Your credentials are stored securely on your device.',
-                      style: TextStyle(color: Colors.blue, fontSize: 12),
-                      textAlign: TextAlign.center,
-                    ),
+                  SizedBox(
+                    height: ResponsiveUtils.getResponsiveSpacing(context, 16),
                   ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6500),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
-                        vertical: 14,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    onPressed: isLoading ? null : _handleSubmit,
-                    child: isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.white,
-                              ),
-                            ),
-                          )
-                        : Text(isLogin ? "Login" : "Register"),
+                  _buildInfoBox(context),
+                  SizedBox(
+                    height: ResponsiveUtils.getResponsiveSpacing(context, 20),
                   ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: isLoading ? null : _toggleMode,
-                    child: Text(
-                      isLogin
-                          ? "Need an Account? Register"
-                          : "Already have an Account? Login",
-                      style: const TextStyle(color: Colors.white),
-                    ),
+                  _buildSubmitButton(context),
+                  SizedBox(
+                    height: ResponsiveUtils.getResponsiveSpacing(context, 12),
                   ),
+                  _buildToggleButton(context),
                 ],
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDialogHeader(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          isLogin ? "Login" : "Register",
+          style: TextStyle(
+            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 24),
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        const ConnectionStatusWidget(),
+      ],
+    );
+  }
+
+  Widget _buildInfoBox(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(
+        ResponsiveUtils.getResponsiveSpacing(context, 12),
+      ),
+      decoration: BoxDecoration(
+        color: Colors.blue.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        'This app works offline for emergency use. Your credentials are stored securely on your device.',
+        style: TextStyle(
+          color: Colors.blue,
+          fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+        ),
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
+  Widget _buildSubmitButton(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFFFF6500),
+          padding: EdgeInsets.symmetric(
+            horizontal: ResponsiveUtils.getResponsiveSpacing(context, 32),
+            vertical: ResponsiveUtils.getResponsiveSpacing(context, 16),
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        onPressed: isLoading ? null : _handleSubmit,
+        child: isLoading
+            ? SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : Text(
+                isLogin ? "Login" : "Register",
+                style: TextStyle(
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildToggleButton(BuildContext context) {
+    return TextButton(
+      onPressed: isLoading ? null : _toggleMode,
+      child: Text(
+        isLogin
+            ? "Need an Account? Register"
+            : "Already have an Account? Login",
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
+        ),
       ),
     );
   }
@@ -542,15 +764,25 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
       controller: controller,
       keyboardType: keyboardType,
       obscureText: obscureText,
-      style: const TextStyle(color: Colors.white),
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
+      ),
       decoration: InputDecoration(
         labelText: label,
         filled: true,
         fillColor: const Color(0xFF0B192C),
-        labelStyle: const TextStyle(color: Colors.white70),
+        labelStyle: TextStyle(
+          color: Colors.white70,
+          fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide.none,
+        ),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: ResponsiveUtils.getResponsiveSpacing(context, 16),
+          vertical: ResponsiveUtils.getResponsiveSpacing(context, 16),
         ),
       ),
     );
