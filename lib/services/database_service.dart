@@ -17,41 +17,63 @@ class DatabaseService {
   }
 
   static Future<Database> _initDB() async {
-    String path = join(await getDatabasesPath(), 'resqlink.db');
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    final path = join(await getDatabasesPath(), 'resqlink_messages.db');
+    return await openDatabase(
+      path,
+      version: 2,
+      onCreate: _createDB,
+      onUpgrade: _upgradeDB,
+    );
   }
 
   static Future<void> _createDB(Database db, int version) async {
     await db.execute('''
-    CREATE TABLE $_userTable (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      display_name TEXT,
-      created_at TEXT NOT NULL,
-      last_login TEXT NOT NULL,
-      is_online_user INTEGER DEFAULT 0
-    )
-  ''');
+      CREATE TABLE $_userTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        display_name TEXT,
+        created_at TEXT NOT NULL,
+        last_login TEXT NOT NULL,
+        is_online_user INTEGER DEFAULT 0
+      )
+    ''');
 
     await db.execute('''
-  CREATE TABLE $_messageTable (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    endpoint_id TEXT NOT NULL,
-    from_user TEXT NOT NULL,
-    message TEXT NOT NULL,
-    is_me INTEGER NOT NULL,
-    is_emergency INTEGER NOT NULL,
-    timestamp INTEGER NOT NULL,
-    synced INTEGER DEFAULT 0,
-    synced_to_firebase INTEGER DEFAULT 0
-  )
-''');
+      CREATE TABLE $_messageTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        endpoint_id TEXT NOT NULL,
+        from_user TEXT NOT NULL,
+        message TEXT NOT NULL,
+        is_me INTEGER NOT NULL,
+        is_emergency INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        synced INTEGER DEFAULT 0,
+        synced_to_firebase INTEGER DEFAULT 0,
+        type TEXT DEFAULT 'message',
+        latitude REAL,
+        longitude REAL
+      )
+    ''');
+  }
+
+  static Future<void> _upgradeDB(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) {
+      await db.execute(
+        'ALTER TABLE $_messageTable ADD COLUMN type TEXT DEFAULT "message"',
+      );
+      await db.execute('ALTER TABLE $_messageTable ADD COLUMN latitude REAL');
+      await db.execute('ALTER TABLE $_messageTable ADD COLUMN longitude REAL');
+    }
   }
 
   static String _hashPassword(String password) {
-    var bytes = utf8.encode(password);
-    var digest = sha256.convert(bytes);
+    final bytes = utf8.encode(password);
+    final digest = sha256.convert(bytes);
     return digest.toString();
   }
 
@@ -63,7 +85,6 @@ class DatabaseService {
     try {
       final db = await database;
       final now = DateTime.now();
-
       final user = UserModel(
         email: email.toLowerCase(),
         passwordHash: _hashPassword(password),
@@ -71,7 +92,6 @@ class DatabaseService {
         lastLogin: now,
         isOnlineUser: isOnlineUser,
       );
-
       final id = await db.insert(_userTable, user.toMap());
       return user.copyWith(id: id);
     } catch (e) {
@@ -80,16 +100,10 @@ class DatabaseService {
     }
   }
 
-  static Future<void> deleteDatabaseFile() async {
-    final path = join(await getDatabasesPath(), 'resqlink.db');
-    await deleteDatabase(path);
-  }
-
   static Future<UserModel?> loginUser(String email, String password) async {
     try {
       final db = await database;
       final hashedPassword = _hashPassword(password);
-
       final result = await db.query(
         _userTable,
         where: 'email = ? AND password_hash = ?',
@@ -98,14 +112,12 @@ class DatabaseService {
 
       if (result.isNotEmpty) {
         final user = UserModel.fromMap(result.first);
-
         await db.update(
           _userTable,
           {'last_login': DateTime.now().toIso8601String()},
           where: 'id = ?',
           whereArgs: [user.id],
         );
-
         return user;
       }
       return null;
@@ -163,6 +175,17 @@ class DatabaseService {
     }
   }
 
+  static Future<List<MessageModel>> getMessages(String endpointId) async {
+    final db = await database;
+    final result = await db.query(
+      _messageTable,
+      where: 'endpoint_id = ?',
+      whereArgs: [endpointId],
+      orderBy: 'timestamp ASC',
+    );
+    return result.map((e) => MessageModel.fromMap(e)).toList();
+  }
+
   static Future<List<MessageModel>> getUnsyncedMessages() async {
     try {
       final db = await database;
@@ -177,22 +200,6 @@ class DatabaseService {
     }
   }
 
-  static Future<List<MessageModel>> getMessages(String endpointId) async {
-    try {
-      final db = await database;
-      final result = await db.query(
-        _messageTable,
-        where: 'endpoint_id = ?',
-        whereArgs: [endpointId],
-        orderBy: 'timestamp ASC',
-      );
-      return result.map((e) => MessageModel.fromMap(e)).toList();
-    } catch (e) {
-      print('Error loading messages: $e');
-      return [];
-    }
-  }
-
   static Future<void> syncMessageToFirebaseIfOnline(
     MessageModel message,
     Future<bool> Function() isConnected,
@@ -201,7 +208,6 @@ class DatabaseService {
     if (await isConnected()) {
       try {
         await syncFn(message);
-
         final db = await database;
         await db.update(
           _messageTable,
@@ -213,6 +219,27 @@ class DatabaseService {
         print('Error syncing message to Firebase: $e');
       }
     }
+  }
+
+  static Future<List<MessageModel>> getAllMessages() async {
+    final db = await database;
+    final result = await db.query(_messageTable, orderBy: 'timestamp DESC');
+    return result.map((e) => MessageModel.fromMap(e)).toList();
+  }
+
+  static Future<void> clearMessages() async {
+    final db = await database;
+    await db.delete(_messageTable);
+  }
+
+  static Future<void> deleteDatabaseFile() async {
+    final path = join(await getDatabasesPath(), 'resqlink_messages.db');
+    await deleteDatabase(path);
+  }
+
+  static Future<int> insertMessage(MessageModel message) async {
+    final db = await database;
+    return await db.insert('messages', message.toMap());
   }
 }
 
