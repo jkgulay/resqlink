@@ -441,7 +441,7 @@ class LandingPage extends StatelessWidget {
         ResponsiveUtils.getResponsiveSpacing(context, 12),
       ),
       decoration: BoxDecoration(
-        color: Colors.green.withOpacity(0.1),
+        color: Colors.green.withAlpha((0.1 * 255).round()),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.green, width: 1),
       ),
@@ -690,7 +690,7 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
         ResponsiveUtils.getResponsiveSpacing(context, 12),
       ),
       decoration: BoxDecoration(
-        color: Colors.blue.withOpacity(0.1),
+        color: Colors.blue.withAlpha((0.1 * 255).round()),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
