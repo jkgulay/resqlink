@@ -8,102 +8,33 @@ import 'package:path/path.dart' as p;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 
-// Responsive utilities class
-class ResponsiveUtils {
-  static const double mobileBreakpoint = 600.0;
-  static const double tabletBreakpoint = 1024.0;
-
-  static bool isMobile(BuildContext context) {
-    return MediaQuery.of(context).size.width < mobileBreakpoint;
-  }
-
-  static bool isTablet(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    return width >= mobileBreakpoint && width < tabletBreakpoint;
-  }
-
-  static bool isDesktop(BuildContext context) {
-    return MediaQuery.of(context).size.width >= tabletBreakpoint;
-  }
-
-  static double getResponsiveFontSize(
-    BuildContext context,
-    double baseFontSize,
-  ) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    if (screenWidth < mobileBreakpoint) {
-      return baseFontSize * 0.9;
-    } else if (screenWidth < tabletBreakpoint) {
-      return baseFontSize * 1.1;
-    } else {
-      return baseFontSize * 1.2;
-    }
-  }
-
-  static double getResponsiveSpacing(BuildContext context, double baseSpacing) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    if (screenWidth < mobileBreakpoint) {
-      return baseSpacing * 0.8;
-    } else if (screenWidth < tabletBreakpoint) {
-      return baseSpacing * 1.0;
-    } else {
-      return baseSpacing * 1.2;
-    }
-  }
-
-  static EdgeInsets getResponsivePadding(BuildContext context) {
-    if (isMobile(context)) {
-      return const EdgeInsets.all(12.0);
-    } else if (isTablet(context)) {
-      return const EdgeInsets.all(16.0);
-    } else {
-      return const EdgeInsets.all(20.0);
-    }
-  }
-
-  static double getResponsiveIconSize(BuildContext context, double baseSize) {
-    if (isMobile(context)) {
-      return baseSize * 0.9;
-    } else if (isTablet(context)) {
-      return baseSize * 1.1;
-    } else {
-      return baseSize * 1.2;
-    }
-  }
-
-  static double getResponsiveMarkerSize(BuildContext context) {
-    if (isMobile(context)) {
-      return 40.0;
-    } else if (isTablet(context)) {
-      return 50.0;
-    } else {
-      return 60.0;
-    }
-  }
-
-  static double getResponsiveFloatingActionButtonSize(BuildContext context) {
-    if (isMobile(context)) {
-      return 48.0;
-    } else if (isTablet(context)) {
-      return 56.0;
-    } else {
-      return 64.0;
-    }
-  }
-
-  static double getResponsiveDialogWidth(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    if (isMobile(context)) {
-      return screenWidth * 0.9;
-    } else if (isTablet(context)) {
-      return screenWidth * 0.7;
-    } else {
-      return 500.0;
-    }
-  }
+// Emergency-optimized theme colors
+class ResQLinkTheme {
+  static const Color primaryRed = Color(0xFFE53935);
+  static const Color darkRed = Color(0xFFB71C1C);
+  static const Color emergencyOrange = Color(0xFFFF6F00);
+  static const Color safeGreen = Color(0xFF43A047);
+  static const Color warningYellow = Color(0xFFFFD600);
+  static const Color offlineGray = Color(0xFF616161);
+  static const Color backgroundDark = Color(0xFF121212);
+  static const Color surfaceDark = Color(0xFF1E1E1E);
+  static const Color cardDark = Color(0xFF2C2C2C);
 }
 
-enum LocationType { normal, emergency }
+// Location types for emergency scenarios
+enum LocationType {
+  normal,
+  emergency,
+  sos,
+  safezone,
+  hazard,
+  evacuationPoint,
+  medicalAid,
+  supplies,
+}
+
+// Emergency status levels
+enum EmergencyLevel { safe, caution, warning, danger, critical }
 
 class LocationModel {
   final int? id;
@@ -113,6 +44,9 @@ class LocationModel {
   final bool synced;
   final String? userId;
   final LocationType type;
+  final String? message;
+  final EmergencyLevel? emergencyLevel;
+  final int? batteryLevel;
 
   LocationModel({
     this.id,
@@ -122,6 +56,9 @@ class LocationModel {
     this.synced = false,
     this.userId,
     this.type = LocationType.normal,
+    this.message,
+    this.emergencyLevel,
+    this.batteryLevel,
   });
 
   Map<String, dynamic> toMap() {
@@ -133,6 +70,9 @@ class LocationModel {
       'synced': synced ? 1 : 0,
       'userId': userId,
       'type': type.index,
+      'message': message,
+      'emergencyLevel': emergencyLevel?.index,
+      'batteryLevel': batteryLevel,
     };
   }
 
@@ -145,6 +85,11 @@ class LocationModel {
       synced: map['synced'] == 1,
       userId: map['userId'],
       type: LocationType.values[map['type'] ?? 0],
+      message: map['message'],
+      emergencyLevel: map['emergencyLevel'] != null
+          ? EmergencyLevel.values[map['emergencyLevel']]
+          : null,
+      batteryLevel: map['batteryLevel'],
     );
   }
 
@@ -155,28 +100,61 @@ class LocationModel {
       'timestamp': Timestamp.fromDate(timestamp),
       'userId': userId,
       'type': type.name,
+      'message': message,
+      'emergencyLevel': emergencyLevel?.name,
+      'batteryLevel': batteryLevel,
     };
   }
 
+  // Get marker color based on type and emergency level
   Color getMarkerColor() {
-    final now = DateTime.now();
-    final age = now.difference(timestamp);
-
-    if (type == LocationType.emergency) {
-      return Colors.red;
-    }
-
-    if (age.inMinutes < 5) {
-      return Colors.green;
-    } else if (age.inMinutes < 30) {
-      return Colors.orange;
-    } else {
-      return Colors.grey;
+    switch (type) {
+      case LocationType.emergency:
+      case LocationType.sos:
+        return ResQLinkTheme.primaryRed;
+      case LocationType.safezone:
+      case LocationType.evacuationPoint:
+        return ResQLinkTheme.safeGreen;
+      case LocationType.hazard:
+        return ResQLinkTheme.emergencyOrange;
+      case LocationType.medicalAid:
+        return Colors.blue;
+      case LocationType.supplies:
+        return Colors.purple;
+      default:
+        if (emergencyLevel == EmergencyLevel.critical) {
+          return ResQLinkTheme.darkRed;
+        }
+        final now = DateTime.now();
+        final age = now.difference(timestamp);
+        if (age.inMinutes < 5) {
+          return ResQLinkTheme.safeGreen;
+        } else if (age.inHours < 1) {
+          return ResQLinkTheme.warningYellow;
+        } else {
+          return ResQLinkTheme.offlineGray;
+        }
     }
   }
 
   IconData getMarkerIcon() {
-    return type == LocationType.emergency ? Icons.warning : Icons.location_on;
+    switch (type) {
+      case LocationType.emergency:
+      case LocationType.sos:
+        return Icons.warning_rounded;
+      case LocationType.safezone:
+        return Icons.shield;
+      case LocationType.evacuationPoint:
+        return Icons.exit_to_app;
+      case LocationType.hazard:
+        return Icons.dangerous;
+      case LocationType.medicalAid:
+        return Icons.medical_services;
+      case LocationType.supplies:
+        return Icons.inventory_2;
+      default:
+        return Icons.location_on;
+    }
   }
 }
 
@@ -191,10 +169,10 @@ class LocationService {
   }
 
   static Future<Database> _initDB() async {
-    String path = p.join(await getDatabasesPath(), 'locations.db');
+    String path = p.join(await getDatabasesPath(), 'resqlink_locations.db');
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) {
         return db.execute('''
           CREATE TABLE $_tableName(
@@ -204,14 +182,26 @@ class LocationService {
             timestamp INTEGER NOT NULL,
             synced INTEGER NOT NULL DEFAULT 0,
             userId TEXT,
-            type INTEGER NOT NULL DEFAULT 0
+            type INTEGER NOT NULL DEFAULT 0,
+            message TEXT,
+            emergencyLevel INTEGER,
+            batteryLevel INTEGER
           )
         ''');
       },
-      onUpgrade: (db, oldVersion, newVersion) {
+      onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
-          db.execute(
+          await db.execute(
             'ALTER TABLE $_tableName ADD COLUMN type INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 3) {
+          await db.execute('ALTER TABLE $_tableName ADD COLUMN message TEXT');
+          await db.execute(
+            'ALTER TABLE $_tableName ADD COLUMN emergencyLevel INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE $_tableName ADD COLUMN batteryLevel INTEGER',
           );
         }
       },
@@ -228,7 +218,6 @@ class LocationService {
     final List<Map<String, dynamic>> maps = await db.query(
       _tableName,
       orderBy: 'timestamp DESC',
-      limit: 100, // Limit to last 100 locations for performance
     );
     return List.generate(maps.length, (i) => LocationModel.fromMap(maps[i]));
   }
@@ -266,6 +255,14 @@ class LocationService {
     return null;
   }
 
+  static Future<int> getUnsyncedCount() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM $_tableName WHERE synced = 0',
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
   static Future<void> clearAllLocations() async {
     final db = await database;
     await db.delete(_tableName);
@@ -274,7 +271,7 @@ class LocationService {
 
 class FirebaseLocationService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  static const String _collection = 'user_locations';
+  static const String _collection = 'emergency_locations';
 
   static Future<void> syncLocation(LocationModel location) async {
     try {
@@ -283,7 +280,7 @@ class FirebaseLocationService {
         await LocationService.markLocationSynced(location.id!);
       }
     } catch (e) {
-      debugPrint('Error syncing location: $e');
+      print('Error syncing location to Firebase: $e');
       rethrow;
     }
   }
@@ -295,7 +292,7 @@ class FirebaseLocationService {
         await syncLocation(location);
       }
     } catch (e) {
-      debugPrint('Error syncing all locations: $e');
+      print('Error syncing all locations: $e');
       rethrow;
     }
   }
@@ -311,40 +308,93 @@ class GpsPage extends StatefulWidget {
   State<GpsPage> createState() => _GpsPageState();
 }
 
-class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
+class _GpsPageState extends State<GpsPage>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
+  // Core variables
   final List<LocationModel> savedLocations = [];
   final MapController _mapController = MapController();
+
+  // Location and connectivity
   LocationModel? _lastKnownLocation;
   LatLng? _currentLocation;
   bool _isLocationServiceEnabled = false;
   bool _isConnected = false;
-  bool _emergencyMode = false;
+
+  // Emergency states
+  EmergencyLevel _currentEmergencyLevel = EmergencyLevel.safe;
+  bool _sosMode = false;
+  int _batteryLevel = 100;
+
+  // UI states
   bool _isLoading = true;
-  bool _mapReady = false;
-  String _statusMessage = '';
   String _errorMessage = '';
+  bool _showMapTypeSelector = false;
+  int _selectedMapType = 0; // 0: Street, 1: Satellite, 2: Terrain
+
+  // Timers and streams
   Timer? _locationTimer;
-  Timer? _emergencyTimer;
-  Timer? _statusMessageTimer;
+  Timer? _sosTimer;
+  Timer? _batteryTimer;
   StreamSubscription<Position>? _positionStream;
   StreamSubscription<ConnectivityResult>? _connectivitySubscription;
-  static const LatLng _defaultLocation = LatLng(37.4219983, -122.084);
+
+  // Animation controllers
+  late AnimationController _pulseController;
+  late AnimationController _sosAnimationController;
+  late Animation<double> _pulseAnimation;
+  late Animation<double> _sosAnimation;
+
+  // Map tile sources
+  final List<String> _mapTypes = ['Street', 'Satellite', 'Terrain'];
+  final List<String> _tileUrls = [
+    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+  ];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeApp();
+    _initializeAnimations();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeApp();
+    });
+  }
+
+  void _initializeAnimations() {
+    _pulseController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    )..repeat(reverse: true);
+
+    _sosAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+
+    _pulseAnimation = Tween<double>(begin: 0.8, end: 1.2).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    _sosAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
+      CurvedAnimation(
+        parent: _sosAnimationController,
+        curve: Curves.elasticOut,
+      ),
+    );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _locationTimer?.cancel();
-    _emergencyTimer?.cancel();
-    _statusMessageTimer?.cancel();
+    _sosTimer?.cancel();
+    _batteryTimer?.cancel();
     _positionStream?.cancel();
     _connectivitySubscription?.cancel();
+    _pulseController.dispose();
+    _sosAnimationController.dispose();
     super.dispose();
   }
 
@@ -352,36 +402,49 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _checkLocationPermission();
+      _checkBatteryLevel();
     }
   }
 
   Future<void> _initializeApp() async {
     try {
+      print('[INIT] Starting _initializeApp');
       setState(() {
         _isLoading = true;
         _errorMessage = '';
       });
 
       await _initializeServices();
+      print('[INIT] Services initialized');
+
       await _loadSavedLocations();
+      print('[INIT] Saved locations loaded');
+
       _checkConnectivity();
+      print('[INIT] Connectivity checked');
+
+      _startBatteryMonitoring();
+      print('[INIT] Battery monitoring started');
+
       await _startLocationTracking();
+      print('[INIT] Location tracking started');
 
       setState(() {
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, st) {
+      print('[INIT ERROR] $e\n$st');
       setState(() {
         _isLoading = false;
         _errorMessage = 'Failed to initialize GPS: $e';
       });
-      debugPrint('Error initializing app: $e');
     }
   }
 
   Future<void> _initializeServices() async {
     await _checkLocationPermission();
     await _loadLastKnownLocation();
+    await _checkBatteryLevel();
   }
 
   Future<void> _checkLocationPermission() async {
@@ -390,8 +453,7 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
       if (!serviceEnabled) {
         setState(() {
           _isLocationServiceEnabled = false;
-          _errorMessage =
-              'Location services are disabled. Please enable them in device settings.';
+          _errorMessage = 'Location services disabled. Enable in settings.';
         });
         return;
       }
@@ -402,8 +464,7 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
         if (permission == LocationPermission.denied) {
           setState(() {
             _isLocationServiceEnabled = false;
-            _errorMessage =
-                'Location permissions are denied. Please grant location access.';
+            _errorMessage = 'Location permission denied.';
           });
           return;
         }
@@ -412,8 +473,7 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
       if (permission == LocationPermission.deniedForever) {
         setState(() {
           _isLocationServiceEnabled = false;
-          _errorMessage =
-              'Location permissions are permanently denied. Please enable them in app settings.';
+          _errorMessage = 'Location permissions permanently denied.';
         });
         return;
       }
@@ -425,7 +485,7 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
     } catch (e) {
       setState(() {
         _isLocationServiceEnabled = false;
-        _errorMessage = 'Error checking location permissions: $e';
+        _errorMessage = 'Error checking permissions: $e';
       });
     }
   }
@@ -441,13 +501,10 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
             lastLocation.longitude,
           );
         });
-
-        if (_mapReady) {
-          _mapController.move(_currentLocation!, 15.0);
-        }
+        _mapController.move(_currentLocation!, 15.0);
       }
     } catch (e) {
-      debugPrint('Error loading last known location: $e');
+      print('Error loading last location: $e');
     }
   }
 
@@ -461,24 +518,14 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
         });
       }
     } catch (e) {
-      debugPrint('Error loading saved locations: $e');
+      print('Error loading locations: $e');
     }
   }
 
-  void _checkConnectivity() async {
-    // Check initial connectivity state
-    final ConnectivityResult connectivityResult = await Connectivity()
-        .checkConnectivity();
-    if (mounted) {
-      setState(() {
-        _isConnected = connectivityResult != ConnectivityResult.none;
-      });
-    }
-
-    // Listen for connectivity changes
+  void _checkConnectivity() {
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
-      ConnectivityResult result,
-    ) {
+      result,
+    ) async {
       if (mounted) {
         final wasConnected = _isConnected;
         setState(() {
@@ -486,12 +533,31 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
         });
 
         if (!wasConnected && _isConnected) {
-          _syncLocationsToFirebase();
-          _showMessage('Back online! Syncing saved locations...');
+          _showMessage('Connection restored! Syncing data...', isSuccess: true);
+          await _syncLocationsToFirebase();
+          final unsyncedCount = await LocationService.getUnsyncedCount();
+          if (unsyncedCount == 0) {
+            _showMessage('All locations synced!', isSuccess: true);
+          }
         } else if (wasConnected && !_isConnected) {
-          _showMessage('Offline mode - locations will be saved locally');
+          _showMessage('OFFLINE MODE - Data saved locally', isWarning: true);
         }
       }
+    });
+  }
+
+  void _startBatteryMonitoring() {
+    _checkBatteryLevel();
+    _batteryTimer = Timer.periodic(const Duration(minutes: 5), (timer) {
+      _checkBatteryLevel();
+    });
+  }
+
+  Future<void> _checkBatteryLevel() async {
+    // In a real app, you'd use battery_plus package
+    // For now, we'll simulate battery level
+    setState(() {
+      _batteryLevel = 75; // Simulated value
     });
   }
 
@@ -503,7 +569,7 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
 
       const locationSettings = LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // Increased from 5 for better battery life
+        distanceFilter: 10,
       );
 
       _positionStream =
@@ -516,22 +582,23 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
               }
             },
             onError: (error) {
-              debugPrint('Position stream error: $error');
+              print('Position stream error: $error');
               setState(() {
                 _errorMessage = 'GPS tracking error: $error';
               });
             },
           );
 
+      // Update location every 30 seconds
       _locationTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
         if (mounted && _isLocationServiceEnabled) {
           _getCurrentLocation();
         }
       });
     } catch (e) {
-      debugPrint('Error starting location tracking: $e');
+      print('Error starting location tracking: $e');
       setState(() {
-        _errorMessage = 'Failed to start location tracking: $e';
+        _errorMessage = 'Failed to start tracking: $e';
       });
     }
   }
@@ -550,15 +617,10 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
       );
       _updateCurrentLocation(position);
     } catch (e) {
-      debugPrint('Error getting current location: $e');
-
-      try {
-        Position? lastPosition = await Geolocator.getLastKnownPosition();
-        if (lastPosition != null) {
-          _updateCurrentLocation(lastPosition);
-        }
-      } catch (e2) {
-        debugPrint('Error getting last known position: $e2');
+      print('Error getting location: $e');
+      Position? lastPosition = await Geolocator.getLastKnownPosition();
+      if (lastPosition != null) {
+        _updateCurrentLocation(lastPosition);
       }
     }
   }
@@ -566,213 +628,221 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
   void _updateCurrentLocation(Position position) {
     if (!mounted) return;
 
-    try {
-      final newLocation = LatLng(position.latitude, position.longitude);
-      final locationModel = LocationModel(
-        latitude: position.latitude,
-        longitude: position.longitude,
-        timestamp: DateTime.now(),
-        userId: widget.userId,
-        type: LocationType.normal,
-      );
+    final newLocation = LatLng(position.latitude, position.longitude);
+    final locationModel = LocationModel(
+      latitude: position.latitude,
+      longitude: position.longitude,
+      timestamp: DateTime.now(),
+      userId: widget.userId,
+      type: _sosMode ? LocationType.sos : LocationType.normal,
+      emergencyLevel: _currentEmergencyLevel,
+      batteryLevel: _batteryLevel,
+    );
 
-      setState(() {
-        _currentLocation = newLocation;
-        _lastKnownLocation = locationModel;
-        _errorMessage = '';
-      });
-
-      LocationService.insertLocation(locationModel)
-          .then((_) {
-            if (_isConnected) {
-              FirebaseLocationService.syncLocation(locationModel);
-            }
-          })
-          .catchError((error) {
-            debugPrint('Error saving location: $error');
-          });
-    } catch (e) {
-      debugPrint('Error updating current location: $e');
-    }
-  }
-
-  void _showMessage(String message) {
-    if (mounted) {
-      setState(() {
-        _statusMessage = message;
-      });
-      _statusMessageTimer?.cancel();
-      _statusMessageTimer = Timer(const Duration(seconds: 3), () {
-        if (mounted) {
-          setState(() {
-            _statusMessage = '';
-          });
-        }
-      });
-    }
-  }
-
-  void _toggleEmergencyMode() {
     setState(() {
-      _emergencyMode = !_emergencyMode;
+      _currentLocation = newLocation;
+      _lastKnownLocation = locationModel;
+      _errorMessage = '';
     });
 
-    if (_emergencyMode) {
-      _startEmergencyTracking();
-      _showMessage(
-        'Emergency mode activated! Location sharing every 2 minutes.',
-      );
-    } else {
-      _stopEmergencyTracking();
-      _showMessage('Emergency mode deactivated.');
+    // Auto-save location in emergency situations
+    if (_currentEmergencyLevel.index >= EmergencyLevel.warning.index ||
+        _sosMode) {
+      _saveCurrentLocation(silent: true);
     }
   }
 
-  void _startEmergencyTracking() {
-    _emergencyTimer = Timer.periodic(const Duration(minutes: 2), (timer) {
-      if (_emergencyMode && mounted) {
-        _shareEmergencyLocation();
+  void _activateSOS() {
+    setState(() {
+      _sosMode = true;
+      _currentEmergencyLevel = EmergencyLevel.critical;
+    });
+
+    _sosAnimationController.repeat(reverse: true);
+    _showMessage('SOS ACTIVATED! Broadcasting location...', isDanger: true);
+
+    // Send immediate SOS location
+    _sendSOSLocation();
+
+    // Send SOS signal every 30 seconds
+    _sosTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (_sosMode && mounted) {
+        _sendSOSLocation();
       }
     });
   }
 
-  void _stopEmergencyTracking() {
-    _emergencyTimer?.cancel();
-    _emergencyTimer = null;
+  void _deactivateSOS() {
+    setState(() {
+      _sosMode = false;
+      _currentEmergencyLevel = EmergencyLevel.safe;
+    });
+
+    _sosTimer?.cancel();
+    _sosTimer = null;
+    _sosAnimationController.stop();
+    _sosAnimationController.reset();
+
+    _showMessage('SOS deactivated', isSuccess: true);
   }
 
-  void _shareEmergencyLocation() async {
-    if (_currentLocation != null) {
+  Future<void> _sendSOSLocation() async {
+    if (_currentLocation == null) return;
+
+    final sosLocation = LocationModel(
+      latitude: _currentLocation!.latitude,
+      longitude: _currentLocation!.longitude,
+      timestamp: DateTime.now(),
+      userId: widget.userId,
+      type: LocationType.sos,
+      message: 'EMERGENCY SOS - Immediate assistance required!',
+      emergencyLevel: EmergencyLevel.critical,
+      batteryLevel: _batteryLevel,
+    );
+
+    await LocationService.insertLocation(sosLocation);
+
+    if (_isConnected) {
       try {
-        final emergencyLocation = LocationModel(
-          latitude: _currentLocation!.latitude,
-          longitude: _currentLocation!.longitude,
-          timestamp: DateTime.now(),
-          userId: widget.userId,
-          type: LocationType.emergency,
-        );
-
-        await LocationService.insertLocation(emergencyLocation);
-
-        if (_isConnected) {
-          await FirebaseLocationService.syncLocation(emergencyLocation);
-        }
-
-        if (widget.onLocationShare != null) {
-          widget.onLocationShare!(emergencyLocation);
-        }
-
-        await _loadSavedLocations();
-
-        _showMessage(
-          _isConnected
-              ? 'Emergency location shared and synced!'
-              : 'Emergency location saved! Will sync when online.',
-        );
+        await FirebaseLocationService.syncLocation(sosLocation);
+        _showMessage('SOS location broadcast!', isDanger: true);
       } catch (e) {
-        debugPrint('Error sharing emergency location: $e');
-        _showMessage('Failed to share emergency location');
+        _showMessage(
+          'SOS saved locally - will sync when online',
+          isWarning: true,
+        );
       }
     }
+
+    if (widget.onLocationShare != null) {
+      widget.onLocationShare!(sosLocation);
+    }
+
+    await _loadSavedLocations();
+  }
+
+  Future<void> _saveCurrentLocation({bool silent = false}) async {
+    if (_currentLocation == null) return;
+
+    final location = LocationModel(
+      latitude: _currentLocation!.latitude,
+      longitude: _currentLocation!.longitude,
+      timestamp: DateTime.now(),
+      userId: widget.userId,
+      type: _sosMode ? LocationType.sos : LocationType.normal,
+      emergencyLevel: _currentEmergencyLevel,
+      batteryLevel: _batteryLevel,
+    );
+
+    await LocationService.insertLocation(location);
+
+    if (_isConnected) {
+      try {
+        await FirebaseLocationService.syncLocation(location);
+        if (!silent) _showMessage('Location saved & synced!', isSuccess: true);
+      } catch (e) {
+        if (!silent) _showMessage('Location saved locally', isWarning: true);
+      }
+    } else {
+      if (!silent) _showMessage('Location saved offline', isWarning: true);
+    }
+
+    await _loadSavedLocations();
   }
 
   Future<void> _syncLocationsToFirebase() async {
     try {
       await FirebaseLocationService.syncAllUnsyncedLocations();
+      await _loadSavedLocations();
     } catch (e) {
-      debugPrint('Error syncing locations to Firebase: $e');
+      print('Sync error: $e');
     }
   }
 
-  void _saveLocation(TapPosition tapPosition, LatLng latLng) {
+  void _showMessage(
+    String message, {
+    bool isSuccess = false,
+    bool isWarning = false,
+    bool isDanger = false,
+  }) {
     if (!mounted) return;
 
-    try {
-      final locationModel = LocationModel(
-        latitude: latLng.latitude,
-        longitude: latLng.longitude,
-        timestamp: DateTime.now(),
-        userId: widget.userId,
-        type: LocationType.normal,
-      );
+    final color = isDanger
+        ? ResQLinkTheme.primaryRed
+        : isWarning
+        ? ResQLinkTheme.emergencyOrange
+        : isSuccess
+        ? ResQLinkTheme.safeGreen
+        : Colors.black87;
 
-      setState(() {
-        savedLocations.add(locationModel);
-      });
-
-      LocationService.insertLocation(locationModel)
-          .then((_) {
-            if (_isConnected) {
-              FirebaseLocationService.syncLocation(locationModel);
-            }
-            _showMessage('Location saved!');
-          })
-          .catchError((error) {
-            debugPrint('Error saving location: $error');
-          });
-    } catch (e) {
-      debugPrint('Error saving location: $e');
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        backgroundColor: color,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
   }
 
-  void _shareCurrentLocation() {
-    if (_lastKnownLocation != null && widget.onLocationShare != null) {
-      widget.onLocationShare!(_lastKnownLocation!);
-      _showMessage('Location shared!');
-    } else {
-      _showMessage('No location available to share');
-    }
-  }
-
-  void _centerOnCurrentLocation() {
-    if (_currentLocation != null && _mapReady) {
-      _mapController.move(_currentLocation!, 15.0);
-    } else {
-      _showMessage('No current location available');
-    }
-  }
-
-  void _clearAllLocations() {
+  void _showLocationTypeDialog() {
     showDialog(
       context: context,
-      builder: (BuildContext dialogContext) {
+      builder: (BuildContext context) {
         return AlertDialog(
-          title: Text(
-            'Clear All Locations',
-            style: TextStyle(
-              fontSize: ResponsiveUtils.getResponsiveFontSize(context, 18),
-            ),
+          backgroundColor: ResQLinkTheme.cardDark,
+          title: const Text(
+            'Mark Location Type',
+            style: TextStyle(color: Colors.white),
           ),
-          content: SizedBox(
-            width: ResponsiveUtils.getResponsiveDialogWidth(context),
-            child: Text(
-              'Are you sure you want to clear all saved locations? This action cannot be undone.',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildLocationTypeOption(
+                  LocationType.safezone,
+                  'Safe Zone',
+                  Icons.shield,
+                  ResQLinkTheme.safeGreen,
+                ),
+                _buildLocationTypeOption(
+                  LocationType.hazard,
+                  'Hazard Area',
+                  Icons.dangerous,
+                  ResQLinkTheme.emergencyOrange,
+                ),
+                _buildLocationTypeOption(
+                  LocationType.evacuationPoint,
+                  'Evacuation Point',
+                  Icons.exit_to_app,
+                  ResQLinkTheme.safeGreen,
+                ),
+                _buildLocationTypeOption(
+                  LocationType.medicalAid,
+                  'Medical Aid',
+                  Icons.medical_services,
+                  Colors.blue,
+                ),
+                _buildLocationTypeOption(
+                  LocationType.supplies,
+                  'Supplies/Resources',
+                  Icons.inventory_2,
+                  Colors.purple,
+                ),
+              ],
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text(
                 'Cancel',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-                _confirmClearLocations();
-              },
-              child: Text(
-                'Clear',
-                style: TextStyle(
-                  color: Colors.red,
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-                ),
+                style: TextStyle(color: Colors.white70),
               ),
             ),
           ],
@@ -781,89 +851,176 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _confirmClearLocations() async {
-    try {
-      await LocationService.clearAllLocations();
-      await _loadSavedLocations();
-      _showMessage('All locations cleared!');
-    } catch (e) {
-      debugPrint('Error clearing locations: $e');
-      _showMessage('Failed to clear locations');
+  Widget _buildLocationTypeOption(
+    LocationType type,
+    String label,
+    IconData icon,
+    Color color,
+  ) {
+    return ListTile(
+      leading: Icon(icon, color: color, size: 30),
+      title: Text(label, style: const TextStyle(color: Colors.white)),
+      onTap: () {
+        Navigator.of(context).pop();
+        _markLocation(type);
+      },
+    );
+  }
+
+  Future<void> _markLocation(LocationType type) async {
+    if (_currentLocation == null) return;
+
+    final location = LocationModel(
+      latitude: _currentLocation!.latitude,
+      longitude: _currentLocation!.longitude,
+      timestamp: DateTime.now(),
+      userId: widget.userId,
+      type: type,
+      emergencyLevel: _currentEmergencyLevel,
+      batteryLevel: _batteryLevel,
+    );
+
+    await LocationService.insertLocation(location);
+
+    if (_isConnected) {
+      try {
+        await FirebaseLocationService.syncLocation(location);
+        _showMessage('${type.name} marked & synced!', isSuccess: true);
+      } catch (e) {
+        _showMessage('${type.name} marked locally', isWarning: true);
+      }
+    } else {
+      _showMessage('${type.name} marked offline', isWarning: true);
+    }
+
+    await _loadSavedLocations();
+  }
+
+  void _centerOnCurrentLocation() {
+    if (_currentLocation != null) {
+      _mapController.move(_currentLocation!, 16.0);
+    } else {
+      _showMessage('No location available', isWarning: true);
     }
   }
 
-  void _showConnectivityStatus() {
-    _showMessage(_isConnected ? 'Online' : 'Offline');
-  }
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return _buildLoadingScreen();
+    }
 
-  List<LatLng> _getRoutePoints() {
-    return savedLocations
-        .map((loc) => LatLng(loc.latitude, loc.longitude))
-        .toList();
-  }
+    if (_errorMessage.isNotEmpty && !_isLocationServiceEnabled) {
+      return _buildErrorScreen();
+    }
 
-  void _showLocationDetails(LocationModel location) {
-    showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        title: Text(
-          location.type == LocationType.emergency
-              ? 'Emergency Location'
-              : 'Saved Location',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 18),
-          ),
+    return Theme(
+      data: ThemeData.dark().copyWith(
+        primaryColor: ResQLinkTheme.primaryRed,
+        scaffoldBackgroundColor: ResQLinkTheme.backgroundDark,
+      ),
+      child: Scaffold(
+        backgroundColor: ResQLinkTheme.backgroundDark,
+        body: Stack(
+          children: [
+            _buildMap(),
+            _buildTopControls(),
+            _buildEmergencyButton(),
+            if (_showMapTypeSelector) _buildMapTypeSelector(),
+            _buildBottomInfo(),
+          ],
         ),
-        content: SizedBox(
-          width: ResponsiveUtils.getResponsiveDialogWidth(context),
+      ),
+    );
+  }
+
+  Widget _buildLoadingScreen() {
+    return Scaffold(
+      backgroundColor: ResQLinkTheme.backgroundDark,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              'assets/resqlink_logo.png',
+              width: 120,
+              height: 120,
+              errorBuilder: (context, error, stackTrace) {
+                return const Icon(
+                  Icons.emergency,
+                  size: 80,
+                  color: ResQLinkTheme.primaryRed,
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+            const CircularProgressIndicator(color: ResQLinkTheme.primaryRed),
+            const SizedBox(height: 16),
+            const Text(
+              'Initializing Emergency GPS...',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorScreen() {
+    return Scaffold(
+      backgroundColor: ResQLinkTheme.backgroundDark,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              const Icon(
+                Icons.location_off,
+                size: 80,
+                color: ResQLinkTheme.primaryRed,
+              ),
+              const SizedBox(height: 16),
               Text(
-                'Latitude: ${location.latitude.toStringAsFixed(6)}',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                _errorMessage,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 16),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: _retryInitialization,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ResQLinkTheme.primaryRed,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 16,
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-              Text(
-                'Longitude: ${location.longitude.toStringAsFixed(6)}',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
-                ),
-              ),
-              Text(
-                'Time: ${location.timestamp.toString().substring(0, 19)}',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
-                ),
-              ),
-              Text(
-                'Type: ${location.type.name.toUpperCase()}',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
-                ),
-              ),
-              Text(
-                'Synced: ${location.synced ? 'Yes' : 'No'}',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Geolocator.openAppSettings(),
+                child: const Text(
+                  'Open Settings',
+                  style: TextStyle(
+                    color: ResQLinkTheme.primaryRed,
+                    fontSize: 16,
+                  ),
                 ),
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(
-              'Close',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -872,457 +1029,675 @@ class _GpsPageState extends State<GpsPage> with WidgetsBindingObserver {
     _initializeApp();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isMobile = ResponsiveUtils.isMobile(context);
-    final responsivePadding = ResponsiveUtils.getResponsivePadding(context);
-    final responsiveSpacing = ResponsiveUtils.getResponsiveSpacing(context, 10);
-
-    if (_isLoading) {
-      return Scaffold(
-        appBar: AppBar(
-          title: Text(
-            'GPS Tracker',
-            style: TextStyle(
-              fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-            ),
-          ),
-        ),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: responsiveSpacing),
-              Text(
-                'Initializing GPS...',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (_errorMessage.isNotEmpty && !_isLocationServiceEnabled) {
-      return Scaffold(
-        appBar: AppBar(
-          title: Text(
-            'GPS Tracker',
-            style: TextStyle(
-              fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-            ),
-          ),
-        ),
-        body: Center(
-          child: Padding(
-            padding: responsivePadding,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.error_outline,
-                  size: ResponsiveUtils.getResponsiveIconSize(context, 64),
-                  color: Colors.red,
-                ),
-                SizedBox(height: responsiveSpacing),
-                Text(
-                  'GPS Error',
-                  style: TextStyle(
-                    fontSize: ResponsiveUtils.getResponsiveFontSize(
-                      context,
-                      20,
-                    ),
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                SizedBox(height: responsiveSpacing),
-                Text(
-                  _errorMessage,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: ResponsiveUtils.getResponsiveFontSize(
-                      context,
-                      14,
-                    ),
-                  ),
-                ),
-                SizedBox(height: responsiveSpacing * 2),
-                ElevatedButton(
-                  onPressed: _retryInitialization,
-                  child: Text(
-                    'Retry',
-                    style: TextStyle(
-                      fontSize: ResponsiveUtils.getResponsiveFontSize(
-                        context,
-                        16,
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: responsiveSpacing),
-                TextButton(
-                  onPressed: () => Geolocator.openAppSettings(),
-                  child: Text(
-                    'Open App Settings',
-                    style: TextStyle(
-                      fontSize: ResponsiveUtils.getResponsiveFontSize(
-                        context,
-                        14,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          'GPS Tracker',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(
-              _emergencyMode ? Icons.emergency : Icons.emergency_outlined,
-              color: _emergencyMode ? Colors.red : Colors.grey,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            onPressed: _toggleEmergencyMode,
-            tooltip: _emergencyMode
-                ? 'Disable Emergency Mode'
-                : 'Enable Emergency Mode',
-          ),
-          IconButton(
-            icon: Icon(
-              _isConnected ? Icons.cloud_done : Icons.cloud_off,
-              color: _isConnected ? Colors.green : Colors.red,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            onPressed: _showConnectivityStatus,
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'clear') {
-                _clearAllLocations();
-              }
-            },
-            itemBuilder: (BuildContext context) => [
-              PopupMenuItem<String>(
-                value: 'clear',
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.clear_all,
-                      color: Colors.red,
-                      size: ResponsiveUtils.getResponsiveIconSize(context, 20),
-                    ),
-                    SizedBox(width: responsiveSpacing),
-                    Text(
-                      'Clear All Locations',
-                      style: TextStyle(
-                        fontSize: ResponsiveUtils.getResponsiveFontSize(
-                          context,
-                          14,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
+  Widget _buildMap() {
+    return FlutterMap(
+      mapController: _mapController,
+      options: MapOptions(
+        initialCenter:
+            _currentLocation ??
+            const LatLng(10.8531, 123.8939), // Cagayan de Oro default
+        initialZoom: 13.0,
+        maxZoom: 18.0,
+        minZoom: 5.0,
+        onLongPress: (tapPos, latLng) => _showLocationTypeDialog(),
       ),
-      body: Stack(
-        children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _currentLocation ?? _defaultLocation,
-              initialZoom: 13.0,
-              onLongPress: _saveLocation,
-              onMapReady: () {
-                setState(() {
-                  _mapReady = true;
-                  if (_currentLocation != null) {
-                    _mapController.move(_currentLocation!, 15.0);
-                  }
-                });
-              },
-            ),
-            children: [
-              TileLayer(
-                urlTemplate:
-                    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-                subdomains: const ['a', 'b', 'c'],
-              ),
-              if (savedLocations.length > 1)
-                PolylineLayer(
-                  polylines: [
-                    Polyline(
-                      points: _getRoutePoints(),
-                      strokeWidth: ResponsiveUtils.isMobile(context)
-                          ? 3.0
-                          : 4.0,
-                      color: Colors.orange,
-                    ),
-                  ],
+      children: [
+        TileLayer(
+          urlTemplate: _tileUrls[_selectedMapType],
+          subdomains: const ['a', 'b', 'c'],
+          userAgentPackageName: 'com.resqlink.app',
+        ),
+        // Route lines for saved locations
+        if (savedLocations.length > 1)
+          PolylineLayer(
+            polylines: [
+              Polyline(
+                points: savedLocations
+                    .map((loc) => LatLng(loc.latitude, loc.longitude))
+                    .toList(),
+                strokeWidth: 3.0,
+                color: ResQLinkTheme.emergencyOrange.withAlpha(
+                  (0.7 * 255).round(),
                 ),
-              MarkerLayer(
-                markers: [
-                  if (_currentLocation != null)
-                    Marker(
-                      width: ResponsiveUtils.getResponsiveMarkerSize(context),
-                      height: ResponsiveUtils.getResponsiveMarkerSize(context),
-                      point: _currentLocation!,
-                      rotate: false,
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          color: Colors.blue,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.my_location,
-                          color: Colors.white,
-                          size: ResponsiveUtils.getResponsiveIconSize(
-                            context,
-                            30,
-                          ),
-                        ),
-                      ),
-                    ),
-                  for (final location in savedLocations)
-                    Marker(
-                      width: ResponsiveUtils.getResponsiveMarkerSize(context),
-                      height: ResponsiveUtils.getResponsiveMarkerSize(context),
-                      point: LatLng(location.latitude, location.longitude),
-                      rotate: false,
-                      child: GestureDetector(
-                        onTap: () => _showLocationDetails(location),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: location.getMarkerColor(),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                          child: Icon(
-                            location.getMarkerIcon(),
-                            color: Colors.white,
-                            size: ResponsiveUtils.getResponsiveIconSize(
-                              context,
-                              30,
+                pattern: StrokePattern.dashed(
+                  segments: [12.0, 6.0],
+                ), // ✅ valid pattern
+              ),
+            ],
+          ),
+
+        // Markers layer
+        MarkerLayer(
+          markers: [
+            // Current location marker
+            if (_currentLocation != null)
+              Marker(
+                width: 80,
+                height: 80,
+                point: _currentLocation!,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Pulse animation for current location
+                    AnimatedBuilder(
+                      animation: _pulseAnimation,
+                      builder: (context, child) {
+                        return Transform.scale(
+                          scale: _pulseAnimation.value,
+                          child: Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _sosMode
+                                  ? ResQLinkTheme.primaryRed.withAlpha(
+                                      (0.3 * 255).round(),
+                                    )
+                                  : Colors.blue.withAlpha((0.3 * 255).round()),
                             ),
                           ),
-                        ),
+                        );
+                      },
+                    ),
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _sosMode
+                            ? ResQLinkTheme.primaryRed
+                            : Colors.blue,
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color:
+                                (_sosMode
+                                        ? ResQLinkTheme.primaryRed
+                                        : Colors.blue)
+                                    .withAlpha((0.5 * 255).round()),
+                            blurRadius: 10,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        _sosMode ? Icons.emergency : Icons.my_location,
+                        color: Colors.white,
+                        size: 24,
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
-            ],
-          ),
-          Positioned(
-            top: responsiveSpacing,
-            left: responsiveSpacing,
-            child: Container(
-              padding: responsivePadding,
-              constraints: BoxConstraints(maxWidth: isMobile ? 200 : 300),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _isLocationServiceEnabled
-                            ? Icons.gps_fixed
-                            : Icons.gps_off,
-                        color: _isLocationServiceEnabled
-                            ? Colors.green
-                            : Colors.red,
-                        size: ResponsiveUtils.getResponsiveIconSize(
-                          context,
-                          16,
-                        ),
-                      ),
-                      SizedBox(
-                        width: ResponsiveUtils.getResponsiveSpacing(context, 4),
-                      ),
-                      Text(
-                        _isLocationServiceEnabled ? 'GPS ON' : 'GPS OFF',
-                        style: TextStyle(
-                          fontSize: ResponsiveUtils.getResponsiveFontSize(
-                            context,
-                            12,
+            // Saved location markers
+            ...savedLocations.map(
+              (location) => Marker(
+                width: 60,
+                height: 60,
+                point: LatLng(location.latitude, location.longitude),
+                child: GestureDetector(
+                  onTap: () => _showLocationDetails(location),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: location.getMarkerColor(),
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: location.getMarkerColor().withAlpha(
+                            (0.5 * 255).round(),
                           ),
-                          fontWeight: FontWeight.bold,
+                          blurRadius: 8,
+                          spreadRadius: 1,
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
+                    child: Icon(
+                      location.getMarkerIcon(),
+                      color: Colors.white,
+                      size: 28,
+                    ),
                   ),
-                  if (_emergencyMode)
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTopControls() {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Status card with width constraint
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: ResQLinkTheme.cardDark.withAlpha((0.9 * 255).round()),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha((0.3 * 255).round()),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          Icons.emergency,
-                          color: Colors.red,
-                          size: ResponsiveUtils.getResponsiveIconSize(
-                            context,
-                            16,
-                          ),
+                          _isConnected ? Icons.cloud_done : Icons.cloud_off,
+                          color: _isConnected
+                              ? ResQLinkTheme.safeGreen
+                              : ResQLinkTheme.emergencyOrange,
+                          size: 20,
                         ),
-                        SizedBox(
-                          width: ResponsiveUtils.getResponsiveSpacing(
-                            context,
-                            4,
-                          ),
-                        ),
+                        const SizedBox(width: 8),
                         Text(
-                          'EMERGENCY',
+                          _isConnected ? 'ONLINE' : 'OFFLINE',
                           style: TextStyle(
-                            fontSize: ResponsiveUtils.getResponsiveFontSize(
-                              context,
-                              12,
-                            ),
+                            color: _isConnected
+                                ? ResQLinkTheme.safeGreen
+                                : ResQLinkTheme.emergencyOrange,
                             fontWeight: FontWeight.bold,
-                            color: Colors.red,
+                            fontSize: 12,
                           ),
                         ),
                       ],
                     ),
-                  if (_lastKnownLocation != null)
-                    Text(
-                      'Last: ${_lastKnownLocation!.timestamp.toString().substring(0, 19)}',
-                      style: TextStyle(
-                        fontSize: ResponsiveUtils.getResponsiveFontSize(
-                          context,
-                          10,
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.battery_full,
+                          color: _batteryLevel > 20
+                              ? ResQLinkTheme.safeGreen
+                              : ResQLinkTheme.primaryRed,
+                          size: 20,
                         ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '$_batteryLevel%',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    FutureBuilder<int>(
+                      future: LocationService.getUnsyncedCount(),
+                      builder: (context, snapshot) {
+                        final count = snapshot.data ?? 0;
+                        return Row(
+                          children: [
+                            Icon(
+                              Icons.sync,
+                              color: count > 0
+                                  ? ResQLinkTheme.warningYellow
+                                  : ResQLinkTheme.safeGreen,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              count > 0 ? '$count pending' : 'Synced',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Control buttons in column
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildControlButton(
+                  icon: Icons.layers,
+                  onPressed: () {
+                    setState(() {
+                      _showMapTypeSelector = !_showMapTypeSelector;
+                    });
+                  },
+                ),
+                const SizedBox(height: 8),
+                _buildControlButton(
+                  icon: Icons.my_location,
+                  onPressed: _centerOnCurrentLocation,
+                ),
+                const SizedBox(height: 8),
+                _buildControlButton(
+                  icon: Icons.save_alt,
+                  onPressed: () => _saveCurrentLocation(),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControlButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: ResQLinkTheme.cardDark.withAlpha((0.9 * 255).round()),
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha((0.3 * 255).round()),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: Colors.white),
+        onPressed: onPressed,
+        iconSize: 24,
+      ),
+    );
+  }
+
+  Widget _buildEmergencyButton() {
+    return Positioned(
+      bottom: 100,
+      right: 20,
+      child: GestureDetector(
+        onLongPress: () {
+          if (!_sosMode) {
+            _activateSOS();
+          } else {
+            _deactivateSOS();
+          }
+        },
+        child: AnimatedBuilder(
+          animation: _sosMode ? _sosAnimation : _pulseAnimation,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: _sosMode ? _sosAnimation.value : 1.0,
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _sosMode
+                      ? ResQLinkTheme.primaryRed
+                      : ResQLinkTheme.darkRed,
+                  boxShadow: [
+                    BoxShadow(
+                      color:
+                          (_sosMode
+                                  ? ResQLinkTheme.primaryRed
+                                  : ResQLinkTheme.darkRed)
+                              .withAlpha((0.6 * 255).round()),
+                      blurRadius: 20,
+                      spreadRadius: _sosMode ? 5 : 2,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.emergency,
+                      color: Colors.white,
+                      size: _sosMode ? 40 : 35,
+                    ),
+                    Text(
+                      _sosMode ? 'ACTIVE' : 'SOS',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  Text(
-                    'Saved: ${savedLocations.length} locations',
-                    style: TextStyle(
-                      fontSize: ResponsiveUtils.getResponsiveFontSize(
-                        context,
-                        10,
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMapTypeSelector() {
+    return Positioned(
+      top: 150,
+      right: 20,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: ResQLinkTheme.cardDark.withAlpha((0.9 * 255).round()),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha((0.3 * 255).round()),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          children: List.generate(_mapTypes.length, (index) {
+            return InkWell(
+              onTap: () {
+                setState(() {
+                  _selectedMapType = index;
+                  _showMapTypeSelector = false;
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: _selectedMapType == index
+                      ? ResQLinkTheme.primaryRed.withAlpha((0.3 * 255).round())
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _mapTypes[index],
+                  style: TextStyle(
+                    color: _selectedMapType == index
+                        ? Colors.white
+                        : Colors.white70,
+                    fontWeight: _selectedMapType == index
+                        ? FontWeight.bold
+                        : FontWeight.normal,
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomInfo() {
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: ResQLinkTheme.surfaceDark.withAlpha((0.95 * 255).round()),
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha((0.3 * 255).round()),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_lastKnownLocation != null) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Current Location',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
                       ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_lastKnownLocation!.latitude.toStringAsFixed(6)}, '
+                        '${_lastKnownLocation!.longitude.toStringAsFixed(6)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text(
+                        'Last Update',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _formatTime(_lastKnownLocation!.timestamp),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 8),
+            const Text(
+              'Long press map to mark locations • Hold SOS for emergency',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showLocationDetails(LocationModel location) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: ResQLinkTheme.surfaceDark,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    location.getMarkerIcon(),
+                    color: location.getMarkerColor(),
+                    size: 32,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _getLocationTypeLabel(location.type),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          _formatTime(location.timestamp),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
-            ),
-          ),
-          if (_statusMessage.isNotEmpty)
-            Positioned(
-              bottom: ResponsiveUtils.isDesktop(context) ? 120 : 100,
-              left: ResponsiveUtils.getResponsiveSpacing(context, 20),
-              right: ResponsiveUtils.getResponsiveSpacing(context, 20),
-              child: Container(
-                padding: ResponsiveUtils.getResponsivePadding(context),
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(8),
+              const SizedBox(height: 20),
+              _buildDetailRow(
+                'Coordinates',
+                '${location.latitude.toStringAsFixed(6)}, ${location.longitude.toStringAsFixed(6)}',
+              ),
+              if (location.message != null)
+                _buildDetailRow('Message', location.message!),
+              if (location.emergencyLevel != null)
+                _buildDetailRow(
+                  'Emergency Level',
+                  location.emergencyLevel!.name.toUpperCase(),
                 ),
-                child: Text(
-                  _statusMessage,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: ResponsiveUtils.getResponsiveFontSize(
-                      context,
-                      14,
+              _buildDetailRow(
+                'Status',
+                location.synced ? 'Synced' : 'Pending sync',
+              ),
+              if (location.batteryLevel != null)
+                _buildDetailRow('Battery', '${location.batteryLevel}%'),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _mapController.move(
+                        LatLng(location.latitude, location.longitude),
+                        16.0,
+                      );
+                    },
+                    icon: const Icon(Icons.map, color: Colors.white70),
+                    label: const Text(
+                      'View on Map',
+                      style: TextStyle(color: Colors.white70),
                     ),
                   ),
-                  textAlign: TextAlign.center,
-                ),
+                  TextButton.icon(
+                    onPressed: () {
+                      // Share location functionality
+                      if (widget.onLocationShare != null) {
+                        widget.onLocationShare!(location);
+                        Navigator.pop(context);
+                        _showMessage('Location shared!', isSuccess: true);
+                      }
+                    },
+                    icon: const Icon(
+                      Icons.share,
+                      color: ResQLinkTheme.primaryRed,
+                    ),
+                    label: const Text(
+                      'Share',
+                      style: TextStyle(color: ResQLinkTheme.primaryRed),
+                    ),
+                  ),
+                ],
               ),
-            ),
-        ],
-      ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
-              context,
+            width: 120,
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white54, fontSize: 14),
             ),
-            height: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
-              context,
-            ),
-            child: FloatingActionButton(
-              heroTag: "emergency_toggle",
-              onPressed: _toggleEmergencyMode,
-              tooltip: _emergencyMode
-                  ? 'Disable Emergency Mode'
-                  : 'Enable Emergency Mode',
-              backgroundColor: _emergencyMode ? Colors.red : Colors.grey,
-              child: Icon(
-                _emergencyMode ? Icons.emergency : Icons.emergency_outlined,
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
                 color: Colors.white,
-                size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-              ),
-            ),
-          ),
-          SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 10)),
-          SizedBox(
-            width: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
-              context,
-            ),
-            height: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
-              context,
-            ),
-            child: FloatingActionButton(
-              heroTag: "share_location",
-              onPressed: _shareCurrentLocation,
-              tooltip: 'Share Current Location',
-              child: Icon(
-                Icons.share_location,
-                size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-              ),
-            ),
-          ),
-          SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 10)),
-          SizedBox(
-            width: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
-              context,
-            ),
-            height: ResponsiveUtils.getResponsiveFloatingActionButtonSize(
-              context,
-            ),
-            child: FloatingActionButton(
-              heroTag: "center_location",
-              onPressed: _centerOnCurrentLocation,
-              tooltip: 'Center on Current Location',
-              child: Icon(
-                Icons.my_location,
-                size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  String _getLocationTypeLabel(LocationType type) {
+    switch (type) {
+      case LocationType.normal:
+        return 'Location Pin';
+      case LocationType.emergency:
+        return 'Emergency';
+      case LocationType.sos:
+        return 'SOS Signal';
+      case LocationType.safezone:
+        return 'Safe Zone';
+      case LocationType.hazard:
+        return 'Hazard Area';
+      case LocationType.evacuationPoint:
+        return 'Evacuation Point';
+      case LocationType.medicalAid:
+        return 'Medical Aid Station';
+      case LocationType.supplies:
+        return 'Supplies/Resources';
+    }
+  }
+
+  String _formatTime(DateTime time) {
+    final now = DateTime.now();
+    final difference = now.difference(time);
+
+    if (difference.inMinutes < 1) {
+      return 'Just now';
+    } else if (difference.inMinutes < 60) {
+      return '${difference.inMinutes}m ago';
+    } else if (difference.inHours < 24) {
+      return '${difference.inHours}h ago';
+    } else {
+      return '${time.day}/${time.month} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    }
   }
 }
