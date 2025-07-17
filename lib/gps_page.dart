@@ -6,6 +6,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:battery_plus/battery_plus.dart';
 import 'dart:async';
 
 // Emergency-optimized theme colors
@@ -313,6 +314,7 @@ class _GpsPageState extends State<GpsPage>
   // Core variables
   final List<LocationModel> savedLocations = [];
   final MapController _mapController = MapController();
+  final Battery _battery = Battery();
 
   // Location and connectivity
   LocationModel? _lastKnownLocation;
@@ -324,6 +326,7 @@ class _GpsPageState extends State<GpsPage>
   EmergencyLevel _currentEmergencyLevel = EmergencyLevel.safe;
   bool _sosMode = false;
   int _batteryLevel = 100;
+  bool _isOnBatteryPowerSaving = false;
 
   // UI states
   bool _isLoading = true;
@@ -409,6 +412,7 @@ class _GpsPageState extends State<GpsPage>
   Future<void> _initializeApp() async {
     try {
       print('[INIT] Starting _initializeApp');
+      if (!mounted) return;
       setState(() {
         _isLoading = true;
         _errorMessage = '';
@@ -429,11 +433,13 @@ class _GpsPageState extends State<GpsPage>
       await _startLocationTracking();
       print('[INIT] Location tracking started');
 
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
     } catch (e, st) {
       print('[INIT ERROR] $e\n$st');
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = 'Failed to initialize GPS: $e';
@@ -554,22 +560,57 @@ class _GpsPageState extends State<GpsPage>
   }
 
   Future<void> _checkBatteryLevel() async {
-    // In a real app, you'd use battery_plus package
-    // For now, we'll simulate battery level
-    setState(() {
-      _batteryLevel = 75; // Simulated value
-    });
+    try {
+      final level = await _battery.batteryLevel;
+      final batteryState = await _battery.batteryState;
+
+      final isInPowerSaving =
+          batteryState == BatteryState.connectedNotCharging || level < 20;
+
+      if (!mounted) return;
+      setState(() {
+        _batteryLevel = level;
+        _isOnBatteryPowerSaving = isInPowerSaving;
+      });
+
+      if (level < 10 && !_sosMode) {
+        _showMessage(
+          'Low battery warning! Consider activating SOS mode.',
+          isWarning: true,
+        );
+      }
+
+      // Subscribe to changes once
+      _battery.onBatteryStateChanged.listen((BatteryState state) {
+        if (mounted) _checkBatteryLevel();
+      });
+    } catch (e) {
+      print('Error checking battery level: $e');
+      if (!mounted) return;
+      setState(() => _batteryLevel = 100);
+    }
   }
 
   Future<void> _startLocationTracking() async {
-    if (!_isLocationServiceEnabled) return;
+    if (!_isLocationServiceEnabled) {
+      await _checkLocationPermission();
+      if (!_isLocationServiceEnabled) return;
+    }
 
     try {
+      // First, try to get current location immediately
       await _getCurrentLocation();
 
-      const locationSettings = LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
+      // Adjust tracking frequency based on battery level
+      final distanceFilter = _batteryLevel < 20 ? 20 : 10; // meters
+      final accuracy = _batteryLevel < 20
+          ? LocationAccuracy.medium
+          : LocationAccuracy.high;
+
+      // Use the calculated values here!
+      final locationSettings = LocationSettings(
+        accuracy: accuracy, // Use the variable
+        distanceFilter: distanceFilter, // Use the variable
       );
 
       _positionStream =
@@ -586,11 +627,22 @@ class _GpsPageState extends State<GpsPage>
               setState(() {
                 _errorMessage = 'GPS tracking error: $error';
               });
+
+              // Try to restart tracking after error
+              Future.delayed(Duration(seconds: 5), () {
+                if (mounted && _isLocationServiceEnabled) {
+                  _startLocationTracking();
+                }
+              });
             },
           );
 
-      // Update location every 30 seconds
-      _locationTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      // Update location periodically (less frequent if low battery)
+      final updateInterval = _batteryLevel < 20
+          ? Duration(minutes: 2)
+          : Duration(seconds: 30);
+
+      _locationTimer = Timer.periodic(updateInterval, (timer) {
         if (mounted && _isLocationServiceEnabled) {
           _getCurrentLocation();
         }
@@ -607,20 +659,38 @@ class _GpsPageState extends State<GpsPage>
     if (!_isLocationServiceEnabled) return;
 
     try {
-      const locationSettings = LocationSettings(
-        accuracy: LocationAccuracy.high,
-        timeLimit: Duration(seconds: 10),
+      // Show loading indicator
+      _showMessage('Getting current location...', isSuccess: false);
+
+      // Configure location settings based on battery level
+      final locationSettings = LocationSettings(
+        accuracy: _batteryLevel < 20
+            ? LocationAccuracy.medium
+            : LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15),
       );
 
       Position position = await Geolocator.getCurrentPosition(
         locationSettings: locationSettings,
       );
+
       _updateCurrentLocation(position);
+      _showMessage('Location updated!', isSuccess: true);
     } catch (e) {
       print('Error getting location: $e');
-      Position? lastPosition = await Geolocator.getLastKnownPosition();
-      if (lastPosition != null) {
-        _updateCurrentLocation(lastPosition);
+
+      // Try to get last known position as fallback
+      try {
+        Position? lastPosition = await Geolocator.getLastKnownPosition();
+        if (lastPosition != null) {
+          _updateCurrentLocation(lastPosition);
+          _showMessage('Using last known location', isWarning: true);
+        } else {
+          _showMessage('Unable to get location', isDanger: true);
+        }
+      } catch (e2) {
+        print('Error getting last known position: $e2');
+        _showMessage('Location service error', isDanger: true);
       }
     }
   }
@@ -775,19 +845,45 @@ class _GpsPageState extends State<GpsPage>
         ? ResQLinkTheme.safeGreen
         : Colors.black87;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+    final overlay = Overlay.of(context);
+    final overlayEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: MediaQuery.of(context).viewPadding.top + 12,
+        left: 16,
+        right: 16,
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(51),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ),
         ),
-        backgroundColor: color,
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
+
+    overlay.insert(overlayEntry);
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) overlayEntry.remove();
+    });
   }
 
   void _showLocationTypeDialog() {
@@ -1173,17 +1269,18 @@ class _GpsPageState extends State<GpsPage>
         padding: const EdgeInsets.all(16.0),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Status card with width constraint
-            Expanded(
+            // Auto-wrapping status card
+            IntrinsicWidth(
               child: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: ResQLinkTheme.cardDark.withAlpha((0.9 * 255).round()),
+                  color: ResQLinkTheme.cardDark.withAlpha(230),
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withAlpha((0.3 * 255).round()),
+                      color: Colors.black.withAlpha(77),
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     ),
@@ -1202,7 +1299,7 @@ class _GpsPageState extends State<GpsPage>
                               : ResQLinkTheme.emergencyOrange,
                           size: 20,
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         Text(
                           _isConnected ? 'ONLINE' : 'OFFLINE',
                           style: TextStyle(
@@ -1225,14 +1322,27 @@ class _GpsPageState extends State<GpsPage>
                               : ResQLinkTheme.primaryRed,
                           size: 20,
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         Text(
                           '$_batteryLevel%',
-                          style: const TextStyle(
-                            color: Colors.white70,
+                          style: TextStyle(
+                            color: _batteryLevel > 20
+                                ? Colors.white70
+                                : ResQLinkTheme.primaryRed,
                             fontSize: 12,
+                            fontWeight: _batteryLevel <= 20
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
                         ),
+                        if (_isOnBatteryPowerSaving) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.power_settings_new,
+                            color: ResQLinkTheme.warningYellow,
+                            size: 16,
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -1249,7 +1359,7 @@ class _GpsPageState extends State<GpsPage>
                                   : ResQLinkTheme.safeGreen,
                               size: 20,
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
                             Text(
                               count > 0 ? '$count pending' : 'Synced',
                               style: const TextStyle(
@@ -1265,10 +1375,9 @@ class _GpsPageState extends State<GpsPage>
                 ),
               ),
             ),
-            const SizedBox(width: 12),
-            // Control buttons in column
+
+            // Control buttons
             Column(
-              mainAxisSize: MainAxisSize.min,
               children: [
                 _buildControlButton(
                   icon: Icons.layers,
@@ -1286,7 +1395,7 @@ class _GpsPageState extends State<GpsPage>
                 const SizedBox(height: 8),
                 _buildControlButton(
                   icon: Icons.save_alt,
-                  onPressed: () => _saveCurrentLocation(),
+                  onPressed: _saveCurrentLocation,
                 ),
               ],
             ),
@@ -1447,7 +1556,7 @@ class _GpsPageState extends State<GpsPage>
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: ResQLinkTheme.surfaceDark.withAlpha((0.95 * 255).round()),
+          color: ResQLinkTheme.surfaceDark.withAlpha((0.90 * 255).round()),
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(24),
             topRight: Radius.circular(24),
