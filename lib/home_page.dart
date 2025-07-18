@@ -1,362 +1,38 @@
+// lib/pages/home_page.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:nearby_connections/nearby_connections.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'dart:convert';
-import 'dart:typed_data';
+import 'message_page.dart';
 import 'gps_page.dart';
-import 'package:resqlink/settings_page.dart';
-import 'package:resqlink/wifi_direct_wrapper.dart';
-import 'package:resqlink/services/database_service.dart';
-import 'package:resqlink/models/message_model.dart';
+import 'settings_page.dart';
+import '../services/p2p_services.dart';
+import '../services/database_service.dart';
+import '../models/message_model.dart';
+import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 
-// WiFi Direct Service Class with Location Sharing
-class WiFiDirectService with ChangeNotifier {
-  final Map<String, List<Map<String, dynamic>>> messageHistory = {};
-  static const String serviceId = "com.example.resqlink.emergency";
-  static const Strategy strategy = Strategy.P2P_CLUSTER;
-  final NearbyWrapper _nearbyWrapper = NearbyWrapper();
-
-  void _addToHistory(String endpointId, Map<String, dynamic> data, bool isMe) {
-    if (!messageHistory.containsKey(endpointId)) {
-      messageHistory[endpointId] = [];
-    }
-    messageHistory[endpointId]!.add({...data, 'isMe': isMe});
-    notifyListeners();
-  }
-
-  String? _localUserName;
-  Map<String, String> _discoveredEndpoints = {};
-  Map<String, String> _connectedEndpoints = {};
-
-  // Callbacks
-  Function(String endpointId, String userName)? onDeviceFound;
-  Function(String endpointId, String userName)? onDeviceConnected;
-  Function(String endpointId)? onDeviceDisconnected;
-  Function(String endpointId, String message)? onMessageReceived;
-
-  // Initialize WiFi Direct
-  Future<bool> initialize(String userName) async {
-    _localUserName = userName;
-    await _requestPermissions();
-    return true;
-  }
-
-  Future<void> _requestPermissions() async {
-    await [
-      Permission.location,
-      Permission.bluetooth,
-      Permission.bluetoothAdvertise,
-      Permission.bluetoothConnect,
-      Permission.nearbyWifiDevices,
-    ].request();
-  }
-
-  // Start advertising (become discoverable)
-  Future<void> startAdvertising() async {
-    try {
-      if (_localUserName == null) {
-        print("Cannot start advertising without a username");
-        return;
-      }
-
-      bool success = await _nearbyWrapper.startAdvertising(
-        _localUserName!,
-        onConnectionInitiated: _onConnectionInitiated,
-        onConnectionResult: _onConnectionResult,
-        onDisconnected: _onDisconnected,
-      );
-
-      if (success) {
-        print("Started advertising as $_localUserName");
-      }
-    } catch (e) {
-      print("Error starting advertising: $e");
-    }
-  }
-
-  // Start discovery (find other devices)
-  Future<void> startDiscovery() async {
-    try {
-      bool success = await _nearbyWrapper.startDiscovery(
-        onEndpointFound: (endpointId, endpointName, serviceId) {
-          _onEndpointFound(endpointId, endpointName, serviceId);
-        },
-        onEndpointLost: (endpointId) {
-          _onEndpointLost(endpointId);
-        },
-      );
-
-      if (success) {
-        print("Started discovery");
-      }
-    } catch (e) {
-      print("Error starting discovery: $e");
-    }
-  }
-
-  // Connect to a discovered device
-  Future<void> connectToDevice(String endpointId) async {
-    try {
-      if (_localUserName == null) {
-        print("Cannot connect without a username");
-        return;
-      }
-
-      bool success = await _nearbyWrapper.requestConnection(
-        _localUserName!,
-        endpointId,
-        onConnectionInitiated: _onConnectionInitiated,
-        onConnectionResult: _onConnectionResult,
-        onDisconnected: _onDisconnected,
-      );
-
-      if (success) {
-        print("Connection requested to $endpointId");
-      }
-    } catch (e) {
-      print("Error connecting to device: $e");
-    }
-  }
-
-  // Send message to connected device
-  Future<void> sendMessage(String endpointId, String message) async {
-    try {
-      final data = {
-        'type': 'message',
-        'from': _localUserName,
-        'message': message,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      };
-
-      final bytes = Uint8List.fromList(utf8.encode(jsonEncode(data)));
-      await _nearbyWrapper.sendBytesPayload(endpointId, bytes);
-      _addToHistory(endpointId, data, true);
-
-      // Save to database
-      final messageModel = MessageModel(
-        endpointId: endpointId,
-        fromUser: _localUserName ?? 'Me',
-        message: message,
-        isMe: true,
-        isEmergency: false,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
-        latitude: 0.0, // Add default latitude or get actual location
-        longitude: 0.0, // Add default longitude or get actual location
-      );
-
-      await DatabaseService.insertMessage(messageModel);
-    } catch (e) {
-      print("Error sending message: $e");
-    }
-  }
-
-  // Send location to connected device
-  Future<void> sendLocation(String endpointId, LocationModel location) async {
-    try {
-      final data = {
-        'type': 'location',
-        'from': _localUserName,
-        'message': 'Shared location: ${location.type.name}',
-        'latitude': location.latitude,
-        'longitude': location.longitude,
-        'location_type': location.type.name,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'location_timestamp': location.timestamp.millisecondsSinceEpoch,
-      };
-
-      final bytes = Uint8List.fromList(utf8.encode(jsonEncode(data)));
-      await _nearbyWrapper.sendBytesPayload(endpointId, bytes);
-
-      // Add to history with location data
-      _addToHistory(endpointId, {...data, 'isMe': true}, true);
-
-      // Also save to database
-      final messageModel = MessageModel(
-        endpointId: endpointId,
-        fromUser: _localUserName ?? 'Me',
-        message: 'Shared location: ${location.type.name}',
-        isMe: true,
-        isEmergency:
-            location.type == LocationType.emergency ||
-            location.type == LocationType.sos,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
-        latitude: location.latitude,
-        longitude: location.longitude,
-      );
-      await DatabaseService.insertMessage(messageModel);
-    } catch (e) {
-      print("Error sending location: $e");
-    }
-  }
-
-  // Broadcast emergency message to all connected devices
-  Future<void> broadcastEmergency(
-    String message,
-    double? latitude,
-    double? longitude,
-  ) async {
-    final emergencyData = {
-      'type': 'emergency',
-      'priority': 1,
-      'from': _localUserName,
-      'message': message,
-      'latitude': latitude,
-      'longitude': longitude,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-
-    for (String endpointId in _connectedEndpoints.keys) {
-      for (int i = 0; i < 3; i++) {
-        try {
-          final bytes = Uint8List.fromList(
-            utf8.encode(jsonEncode(emergencyData)),
-          );
-          await _nearbyWrapper.sendBytesPayload(endpointId, bytes);
-          _addToHistory(endpointId, emergencyData, true);
-
-          // Save to database
-          // Option 1: Check if location is available before creating the message
-          final messageModel = MessageModel(
-            endpointId: endpointId,
-            fromUser: _localUserName ?? 'Me',
-            message: message,
-            isMe: true,
-            isEmergency: true,
-            timestamp: DateTime.now().millisecondsSinceEpoch,
-            latitude: latitude ?? 0.0,
-            longitude: longitude ?? 0.0,
-          );
-
-          await DatabaseService.insertMessage(messageModel);
-          break;
-        } catch (e) {
-          if (i == 2) {
-            print("Failed to send emergency to $endpointId after 3 attempts");
-          }
-        }
-      }
-    }
-  }
-
-  // Event handlers
-  void _onEndpointFound(
-    String endpointId,
-    String endpointName,
-    String serviceId,
-  ) {
-    _discoveredEndpoints[endpointId] = endpointName;
-    onDeviceFound?.call(endpointId, endpointName);
-    print("Found endpoint: $endpointName ($endpointId)");
-  }
-
-  void _onEndpointLost(String endpointId) {
-    String? endpointNameRemoved = _discoveredEndpoints.remove(endpointId);
-    print(
-      "Lost endpoint: $endpointId${endpointNameRemoved != null ? ' ($endpointNameRemoved)' : ''}",
-    );
-
-    if (_connectedEndpoints.containsKey(endpointId)) {
-      _connectedEndpoints.remove(endpointId);
-      onDeviceDisconnected?.call(endpointId);
-    }
-  }
-
-  void _onConnectionInitiated(String endpointId, ConnectionInfo info) {
-    print("Connection initiated with $endpointId");
-    Nearby().acceptConnection(
-      endpointId,
-      onPayLoadRecieved: _onPayloadReceived,
-    );
-  }
-
-  void _onConnectionResult(String endpointId, Status status) {
-    if (status == Status.CONNECTED) {
-      _connectedEndpoints[endpointId] =
-          _discoveredEndpoints[endpointId] ?? "Unknown";
-      onDeviceConnected?.call(endpointId, _connectedEndpoints[endpointId]!);
-      print("Connected to $endpointId");
-    } else {
-      print("Connection failed with $endpointId");
-    }
-  }
-
-  void _onDisconnected(String endpointId) {
-    _connectedEndpoints.remove(endpointId);
-    onDeviceDisconnected?.call(endpointId);
-    print("Disconnected from $endpointId");
-
-    if (_discoveredEndpoints.containsKey(endpointId)) {
-      Future.delayed(Duration(seconds: 2), () {
-        connectToDevice(endpointId);
-      });
-    }
-  }
-
-  void _onPayloadReceived(String endpointId, Payload payload) {
-    if (payload.type == PayloadType.BYTES) {
-      try {
-        String dataString = utf8.decode(payload.bytes!);
-        Map<String, dynamic> data = jsonDecode(dataString);
-
-        if (data['type'] == 'emergency') {
-          triggerEmergencyFeedback();
-        }
-
-        _addToHistory(endpointId, data, false);
-        onMessageReceived?.call(endpointId, dataString);
-
-        // Save to database
-        final messageModel = MessageModel(
-          endpointId: endpointId,
-          fromUser: data['from'] ?? 'Unknown',
-          message: data['message'] ?? '',
-          isMe: false,
-          isEmergency: data['type'] == 'emergency',
-          timestamp: data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
-          latitude: (data['latitude'] ?? 0.0).toDouble(),
-          longitude: (data['longitude'] ?? 0.0).toDouble(),
-        );
-        DatabaseService.insertMessage(messageModel);
-      } catch (e) {
-        print("Error processing payload: $e");
-      }
-    }
-  }
-
-  Future<void> stop() async {
-    await Nearby().stopAdvertising();
-    await Nearby().stopDiscovery();
-    await Nearby().stopAllEndpoints();
-    _discoveredEndpoints.clear();
-    _connectedEndpoints.clear();
-  }
-
-  Map<String, String> get discoveredDevices => Map.from(_discoveredEndpoints);
-  Map<String, String> get connectedDevices => Map.from(_connectedEndpoints);
-  String? get localUserName => _localUserName;
-}
-
-// Main Home Page with Navigation
 class HomePage extends StatefulWidget {
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int selectedIndex = 0;
-  final WiFiDirectService _wifiDirectService = WiFiDirectService();
+  final P2PConnectionService _p2pService = P2PConnectionService();
   LocationModel? _currentLocation;
   String? _userId = "user_${DateTime.now().millisecondsSinceEpoch}";
+  bool _isP2PInitialized = false;
 
   late final List<Widget> pages;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadCurrentLocation();
+    _initializeP2P();
+
     pages = [
       EmergencyHomePage(
-        wifiDirectService: _wifiDirectService,
+        p2pService: _p2pService,
         onLocationUpdate: (location) {
           setState(() {
             _currentLocation = location;
@@ -369,23 +45,161 @@ class _HomePageState extends State<HomePage> {
           setState(() {
             _currentLocation = location;
           });
-          // Optionally show a snackbar or notification
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Location updated: ${location.type.name}'),
-              backgroundColor: location.type == LocationType.emergency
-                  ? Colors.red
-                  : Colors.green,
-            ),
-          );
+          // Share location via P2P
+          _shareLocationViaP2P(location);
         },
       ),
-      MessagePage(
-        wifiDirectService: _wifiDirectService,
-        currentLocation: _currentLocation,
-      ),
+      MessagePage(p2pService: _p2pService, currentLocation: _currentLocation),
       SettingsPage(),
     ];
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Check permissions when app resumes
+      _p2pService.checkAndRequestPermissions();
+    }
+  }
+
+  Future<void> _initializeP2P() async {
+    final userName =
+        "User_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
+    final success = await _p2pService.initialize(userName);
+
+    if (success) {
+      setState(() {
+        _isP2PInitialized = true;
+      });
+
+      // Setup callbacks
+      _p2pService.onMessageReceived = (message) {
+        _showNotification(message);
+      };
+
+      _p2pService.onDeviceConnected = (deviceId, userName) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Connected to $userName'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      };
+
+      _p2pService.onDeviceDisconnected = (deviceId) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Device disconnected'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      };
+
+      // Listen for changes
+      _p2pService.addListener(_updateUI);
+    }
+  }
+
+  void _updateUI() {
+    if (mounted) setState(() {});
+  }
+
+  void _shareLocationViaP2P(LocationModel location) async {
+    if (!_isP2PInitialized) return;
+
+    await _p2pService.sendMessage(
+      message: 'Shared location: ${location.type.name}',
+      type: MessageType.location,
+      latitude: location.latitude,
+      longitude: location.longitude,
+    );
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Location shared via P2P network'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  void _showNotification(P2PMessage message) {
+    if (!mounted) return;
+
+    if (message.type == MessageType.emergency ||
+        message.type == MessageType.sos) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          backgroundColor: Colors.red.shade900,
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Colors.white),
+              SizedBox(width: 8),
+              Text('EMERGENCY ALERT', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'From: ${message.senderName}',
+                style: TextStyle(color: Colors.white),
+              ),
+              SizedBox(height: 8),
+              Text(
+                message.message,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (message.latitude != null && message.longitude != null) ...[
+                SizedBox(height: 8),
+                Text(
+                  'Location: ${message.latitude!.toStringAsFixed(4)}, ${message.longitude!.toStringAsFixed(4)}',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ],
+              SizedBox(height: 8),
+              Text(
+                'Hops: ${message.routePath.length}',
+                style: TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+            if (message.latitude != null && message.longitude != null)
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => GpsPage(userId: _userId)),
+                  );
+                },
+                child: Text(
+                  'View Location',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
   }
 
   Future<void> _loadCurrentLocation() async {
@@ -403,7 +217,9 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
-    _wifiDirectService.stop();
+    WidgetsBinding.instance.removeObserver(this);
+    _p2pService.removeListener(_updateUI);
+    _p2pService.dispose();
     super.dispose();
   }
 
@@ -411,10 +227,9 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    // Update pages with current location when switching tabs
     if (selectedIndex == 2 && pages.length > 2) {
       pages[2] = MessagePage(
-        wifiDirectService: _wifiDirectService,
+        p2pService: _p2pService,
         currentLocation: _currentLocation,
       );
     }
@@ -424,7 +239,6 @@ class _HomePageState extends State<HomePage> {
       child: AnimatedSwitcher(
         duration: Duration(milliseconds: 200),
         child: pages[selectedIndex],
-        layoutBuilder: (currentChild, _) => currentChild!,
       ),
     );
 
@@ -432,7 +246,12 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: Row(
           children: [
-            Image.asset('assets/1.png', height: 30),
+            Image.asset(
+              'assets/1.png',
+              height: 30,
+              errorBuilder: (context, error, stackTrace) =>
+                  Icon(Icons.emergency),
+            ),
             const SizedBox(width: 8),
             const Text(
               "ResQLink",
@@ -444,16 +263,70 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         actions: [
+          // P2P Connection Status
+          Container(
+            margin: EdgeInsets.only(right: 8),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _p2pService.currentRole != P2PRole.none
+                  ? Colors.green
+                  : Colors.grey,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.wifi_tethering, size: 16, color: Colors.white),
+                SizedBox(width: 4),
+                Text(
+                  _p2pService.currentRole == P2PRole.host
+                      ? 'HOST'
+                      : _p2pService.currentRole == P2PRole.client
+                      ? 'CLIENT'
+                      : 'OFF',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (_p2pService.connectedDevices.isNotEmpty) ...[
+                  SizedBox(width: 4),
+                  Container(
+                    padding: EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text(
+                      '${_p2pService.connectedDevices.length}',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          // Online/Offline Status
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: Icon(
+              _p2pService.isOnline ? Icons.cloud_done : Icons.cloud_off,
+              color: _p2pService.isOnline ? Colors.green : Colors.grey,
+            ),
+          ),
           if (_currentLocation != null)
             Padding(
               padding: const EdgeInsets.only(right: 16.0),
-              child: Center(
-                child: Icon(
-                  Icons.location_on,
-                  color: _currentLocation!.type == LocationType.emergency
-                      ? Colors.red
-                      : Colors.green,
-                ),
+              child: Icon(
+                Icons.location_on,
+                color: _currentLocation!.type == LocationType.emergency
+                    ? Colors.red
+                    : Colors.green,
               ),
             ),
         ],
@@ -533,14 +406,14 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// Enhanced Emergency Home Page with WiFi Direct Integration
+// Emergency Home Page
 class EmergencyHomePage extends StatefulWidget {
-  final WiFiDirectService wifiDirectService;
+  final P2PConnectionService p2pService;
   final Function(LocationModel)? onLocationUpdate;
 
   const EmergencyHomePage({
     super.key,
-    required this.wifiDirectService,
+    required this.p2pService,
     this.onLocationUpdate,
   });
 
@@ -552,12 +425,26 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
   LocationModel? _latestLocation;
   bool _isLoadingLocation = true;
   int _unsyncedCount = 0;
+  StreamSubscription<List<BleDiscoveredDevice>>? _scanSubscription;
+  List<BleDiscoveredDevice> _discoveredDevices = [];
 
   @override
   void initState() {
     super.initState();
     _loadLatestLocation();
     _checkUnsyncedLocations();
+    widget.p2pService.addListener(_updateUI);
+  }
+
+  @override
+  void dispose() {
+    _scanSubscription?.cancel();
+    widget.p2pService.removeListener(_updateUI);
+    super.dispose();
+  }
+
+  void _updateUI() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadLatestLocation() async {
@@ -590,14 +477,14 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
 
   Future<void> _checkUnsyncedLocations() async {
     try {
-      final count = await LocationService.getUnsyncedCount();
+      final messages = await DatabaseService.getUnsyncedMessages();
       if (mounted) {
         setState(() {
-          _unsyncedCount = count;
+          _unsyncedCount = messages.length;
         });
       }
     } catch (e) {
-      print('Error checking unsynced locations: $e');
+      print('Error checking unsynced: $e');
     }
   }
 
@@ -606,10 +493,9 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
 
     if (_latestLocation != null) {
       messageController.text =
-          'EMERGENCY! My last location: '
+          'EMERGENCY! My location: '
           'Lat: ${_latestLocation!.latitude.toStringAsFixed(6)}, '
-          'Lon: ${_latestLocation!.longitude.toStringAsFixed(6)} '
-          '(${_formatDateTime(_latestLocation!.timestamp)})';
+          'Lon: ${_latestLocation!.longitude.toStringAsFixed(6)}';
     }
 
     showDialog(
@@ -655,19 +541,12 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
               Navigator.of(dialogContext).pop();
 
               // Send emergency broadcast with location
-              if (_latestLocation != null) {
-                await widget.wifiDirectService.broadcastEmergency(
-                  message,
-                  _latestLocation!.latitude,
-                  _latestLocation!.longitude,
-                );
-              } else {
-                await widget.wifiDirectService.broadcastEmergency(
-                  message,
-                  null,
-                  null,
-                );
-              }
+              await widget.p2pService.sendMessage(
+                message: message,
+                type: MessageType.emergency,
+                latitude: _latestLocation?.latitude,
+                longitude: _latestLocation?.longitude,
+              );
 
               // Check if widget is still mounted before showing snackbar
               if (context.mounted) {
@@ -687,8 +566,407 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
     );
   }
 
+  void _showP2POptionsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text('P2P Network Options'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.group_add, color: Colors.blue),
+              title: Text('Create Emergency Group'),
+              subtitle: Text('Become a host for others to connect'),
+              onTap: () async {
+                Navigator.of(dialogContext).pop();
+                await _createEmergencyGroup();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.search, color: Colors.green),
+              title: Text('Find Nearby Groups'),
+              subtitle: Text('Scan for existing emergency networks'),
+              onTap: () async {
+                Navigator.of(dialogContext).pop();
+                await _startScanning();
+              },
+            ),
+            if (widget.p2pService.knownDevices.isNotEmpty)
+              ListTile(
+                leading: Icon(Icons.history, color: Colors.orange),
+                title: Text('Reconnect to Known Devices'),
+                subtitle: Text(
+                  '${widget.p2pService.knownDevices.length} devices saved',
+                ),
+                onTap: () async {
+                  Navigator.of(dialogContext).pop();
+                  _showKnownDevicesDialog();
+                },
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createEmergencyGroup() async {
+    try {
+      // Check permissions first
+      if (!await widget.p2pService.checkAndRequestPermissions()) {
+        throw Exception('Permissions not granted');
+      }
+
+      // Enable services
+      if (!await widget.p2pService.enableServices()) {
+        throw Exception('Required services not enabled');
+      }
+
+      // Check if still mounted before showing dialog
+      if (!mounted) return;
+
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Creating emergency group...'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await widget.p2pService.createEmergencyGroup();
+
+      // Check if still mounted before using context
+      if (!mounted) return;
+
+      Navigator.of(context).pop(); // Close loading
+
+      // Show success with group info
+      final hostState = widget.p2pService.hostState;
+      if (hostState != null && hostState.ssid != null) {
+        if (!mounted) return;
+        _showGroupCreatedDialog(hostState.ssid!, hostState.preSharedKey ?? '');
+      }
+    } catch (e) {
+      // Check if still mounted before using context
+      if (!mounted) return;
+
+      // Close loading dialog if it's still open
+      if (Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to create group: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showGroupCreatedDialog(String ssid, String psk) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green),
+            SizedBox(width: 8),
+            Text('Group Created!'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Others can now connect using:'),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Network: $ssid',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Password: $psk',
+                    style: TextStyle(fontFamily: 'monospace'),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Share these credentials with nearby devices or let them scan via Bluetooth.',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _startScanning() async {
+    try {
+      // Check permissions
+      if (!await widget.p2pService.checkAndRequestPermissions()) {
+        throw Exception('Permissions not granted');
+      }
+
+      if (!await widget.p2pService.enableServices()) {
+        throw Exception('Required services not enabled');
+      }
+
+      // Check if still mounted before setState
+      if (!mounted) return;
+
+      setState(() {
+        _discoveredDevices.clear();
+      });
+
+      // Start scanning
+      _scanSubscription = await widget.p2pService.startScan((devices) {
+        // Check if still mounted before setState in callback
+        if (mounted) {
+          setState(() {
+            _discoveredDevices = devices;
+          });
+        }
+      });
+
+      // Check if still mounted before showing dialog
+      if (!mounted) return;
+
+      // Show scanning dialog
+      _showScanningDialog();
+    } catch (e) {
+      // Check if still mounted before showing snackbar
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to start scanning: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showScanningDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 16),
+            Text('Scanning for Groups...'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_discoveredDevices.isEmpty)
+              Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  'No devices found yet.\nMake sure other devices are hosting groups.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              )
+            else
+              ...List.generate(_discoveredDevices.length, (index) {
+                final device = _discoveredDevices[index];
+                return ListTile(
+                  leading: Icon(Icons.wifi_tethering, color: Colors.blue),
+                  title: Text(device.deviceName),
+                  subtitle: Text(device.deviceAddress),
+                  trailing: ElevatedButton(
+                    onPressed: () async {
+                      Navigator.of(context).pop();
+                      await _connectToDevice(device);
+                    },
+                    child: Text('Connect'),
+                  ),
+                );
+              }),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _scanSubscription?.cancel();
+              Navigator.of(context).pop();
+            },
+            child: Text('Cancel'),
+          ),
+        ],
+      ),
+    ).then((_) {
+      _scanSubscription?.cancel();
+    });
+  }
+
+  Future<void> _connectToDevice(BleDiscoveredDevice device) async {
+    try {
+      // Show connecting dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Connecting to ${device.deviceName}...'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await widget.p2pService.connectToDevice(device);
+
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close loading
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Connected to ${device.deviceName}!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to connect: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showKnownDevicesDialog() {
+    final knownDevices = widget.p2pService.knownDevices.values.toList();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Known Devices'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: knownDevices.map((device) {
+            final lastSeenAgo = DateTime.now().difference(device.lastSeen);
+            return ListTile(
+              leading: Icon(
+                device.isHost ? Icons.router : Icons.phone_android,
+                color: device.isHost ? Colors.blue : Colors.green,
+              ),
+              title: Text(device.ssid),
+              subtitle: Text('Last seen: ${_formatDuration(lastSeenAgo)} ago'),
+              trailing: ElevatedButton(
+                onPressed: () async {
+                  Navigator.of(context).pop();
+                  await _reconnectToDevice(device);
+                },
+                child: Text('Reconnect'),
+              ),
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _reconnectToDevice(DeviceCredentials device) async {
+    try {
+      await widget.p2pService.connectWithCredentials(device.ssid, device.psk);
+
+      // Check if still mounted before showing snackbar
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reconnected to ${device.ssid}!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      // Check if still mounted before showing error snackbar
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to reconnect: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  String _formatDuration(Duration duration) {
+    if (duration.inDays > 0) return '${duration.inDays}d';
+    if (duration.inHours > 0) return '${duration.inHours}h';
+    if (duration.inMinutes > 0) return '${duration.inMinutes}m';
+    return 'moments';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final connectionInfo = widget.p2pService.getConnectionInfo();
+
     return RefreshIndicator(
       onRefresh: () async {
         await _loadLatestLocation();
@@ -708,17 +986,110 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
               ),
               const SizedBox(height: 20),
               const Text(
-                'Emergency Contact Finder',
+                'Emergency P2P Network',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 10),
               const Text(
-                'Connect with nearby devices offline',
+                'Connect with nearby devices without internet',
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
 
-              // Location display section
+              // P2P Connection Status Card
+              Card(
+                elevation: 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.wifi_tethering,
+                            color: widget.p2pService.currentRole != P2PRole.none
+                                ? Colors.green
+                                : Colors.grey,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'P2P Network Status',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildStatusRow(
+                        Icons.person,
+                        'Device ID',
+                        connectionInfo['deviceId']?.toString().substring(
+                              0,
+                              8,
+                            ) ??
+                            'Not initialized',
+                      ),
+                      _buildStatusRow(
+                        Icons.router,
+                        'Role',
+                        connectionInfo['role']?.toString().toUpperCase() ??
+                            'NONE',
+                        valueColor:
+                            widget.p2pService.currentRole != P2PRole.none
+                            ? Colors.green
+                            : Colors.grey,
+                      ),
+                      _buildStatusRow(
+                        Icons.devices,
+                        'Connected',
+                        '${connectionInfo['connectedDevices'] ?? 0} devices',
+                      ),
+                      _buildStatusRow(
+                        Icons.cloud,
+                        'Sync Status',
+                        connectionInfo['isOnline'] == true
+                            ? 'Online'
+                            : 'Offline',
+                        valueColor: connectionInfo['isOnline'] == true
+                            ? Colors.green
+                            : Colors.orange,
+                      ),
+                      if (connectionInfo['pendingMessages'] != null &&
+                          connectionInfo['pendingMessages'] > 0)
+                        _buildStatusRow(
+                          Icons.hourglass_empty,
+                          'Pending',
+                          '${connectionInfo['pendingMessages']} messages',
+                          valueColor: Colors.orange,
+                        ),
+                      const SizedBox(height: 8),
+                      if (widget.p2pService.currentRole == P2PRole.host &&
+                          connectionInfo['hostInfo'] != null) ...[
+                        Divider(),
+                        Text(
+                          'Group Info:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'SSID: ${connectionInfo['hostInfo']['ssid'] ?? 'N/A'}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // Location Card
               if (_isLoadingLocation)
                 const CircularProgressIndicator()
               else if (_latestLocation != null) ...[
@@ -779,35 +1150,17 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
                           Icons.map,
                           "Latitude",
                           _latestLocation!.latitude.toStringAsFixed(6),
-                          valueColor: Colors.grey,
                         ),
                         _buildLocationRow(
                           Icons.map,
                           "Longitude",
                           _latestLocation!.longitude.toStringAsFixed(6),
-                          valueColor: Colors.grey,
                         ),
                         _buildLocationRow(
                           Icons.access_time,
                           "Time",
                           _formatDateTime(_latestLocation!.timestamp),
-                          valueColor: Colors.grey,
                         ),
-                        _buildLocationRow(
-                          Icons.category,
-                          "Type",
-                          _getLocationTypeLabel(_latestLocation!.type),
-                          valueColor: _getLocationTypeColor(
-                            _latestLocation!.type,
-                          ),
-                        ),
-                        if (!_latestLocation!.synced)
-                          _buildLocationRow(
-                            Icons.cloud_off,
-                            "Status",
-                            "Not synced",
-                            valueColor: Colors.orange,
-                          ),
                         const SizedBox(height: 8),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
@@ -851,73 +1204,63 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
                   ),
                 ),
                 const SizedBox(height: 20),
-              ] else ...[
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      children: [
-                        Icon(Icons.location_off, size: 48, color: Colors.grey),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No location data available',
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
-                        const SizedBox(height: 8),
-                        TextButton.icon(
-                          icon: const Icon(Icons.gps_fixed),
-                          label: const Text('Open GPS Tracker'),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => GpsPage(
-                                  userId:
-                                      'user_${DateTime.now().millisecondsSinceEpoch}',
-                                  onLocationShare: (location) {
-                                    setState(() {
-                                      _latestLocation = location;
-                                    });
-                                    if (widget.onLocationUpdate != null) {
-                                      widget.onLocationUpdate!(location);
-                                    }
-                                  },
-                                ),
-                              ),
-                            ).then((_) {
-                              _loadLatestLocation();
-                              _checkUnsyncedLocations();
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
               ],
 
+              // Action Buttons
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.wifi),
-                  label: const Text('WiFi Direct Emergency Chat'),
+                  icon: const Icon(Icons.wifi_tethering),
+                  label: Text(
+                    widget.p2pService.currentRole == P2PRole.none
+                        ? 'Start P2P Network'
+                        : widget.p2pService.currentRole == P2PRole.host
+                        ? 'Managing Group (${widget.p2pService.connectedDevices.length} connected)'
+                        : 'Connected to Group',
+                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
+                    backgroundColor:
+                        widget.p2pService.currentRole != P2PRole.none
+                        ? Colors.green
+                        : Colors.blue,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => WiFiDirectPage(
-                          wifiDirectService: widget.wifiDirectService,
-                          currentLocation: _latestLocation,
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: widget.p2pService.currentRole == P2PRole.none
+                      ? () => _showP2POptionsDialog(context)
+                      : () async {
+                          // Show connection details or stop P2P
+                          final stop = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: Text('P2P Network Active'),
+                              content: Text(
+                                'Role: ${widget.p2pService.currentRole.name}\n'
+                                'Connected devices: ${widget.p2pService.connectedDevices.length}\n\n'
+                                'Do you want to disconnect?',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(context).pop(false),
+                                  child: Text('Cancel'),
+                                ),
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(context).pop(true),
+                                  child: Text(
+                                    'Disconnect',
+                                    style: TextStyle(color: Colors.red),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          if (stop == true) {
+                            await widget.p2pService.stopP2P();
+                          }
+                        },
                 ),
               ),
 
@@ -927,15 +1270,13 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.emergency),
-                  label: const Text('Quick Emergency Broadcast'),
+                  label: const Text('Send Emergency Broadcast'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.red,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  onPressed: () {
-                    _showQuickEmergencyDialog(context);
-                  },
+                  onPressed: () => _showQuickEmergencyDialog(context),
                 ),
               ),
 
@@ -944,27 +1285,30 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.wifi_tethering),
-                  label: const Text('Scan for Nearby Devices'),
+                  icon: const Icon(Icons.people),
+                  label: const Text('View Connected Devices'),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => NearbyDevicesPage(
-                          wifiDirectService: widget.wifiDirectService,
-                          currentLocation: _latestLocation,
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: widget.p2pService.connectedDevices.isEmpty
+                      ? null
+                      : () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => P2PDevicesPage(
+                                p2pService: widget.p2pService,
+                                currentLocation: _latestLocation,
+                              ),
+                            ),
+                          );
+                        },
                 ),
               ),
 
               const SizedBox(height: 24),
 
+              // Info Cards
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
@@ -975,7 +1319,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
                           Icon(Icons.info_outline, color: Colors.blue),
                           const SizedBox(width: 8),
                           Text(
-                            'Connection Status',
+                            'How Multi-hop Works',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
@@ -985,16 +1329,76 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'WiFi Direct allows you to connect directly with nearby devices without internet. Perfect for emergency situations.',
+                        'Messages automatically relay through connected devices to reach everyone. '
+                        'Each message can hop up to ${P2PConnectionService.maxTtl} times. '
+                        'Duplicate messages are automatically filtered.',
                         style: TextStyle(color: Colors.grey[600]),
                       ),
                     ],
                   ),
                 ),
               ),
+
+              const SizedBox(height: 16),
+
+              if (widget.p2pService.isOnline)
+                Card(
+                  color: Colors.green[50],
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Row(
+                      children: [
+                        Icon(Icons.cloud_done, color: Colors.green),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Online - Messages syncing to cloud',
+                            style: TextStyle(color: Colors.green[800]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildStatusRow(
+    IconData icon,
+    String label,
+    String value, {
+    Color? valueColor,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.grey),
+          const SizedBox(width: 8),
+          Text(
+            '$label: ',
+            style: TextStyle(
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[700],
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? Colors.black87,
+                fontWeight: valueColor != null
+                    ? FontWeight.bold
+                    : FontWeight.normal,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1051,721 +1455,302 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
       return dateTime.toString().substring(0, 19);
     }
   }
-
-  String _getLocationTypeLabel(LocationType type) {
-    switch (type) {
-      case LocationType.normal:
-        return 'Normal';
-      case LocationType.emergency:
-        return 'Emergency';
-      case LocationType.sos:
-        return 'SOS';
-      case LocationType.safezone:
-        return 'Safe Zone';
-      case LocationType.hazard:
-        return 'Hazard';
-      case LocationType.evacuationPoint:
-        return 'Evacuation Point';
-      case LocationType.medicalAid:
-        return 'Medical Aid';
-      case LocationType.supplies:
-        return 'Supplies';
-    }
-  }
-
-  Color _getLocationTypeColor(LocationType type) {
-    switch (type) {
-      case LocationType.emergency:
-      case LocationType.sos:
-      case LocationType.hazard:
-        return Colors.red;
-      case LocationType.safezone:
-      case LocationType.evacuationPoint:
-        return Colors.green;
-      case LocationType.medicalAid:
-        return Colors.blue;
-      case LocationType.supplies:
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
-  }
 }
 
-// Enhanced WiFi Direct Page with Location
-class WiFiDirectPage extends StatefulWidget {
-  final WiFiDirectService wifiDirectService;
+// P2P Devices Page
+class P2PDevicesPage extends StatefulWidget {
+  final P2PConnectionService p2pService;
   final LocationModel? currentLocation;
-  final bool autoEmergency;
 
-  const WiFiDirectPage({
+  const P2PDevicesPage({
     super.key,
-    required this.wifiDirectService,
+    required this.p2pService,
     this.currentLocation,
-    this.autoEmergency = false,
   });
 
   @override
-  State<WiFiDirectPage> createState() => _WiFiDirectPageState();
+  State<P2PDevicesPage> createState() => _P2PDevicesPageState();
 }
 
-class _WiFiDirectPageState extends State<WiFiDirectPage> {
-  final TextEditingController _userNameController = TextEditingController();
-  final TextEditingController _messageController = TextEditingController();
-
-  bool _isInitialized = false;
-  bool _isAdvertising = false;
-  bool _isDiscovering = false;
-  List<String> _messages = [];
-
+class _P2PDevicesPageState extends State<P2PDevicesPage> {
   @override
   void initState() {
     super.initState();
-    _setupCallbacks();
-
-    if (widget.autoEmergency) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showEmergencySetup();
-      });
-    }
-  }
-
-  void _setupCallbacks() {
-    widget.wifiDirectService.onDeviceFound = (endpointId, userName) {
-      setState(() {});
-      _showSnackBar("Found device: $userName");
-    };
-
-    widget.wifiDirectService.onDeviceConnected = (endpointId, userName) {
-      setState(() {});
-      _showSnackBar("Connected to: $userName");
-    };
-
-    widget.wifiDirectService.onDeviceDisconnected = (endpointId) {
-      setState(() {});
-      _showSnackBar("Device disconnected");
-    };
-
-    widget.wifiDirectService.onMessageReceived = (endpointId, messageData) {
-      try {
-        Map<String, dynamic> data = jsonDecode(messageData);
-        String displayMessage = "${data['from']}: ${data['message']}";
-
-        if (data['type'] == 'emergency') {
-          displayMessage =
-              "🚨 EMERGENCY from ${data['from']}: ${data['message']}";
-        } else if (data['type'] == 'location') {
-          displayMessage =
-              "📍 ${data['from']} shared location: ${data['latitude']}, ${data['longitude']}";
-        }
-
-        setState(() {
-          _messages.add(displayMessage);
-        });
-      } catch (e) {
-        print("Error parsing message: $e");
-      }
-    };
-  }
-
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  void _showEmergencySetup() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('🚨 Emergency Mode'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Enter your name to start emergency broadcasting:'),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _userNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Your Name',
-                  border: OutlineInputBorder(),
-                ),
-                autofocus: true,
-              ),
-            ],
-          ),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text(
-                'Start Emergency Mode',
-                style: TextStyle(color: Colors.white),
-              ),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _initializeEmergencyMode();
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _initializeEmergencyMode() async {
-    if (_userNameController.text.isEmpty) {
-      _userNameController.text = "Emergency User";
-    }
-
-    await _initialize();
-    if (_isInitialized) {
-      await _startAdvertising();
-      await _startDiscovery();
-      await _sendEmergencyBroadcast();
-    }
-  }
-
-  Future<void> _initialize() async {
-    if (_userNameController.text.isEmpty) {
-      _showSnackBar("Please enter your name");
-      return;
-    }
-
-    bool success = await widget.wifiDirectService.initialize(
-      _userNameController.text,
-    );
-    if (success) {
-      setState(() {
-        _isInitialized = true;
-      });
-      _showSnackBar("WiFi Direct initialized");
-    }
-  }
-
-  Future<void> _startAdvertising() async {
-    await widget.wifiDirectService.startAdvertising();
-    setState(() {
-      _isAdvertising = true;
-    });
-  }
-
-  Future<void> _startDiscovery() async {
-    await widget.wifiDirectService.startDiscovery();
-    setState(() {
-      _isDiscovering = true;
-    });
-  }
-
-  Future<void> _sendBroadcastMessage() async {
-    if (_messageController.text.isEmpty) return;
-
-    String message = _messageController.text;
-    _messageController.clear();
-
-    for (String endpointId in widget.wifiDirectService.connectedDevices.keys) {
-      await widget.wifiDirectService.sendMessage(endpointId, message);
-    }
-
-    setState(() {
-      _messages.add("You: $message");
-    });
-  }
-
-  Future<void> _sendEmergencyBroadcast() async {
-    await widget.wifiDirectService.broadcastEmergency(
-      "EMERGENCY ASSISTANCE NEEDED!",
-      widget.currentLocation?.latitude,
-      widget.currentLocation?.longitude,
-    );
-
-    setState(() {
-      _messages.add("🚨 You: EMERGENCY BROADCAST SENT");
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('WiFi Direct Emergency Chat'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.warning, color: Colors.red),
-            onPressed: _isInitialized ? _sendEmergencyBroadcast : null,
-            tooltip: 'Send Emergency Broadcast',
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            if (!_isInitialized) ...[
-              TextField(
-                controller: _userNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Your Name',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _initialize,
-                  child: const Text('Initialize WiFi Direct'),
-                ),
-              ),
-            ] else ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isAdvertising ? null : _startAdvertising,
-                      child: Text(
-                        _isAdvertising ? 'Advertising...' : 'Start Advertising',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isDiscovering ? null : _startDiscovery,
-                      child: Text(
-                        _isDiscovering ? 'Discovering...' : 'Start Discovery',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _isAdvertising && _isDiscovering
-                            ? Icons.wifi
-                            : Icons.wifi_off,
-                        color: _isAdvertising && _isDiscovering
-                            ? Colors.green
-                            : Colors.red,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Discovered: ${widget.wifiDirectService.discoveredDevices.length} | '
-                        'Connected: ${widget.wifiDirectService.connectedDevices.length}',
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              const Text(
-                'Discovered Devices:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              SizedBox(
-                height: 120,
-                child: widget.wifiDirectService.discoveredDevices.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'No devices found. Make sure both devices are scanning.',
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount:
-                            widget.wifiDirectService.discoveredDevices.length,
-                        itemBuilder: (context, index) {
-                          String endpointId = widget
-                              .wifiDirectService
-                              .discoveredDevices
-                              .keys
-                              .elementAt(index);
-                          String userName = widget
-                              .wifiDirectService
-                              .discoveredDevices[endpointId]!;
-                          bool isConnected = widget
-                              .wifiDirectService
-                              .connectedDevices
-                              .containsKey(endpointId);
-
-                          return ListTile(
-                            leading: Icon(
-                              isConnected ? Icons.wifi : Icons.wifi_off,
-                            ),
-                            title: Text(userName),
-                            trailing: isConnected
-                                ? const Text(
-                                    'Connected',
-                                    style: TextStyle(color: Colors.green),
-                                  )
-                                : ElevatedButton(
-                                    onPressed: () => widget.wifiDirectService
-                                        .connectToDevice(endpointId),
-                                    child: const Text('Connect'),
-                                  ),
-                          );
-                        },
-                      ),
-              ),
-
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Messages:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Expanded(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: _messages.isEmpty
-                            ? const Center(child: Text('No messages yet'))
-                            : ListView.builder(
-                                itemCount: _messages.length,
-                                itemBuilder: (context, index) {
-                                  return Padding(
-                                    padding: const EdgeInsets.all(8.0),
-                                    child: Text(
-                                      _messages[index],
-                                      style: TextStyle(
-                                        color: _messages[index].contains('🚨')
-                                            ? Colors.red
-                                            : _messages[index].contains('📍')
-                                            ? Colors.blue
-                                            : null,
-                                        fontWeight:
-                                            _messages[index].contains('🚨')
-                                            ? FontWeight.bold
-                                            : null,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      decoration: const InputDecoration(
-                        hintText: 'Type your message...',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _sendBroadcastMessage,
-                    child: const Text('Send'),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+    widget.p2pService.addListener(_updateUI);
   }
 
   @override
   void dispose() {
-    _userNameController.dispose();
-    _messageController.dispose();
+    widget.p2pService.removeListener(_updateUI);
     super.dispose();
   }
-}
 
-// Enhanced Nearby Devices Page with Location
-class NearbyDevicesPage extends StatefulWidget {
-  final WiFiDirectService wifiDirectService;
-  final LocationModel? currentLocation;
-
-  const NearbyDevicesPage({
-    super.key,
-    required this.wifiDirectService,
-    this.currentLocation,
-  });
-
-  @override
-  State<NearbyDevicesPage> createState() => _NearbyDevicesPageState();
-}
-
-class _NearbyDevicesPageState extends State<NearbyDevicesPage> {
-  @override
-  void initState() {
-    super.initState();
-    _setupCallbacks();
-  }
-
-  void _setupCallbacks() {
-    widget.wifiDirectService.onDeviceFound = (endpointId, userName) {
-      setState(() {});
-    };
-
-    widget.wifiDirectService.onDeviceConnected = (endpointId, userName) {
-      setState(() {});
-    };
-
-    widget.wifiDirectService.onDeviceDisconnected = (endpointId) {
-      setState(() {});
-    };
+  void _updateUI() {
+    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
+    final connectedDevices = widget.p2pService.connectedDevices;
+    final connectionInfo = widget.p2pService.getConnectionInfo();
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Nearby Devices')),
-      body: Column(
-        children: [
-          Card(
-            margin: const EdgeInsets.all(16),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.wifi_tethering, color: Colors.blue),
-                      const SizedBox(width: 8),
-                      Text(
-                        'WiFi Direct Status',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Discovered: ${widget.wifiDirectService.discoveredDevices.length} devices\n'
-                    'Connected: ${widget.wifiDirectService.connectedDevices.length} devices',
-                  ),
-                ],
+      appBar: AppBar(
+        title: Text('P2P Network Devices'),
+        actions: [
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(
+              child: Text(
+                'Role: ${widget.p2pService.currentRole.name.toUpperCase()}',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
           ),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
+        ],
+      ),
+      body: Column(
+        children: [
+          // Network Info
+          Container(
+            padding: EdgeInsets.all(16),
+            color: Theme.of(
+              context,
+            ).primaryColor.withAlpha((0.1 * 255).round()),
+            child: Column(
               children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.wifi),
-                    label: const Text('Open WiFi Direct Chat'),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => WiFiDirectPage(
-                            wifiDirectService: widget.wifiDirectService,
-                            currentLocation: widget.currentLocation,
-                          ),
-                        ),
-                      );
-                    },
+                if (widget.p2pService.currentRole == P2PRole.host &&
+                    connectionInfo['hostInfo'] != null) ...[
+                  Text(
+                    'Hosting Group: ${connectionInfo['hostInfo']['ssid']}',
+                    style: TextStyle(fontWeight: FontWeight.bold),
                   ),
+                  SizedBox(height: 4),
+                ],
+                Text(
+                  'Connected: ${connectedDevices.length} devices | '
+                  'Messages processed: ${connectionInfo['processedMessages'] ?? 0}',
                 ),
               ],
             ),
           ),
 
-          const SizedBox(height: 16),
-
+          // Connected Devices List
           Expanded(
-            child: widget.wifiDirectService.discoveredDevices.isEmpty
+            child: connectedDevices.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(
-                          Icons.bluetooth_searching,
-                          size: 100,
-                          color: Colors.blue,
+                        Icon(Icons.devices_other, size: 64, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text(
+                          'No devices connected',
+                          style: TextStyle(fontSize: 18, color: Colors.grey),
                         ),
-                        const SizedBox(height: 20),
-                        const Text('No devices found yet'),
-                        const SizedBox(height: 10),
-                        const Text(
-                          'Start WiFi Direct to discover nearby devices',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey),
+                        SizedBox(height: 8),
+                        Text(
+                          widget.p2pService.currentRole == P2PRole.host
+                              ? 'Waiting for devices to connect...'
+                              : 'Connected to host only',
+                          style: TextStyle(color: Colors.grey[600]),
                         ),
                       ],
                     ),
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount:
-                        widget.wifiDirectService.discoveredDevices.length,
+                    padding: EdgeInsets.all(16),
+                    itemCount: connectedDevices.length,
                     itemBuilder: (context, index) {
-                      String endpointId = widget
-                          .wifiDirectService
-                          .discoveredDevices
-                          .keys
-                          .elementAt(index);
-                      String userName = widget
-                          .wifiDirectService
-                          .discoveredDevices[endpointId]!;
-                      bool isConnected = widget
-                          .wifiDirectService
-                          .connectedDevices
-                          .containsKey(endpointId);
+                      final deviceId = connectedDevices.keys.elementAt(index);
+                      final device = connectedDevices[deviceId]!;
+                      final connectedDuration = DateTime.now().difference(
+                        device.connectedAt,
+                      );
 
                       return Card(
+                        margin: EdgeInsets.only(bottom: 12),
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: isConnected
-                                ? Colors.green
-                                : Colors.grey,
+                            backgroundColor: device.isHost
+                                ? Colors.blue
+                                : Colors.green,
                             child: Icon(
-                              isConnected ? Icons.person : Icons.person_outline,
+                              device.isHost
+                                  ? Icons.router
+                                  : Icons.phone_android,
                               color: Colors.white,
                             ),
                           ),
-                          title: Text(userName),
-                          subtitle: Text(
-                            isConnected ? 'Connected' : 'Available',
+                          title: Text(
+                            device.name,
+                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
-                          trailing: isConnected
-                              ? ElevatedButton(
-                                  child: const Text("Message"),
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => ChatScreen(
-                                          userName: userName,
-                                          endpointId: endpointId,
-                                          wifiDirectService:
-                                              widget.wifiDirectService,
-                                          currentLocation:
-                                              widget.currentLocation,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                )
-                              : ElevatedButton(
-                                  child: const Text("Connect"),
-                                  onPressed: () {
-                                    widget.wifiDirectService.connectToDevice(
-                                      endpointId,
-                                    );
-                                  },
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('ID: ${device.id.substring(0, 8)}...'),
+                              Text(
+                                'Connected: ${_formatDuration(connectedDuration)}',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                          trailing: IconButton(
+                            icon: Icon(Icons.chat),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => P2PChatScreen(
+                                    p2pService: widget.p2pService,
+                                    targetDeviceId: device.id,
+                                    targetDeviceName: device.name,
+                                    currentLocation: widget.currentLocation,
+                                  ),
                                 ),
+                              );
+                            },
+                          ),
                         ),
                       );
                     },
                   ),
           ),
+
+          // Bottom Stats
+          Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              border: Border(top: BorderSide(color: Colors.grey[300]!)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildStatItem(
+                  Icons.message,
+                  'Pending',
+                  '${connectionInfo['pendingMessages'] ?? 0}',
+                ),
+                _buildStatItem(
+                  Icons.history,
+                  'Known',
+                  '${connectionInfo['knownDevices'] ?? 0}',
+                ),
+                _buildStatItem(
+                  Icons.cloud,
+                  'Status',
+                  connectionInfo['isOnline'] == true ? 'Online' : 'Offline',
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
+
+  Widget _buildStatItem(IconData icon, String label, String value) {
+    return Column(
+      children: [
+        Icon(icon, color: Colors.grey[600]),
+        SizedBox(height: 4),
+        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        Text(value, style: TextStyle(fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    if (duration.inHours > 0) {
+      return '${duration.inHours}h ${duration.inMinutes % 60}m';
+    }
+    if (duration.inMinutes > 0) return '${duration.inMinutes}m';
+    return '${duration.inSeconds}s';
+  }
 }
 
-// Enhanced Chat Screen with Location Sharing
-class ChatScreen extends StatefulWidget {
-  final String userName;
-  final String endpointId;
-  final WiFiDirectService wifiDirectService;
+// P2P Chat Screen
+class P2PChatScreen extends StatefulWidget {
+  final P2PConnectionService p2pService;
+  final String targetDeviceId;
+  final String targetDeviceName;
   final LocationModel? currentLocation;
 
-  const ChatScreen({
+  const P2PChatScreen({
     super.key,
-    required this.userName,
-    required this.endpointId,
-    required this.wifiDirectService,
+    required this.p2pService,
+    required this.targetDeviceId,
+    required this.targetDeviceName,
     this.currentLocation,
   });
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  State<P2PChatScreen> createState() => _P2PChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _P2PChatScreenState extends State<P2PChatScreen> {
   final TextEditingController _messageController = TextEditingController();
-  List<Map<String, dynamic>> _chatMessages = [];
+  final ScrollController _scrollController = ScrollController();
+  List<MessageModel> _messages = [];
   LocationModel? _currentLocation;
 
   @override
   void initState() {
     super.initState();
     _currentLocation = widget.currentLocation;
-    _setupMessageListener();
-    _loadLatestLocation();
+    _loadMessages();
+    widget.p2pService.addListener(_onNewMessage);
   }
 
-  Future<void> _loadLatestLocation() async {
-    try {
-      final location = await LocationService.getLastKnownLocation();
-      if (mounted && location != null) {
-        setState(() {
-          _currentLocation = location;
-        });
-      }
-    } catch (e) {
-      print('Error loading location: $e');
+  @override
+  void dispose() {
+    widget.p2pService.removeListener(_onNewMessage);
+    _messageController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onNewMessage() {
+    _loadMessages();
+  }
+
+  Future<void> _loadMessages() async {
+    final messages = await DatabaseService.getMessages(widget.targetDeviceId);
+    if (mounted) {
+      setState(() {
+        _messages = messages;
+      });
+      _scrollToBottom();
     }
   }
 
-  void _setupMessageListener() {
-    widget.wifiDirectService.onMessageReceived = (endpointId, messageData) {
-      if (endpointId == widget.endpointId) {
-        try {
-          Map<String, dynamic> data = jsonDecode(messageData);
-          setState(() {
-            _chatMessages.add({
-              'message': data['message'],
-              'from': data['from'],
-              'type': data['type'],
-              'timestamp': data['timestamp'],
-              'latitude': data['latitude'],
-              'longitude': data['longitude'],
-              'location_type': data['location_type'],
-              'isMe': false,
-            });
-          });
-        } catch (e) {
-          print("Error parsing message: $e");
-        }
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
       }
-    };
+    });
   }
 
   Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty) return;
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
 
-    String message = _messageController.text.trim();
     _messageController.clear();
 
-    setState(() {
-      _chatMessages.add({
-        'message': message,
-        'from': widget.wifiDirectService.localUserName,
-        'type': 'message',
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'isMe': true,
-      });
-    });
+    await widget.p2pService.sendMessage(
+      message: text,
+      type: MessageType.text,
+      targetDeviceId: widget.targetDeviceId,
+    );
 
-    await widget.wifiDirectService.sendMessage(widget.endpointId, message);
+    await _loadMessages();
   }
 
   Future<void> _sendLocation() async {
@@ -1779,323 +1764,296 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    setState(() {
-      _chatMessages.add({
-        'message': 'Shared location',
-        'from': widget.wifiDirectService.localUserName,
-        'type': 'location',
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'latitude': _currentLocation!.latitude,
-        'longitude': _currentLocation!.longitude,
-        'location_type': _currentLocation!.type.name,
-        'isMe': true,
-      });
-    });
-
-    await widget.wifiDirectService.sendLocation(
-      widget.endpointId,
-      _currentLocation!,
+    await widget.p2pService.sendMessage(
+      message: 'Shared location: ${_currentLocation!.type.name}',
+      type: MessageType.location,
+      targetDeviceId: widget.targetDeviceId,
+      latitude: _currentLocation!.latitude,
+      longitude: _currentLocation!.longitude,
     );
+
+    await _loadMessages();
   }
 
   Future<void> _sendEmergencyMessage() async {
-    setState(() {
-      _chatMessages.add({
-        'message': 'EMERGENCY ASSISTANCE NEEDED!',
-        'from': widget.wifiDirectService.localUserName,
-        'type': 'emergency',
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'latitude': _currentLocation?.latitude,
-        'longitude': _currentLocation?.longitude,
-        'isMe': true,
-      });
-    });
-
-    await widget.wifiDirectService.broadcastEmergency(
-      'EMERGENCY ASSISTANCE NEEDED!',
-      _currentLocation?.latitude,
-      _currentLocation?.longitude,
+    await widget.p2pService.sendMessage(
+      message: 'EMERGENCY ASSISTANCE NEEDED!',
+      type: MessageType.sos,
+      targetDeviceId: widget.targetDeviceId,
+      latitude: _currentLocation?.latitude,
+      longitude: _currentLocation?.longitude,
     );
-  }
 
-  void _showLocationOnMap(double latitude, double longitude) {
-    // Navigate to GPS page centered on the shared location
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => GpsPage(
-          userId: 'viewer',
-          // You can pass the location to center the map
-          // This would require modifying GpsPage to accept initial coordinates
-        ),
-      ),
-    );
+    await _loadMessages();
   }
 
   @override
   Widget build(BuildContext context) {
+    final isConnected = widget.p2pService.connectedDevices.containsKey(
+      widget.targetDeviceId,
+    );
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.userName),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.targetDeviceName),
+            Text(
+              isConnected ? 'Connected' : 'Disconnected',
+              style: TextStyle(
+                fontSize: 12,
+                color: isConnected ? Colors.green : Colors.red,
+              ),
+            ),
+          ],
+        ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.location_on),
-            onPressed: _sendLocation,
-            tooltip: 'Share Location',
-          ),
-          IconButton(
-            icon: const Icon(Icons.emergency, color: Colors.red),
-            onPressed: _sendEmergencyMessage,
-            tooltip: 'Send Emergency',
-          ),
+          if (isConnected) ...[
+            IconButton(
+              icon: Icon(Icons.location_on),
+              onPressed: _currentLocation != null ? _sendLocation : null,
+              tooltip: 'Share Location',
+            ),
+            IconButton(
+              icon: Icon(Icons.emergency, color: Colors.red),
+              onPressed: _sendEmergencyMessage,
+              tooltip: 'Send Emergency',
+            ),
+          ],
         ],
       ),
       body: Column(
         children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(8),
-            color:
-                widget.wifiDirectService.connectedDevices.containsKey(
-                  widget.endpointId,
-                )
-                ? Colors.green.withAlpha((0.1 * 255).round())
-                : Colors.red.withAlpha((0.1 * 255).round()),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  widget.wifiDirectService.connectedDevices.containsKey(
-                        widget.endpointId,
-                      )
-                      ? Icons.circle
-                      : Icons.circle_outlined,
-                  size: 12,
-                  color:
-                      widget.wifiDirectService.connectedDevices.containsKey(
-                        widget.endpointId,
-                      )
-                      ? Colors.green
-                      : Colors.red,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  widget.wifiDirectService.connectedDevices.containsKey(
-                        widget.endpointId,
-                      )
-                      ? 'Connected'
-                      : 'Disconnected',
-                  style: TextStyle(
-                    color:
-                        widget.wifiDirectService.connectedDevices.containsKey(
-                          widget.endpointId,
-                        )
-                        ? Colors.green
-                        : Colors.red,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
+          // Messages List
           Expanded(
-            child: _chatMessages.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No messages yet. Start the conversation!',
-                      style: TextStyle(color: Colors.grey),
+            child: _messages.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline,
+                          size: 48,
+                          color: Colors.grey,
+                        ),
+                        SizedBox(height: 16),
+                        Text(
+                          'No messages yet',
+                          style: TextStyle(fontSize: 16, color: Colors.grey),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Start a conversation',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
                     ),
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _chatMessages.length,
-                    itemBuilder: (context, index) {
-                      final message = _chatMessages[index];
-                      final isMe = message['isMe'] as bool;
-                      final isEmergency = message['type'] == 'emergency';
-                      final isLocation = message['type'] == 'location';
-
-                      return Align(
-                        alignment: isMe
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          padding: const EdgeInsets.all(12),
-                          constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width * 0.7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isEmergency
-                                ? Colors.red
-                                : isLocation
-                                ? Colors.blue.shade700
-                                : isMe
-                                ? Colors.blue
-                                : Colors.grey[300],
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (isEmergency)
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.warning,
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'EMERGENCY',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              if (isLocation) ...[
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.location_on,
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Location Shared',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                if (message['latitude'] != null &&
-                                    message['longitude'] != null)
-                                  InkWell(
-                                    onTap: () => _showLocationOnMap(
-                                      message['latitude'],
-                                      message['longitude'],
-                                    ),
-                                    child: Container(
-                                      padding: EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withAlpha(
-                                          (0.2 * 255).round(),
-                                        ),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.map,
-                                            color: Colors.white,
-                                            size: 16,
-                                          ),
-                                          SizedBox(width: 4),
-                                          Flexible(
-                                            child: Text(
-                                              'Lat: ${message['latitude'].toStringAsFixed(4)}, '
-                                              'Lon: ${message['longitude'].toStringAsFixed(4)}',
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                              ] else
-                                Text(
-                                  message['message'],
-                                  style: TextStyle(
-                                    color: isEmergency || isMe || isLocation
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    fontWeight: isEmergency
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                  ),
-                                ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _formatTimestamp(message['timestamp']),
-                                style: TextStyle(
-                                  color: isEmergency || isMe || isLocation
-                                      ? Colors.white70
-                                      : Colors.black54,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
+                    controller: _scrollController,
+                    padding: EdgeInsets.all(16),
+                    itemCount: _messages.length,
+                    itemBuilder: (_, index) {
+                      final msg = _messages[index];
+                      return _buildMessageBubble(msg);
                     },
                   ),
           ),
 
+          // Input Area
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
                   color: Colors.black12,
                   blurRadius: 4,
-                  offset: const Offset(0, -2),
+                  offset: Offset(0, -2),
                 ),
               ],
             ),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.location_on),
-                  onPressed: _currentLocation != null ? _sendLocation : null,
-                  color: _currentLocation != null ? Colors.blue : Colors.grey,
-                  tooltip: 'Share Location',
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    decoration: const InputDecoration(
-                      hintText: 'Type a message...',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
+            child: SafeArea(
+              child: Row(
+                children: [
+                  if (isConnected && _currentLocation != null)
+                    IconButton(
+                      icon: Icon(
+                        Icons.location_on,
+                        color: Theme.of(context).primaryColor,
                       ),
+                      onPressed: _sendLocation,
+                      tooltip: 'Share Location',
                     ),
-                    onSubmitted: (_) => _sendMessage(),
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      enabled: isConnected,
+                      decoration: InputDecoration(
+                        hintText: isConnected
+                            ? 'Type a message...'
+                            : 'Device disconnected',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
+                      onSubmitted: isConnected ? (_) => _sendMessage() : null,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: _sendMessage,
-                  style: ElevatedButton.styleFrom(
-                    shape: const CircleBorder(),
-                    padding: const EdgeInsets.all(16),
+                  SizedBox(width: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: isConnected
+                          ? Theme.of(context).primaryColor
+                          : Colors.grey,
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      onPressed: isConnected ? _sendMessage : null,
+                      icon: Icon(Icons.send, color: Colors.white),
+                    ),
                   ),
-                  child: const Icon(Icons.send),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble(MessageModel msg) {
+    final isMe = msg.isMe;
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        margin: EdgeInsets.symmetric(vertical: 4),
+        padding: EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: msg.isEmergency
+              ? Colors.red.shade600
+              : msg.type == 'location'
+              ? Colors.blue.shade700
+              : isMe
+              ? Theme.of(context).primaryColor
+              : Colors.grey[300],
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha((0.1 * 255).round()),
+              blurRadius: 4,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (msg.isEmergency) ...[
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.warning, color: Colors.white, size: 16),
+                  SizedBox(width: 4),
+                  Text(
+                    'EMERGENCY',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 4),
+            ],
+            if (msg.type == 'location' &&
+                msg.latitude != null &&
+                msg.longitude != null) ...[
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.location_on, color: Colors.white, size: 16),
+                  SizedBox(width: 4),
+                  Text(
+                    'Location Shared',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 4),
+              InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => GpsPage(userId: 'viewer'),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha((0.2 * 255).round()),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.map, color: Colors.white, size: 16),
+                      SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'Lat: ${msg.latitude!.toStringAsFixed(4)}, '
+                          'Lon: ${msg.longitude!.toStringAsFixed(4)}',
+                          style: TextStyle(color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ] else
+              Text(
+                msg.message,
+                style: TextStyle(
+                  color: (isMe || msg.isEmergency || msg.type == 'location')
+                      ? Colors.white
+                      : Colors.black87,
+                  fontSize: 16,
+                ),
+              ),
+            SizedBox(height: 4),
+            Text(
+              _formatTimestamp(msg.timestamp),
+              style: TextStyle(
+                color: (isMe || msg.isEmergency || msg.type == 'location')
+                    ? Colors.white70
+                    : Colors.black54,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2103,104 +2061,11 @@ class _ChatScreenState extends State<ChatScreen> {
   String _formatTimestamp(int timestamp) {
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
     final now = DateTime.now();
-    final difference = now.difference(date);
+    final diff = now.difference(date);
 
-    if (difference.inMinutes < 1) {
-      return 'Just now';
-    } else if (difference.inHours < 1) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inDays < 1) {
-      return '${difference.inHours}h ago';
-    } else {
-      return '${date.day}/${date.month} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-    }
-  }
-
-  @override
-  void dispose() {
-    _messageController.dispose();
-    super.dispose();
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${date.day}/${date.month} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
   }
 }
-
-// Helper function for emergency feedback
-void triggerEmergencyFeedback() {
-  // This would trigger vibration and sound alerts
-  // Implementation depends on platform-specific packages
-  print("EMERGENCY ALERT TRIGGERED!");
-}
-
-// Update MessagePage to support location
-class MessagePage extends StatelessWidget {
-  final WiFiDirectService wifiDirectService;
-  final LocationModel? currentLocation;
-
-  const MessagePage({
-    super.key,
-    required this.wifiDirectService,
-    this.currentLocation,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.message, size: 80, color: Colors.blue),
-          SizedBox(height: 20),
-          Text(
-            'Messages',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          ),
-          SizedBox(height: 20),
-          ElevatedButton.icon(
-            icon: Icon(Icons.chat),
-            label: Text('Open WiFi Direct Chat'),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => WiFiDirectPage(
-                    wifiDirectService: wifiDirectService,
-                    currentLocation: currentLocation,
-                  ),
-                ),
-              );
-            },
-          ),
-          if (currentLocation != null) ...[
-            SizedBox(height: 16),
-            Card(
-              margin: EdgeInsets.symmetric(horizontal: 32),
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.location_on,
-                      color: currentLocation!.type == LocationType.emergency
-                          ? Colors.red
-                          : Colors.green,
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Current Location Available',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      'Ready to share in chats',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-enum Menu { itemOne, itemTwo, itemThree }
