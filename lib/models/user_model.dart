@@ -5,7 +5,7 @@ class UserModel {
   final String? displayName;
   final DateTime createdAt;
   final DateTime lastLogin;
-  final bool isOnlineUser; // Track if user was created online
+  final bool isOnlineUser ; // Track if user was created online
 
   UserModel({
     this.id,
@@ -14,7 +14,7 @@ class UserModel {
     this.displayName,
     required this.createdAt,
     required this.lastLogin,
-    this.isOnlineUser = false,
+    this.isOnlineUser  = false,
   });
 
   Map<String, dynamic> toMap() {
@@ -25,7 +25,7 @@ class UserModel {
       'display_name': displayName,
       'created_at': createdAt.toIso8601String(),
       'last_login': lastLogin.toIso8601String(),
-      'is_online_user': isOnlineUser ? 1 : 0,
+      'is_online_user': isOnlineUser  ? 1 : 0,
     };
   }
 
@@ -38,6 +38,27 @@ class UserModel {
       createdAt: DateTime.parse(map['created_at']),
       lastLogin: DateTime.parse(map['last_login']),
       isOnlineUser: map['is_online_user'] == 1,
+    );
+  }
+
+  // Add copyWith method for immutability
+  UserModel copyWith({
+    int? id,
+    String? email,
+    String? passwordHash,
+    String? displayName,
+    DateTime? createdAt,
+    DateTime? lastLogin,
+    bool? isOnlineUser ,
+  }) {
+    return UserModel(
+      id: id ?? this.id,
+      email: email ?? this.email,
+      passwordHash: passwordHash ?? this.passwordHash,
+      displayName: displayName ?? this.displayName,
+      createdAt: createdAt ?? this.createdAt,
+      lastLogin: lastLogin ?? this.lastLogin,
+      isOnlineUser: isOnlineUser ?? this.isOnlineUser,
     );
   }
 }
