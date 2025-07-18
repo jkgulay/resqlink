@@ -119,9 +119,7 @@ class _MessagePageState extends State<MessagePage> {
           // P2P Status Header
           Container(
             padding: EdgeInsets.all(16),
-            color: Theme.of(
-              context,
-            ).primaryColor.withAlpha((0.1 * 255).round()),
+            color: Theme.of(context).primaryColor.withAlpha((0.1 * 255).round()),
             child: Row(
               children: [
                 Icon(
@@ -151,7 +149,7 @@ class _MessagePageState extends State<MessagePage> {
                   TextButton(
                     onPressed: () {
                       // Navigate to home to start P2P
-                      DefaultTabController.of(context).animateTo(0);
+                      Navigator.of(context).popUntil((route) => route.isFirst);
                     },
                     child: Text('Start P2P'),
                   ),
