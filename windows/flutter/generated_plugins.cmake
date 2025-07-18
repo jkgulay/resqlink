@@ -9,6 +9,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
   firebase_auth
   firebase_core
+  flutter_p2p_connection
   flutter_secure_storage_windows
   geolocator_windows
   permission_handler_windows
