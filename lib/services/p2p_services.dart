@@ -61,7 +61,6 @@ class P2PConnectionService with ChangeNotifier {
   // Connectivity
   bool _isOnline = false;
 
-
   // Callbacks
   Function(P2PMessage message)? onMessageReceived;
   Function(String deviceId, String userName)? onDeviceConnected;
@@ -73,28 +72,20 @@ class P2PConnectionService with ChangeNotifier {
       _userName = userName;
       _deviceId = _generateDeviceId(userName);
 
-      final p2p = FlutterP2pHost();
-      await p2p.initialize();
-
-      if (!await p2p.checkP2pPermissions()) {
-        if (!await p2p.askP2pPermissions()) return false;
-      }
-      if (!await p2p.checkBluetoothPermissions()) {
-        if (!await p2p.askBluetoothPermissions()) return false;
-      }
-      if (!await p2p.checkStoragePermission()) {
-        if (!await p2p.askStoragePermission()) return false;
-      }
-
+      // Start cleanup timers
       _startMessageCleanup();
       _startReconnectTimer();
+
+      // Monitor connectivity
       _monitorConnectivity();
+
+      // Load known devices and pending messages
       await _loadKnownDevices();
       await _loadPendingMessages();
 
       return true;
     } catch (e) {
-      print("P2P initialization error: \$e");
+      print("P2P initialization error: $e");
       return false;
     }
   }
@@ -106,26 +97,56 @@ class P2PConnectionService with ChangeNotifier {
     return hash.substring(0, 16);
   }
 
+  // Permission handling state
+  bool _isRequestingPermissions = false;
+
   // Check and request permissions
   Future<bool> checkAndRequestPermissions() async {
-    final p2p = _hostInstance ?? _clientInstance ?? FlutterP2pHost();
-
-    // Storage permissions
-    if (!await p2p.checkStoragePermission()) {
-      if (!await p2p.askStoragePermission()) return false;
+    // Prevent multiple simultaneous permission requests
+    if (_isRequestingPermissions) {
+      print("Permission request already in progress");
+      return false;
     }
 
-    // P2P permissions
-    if (!await p2p.checkP2pPermissions()) {
-      if (!await p2p.askP2pPermissions()) return false;
-    }
+    _isRequestingPermissions = true;
 
-    // Bluetooth permissions
-    if (!await p2p.checkBluetoothPermissions()) {
-      if (!await p2p.askBluetoothPermissions()) return false;
-    }
+    try {
+      final p2p = _hostInstance ?? _clientInstance ?? FlutterP2pHost();
 
-    return true;
+      // Check all permissions first
+      bool hasStorage = await p2p.checkStoragePermission();
+      bool hasP2P = await p2p.checkP2pPermissions();
+      bool hasBluetooth = await p2p.checkBluetoothPermissions();
+
+      // Request only missing permissions
+      if (!hasStorage) {
+        if (!await p2p.askStoragePermission()) {
+          _isRequestingPermissions = false;
+          return false;
+        }
+      }
+
+      if (!hasP2P) {
+        if (!await p2p.askP2pPermissions()) {
+          _isRequestingPermissions = false;
+          return false;
+        }
+      }
+
+      if (!hasBluetooth) {
+        if (!await p2p.askBluetoothPermissions()) {
+          _isRequestingPermissions = false;
+          return false;
+        }
+      }
+
+      _isRequestingPermissions = false;
+      return true;
+    } catch (e) {
+      print("Error requesting permissions: $e");
+      _isRequestingPermissions = false;
+      return false;
+    }
   }
 
   // Enable required services
@@ -182,7 +203,6 @@ class P2PConnectionService with ChangeNotifier {
             psk: state.preSharedKey!,
             isHost: true,
             lastSeen: DateTime.now(),
-            userName: '',
           ),
         );
       }
@@ -209,7 +229,6 @@ class P2PConnectionService with ChangeNotifier {
     notifyListeners();
   }
 
-  // Start BLE scan for hosts
   Future<StreamSubscription<List<BleDiscoveredDevice>>> startScan(
     Function(List<BleDiscoveredDevice> devices) onDevicesFound,
   ) async {
@@ -217,6 +236,7 @@ class P2PConnectionService with ChangeNotifier {
       throw Exception('Client not initialized');
     }
 
+    // Removed the nonexistent serviceUuid parameter
     return await _clientInstance!.startScan(onDevicesFound);
   }
 
@@ -233,14 +253,14 @@ class P2PConnectionService with ChangeNotifier {
   }
 
   // Connect with known credentials
-  Future<void> connectWithCredentials(String ssid, String psk) async {
+  Future<void> connectWithCredentials(String ssid, String preSharedKey) async {
     if (_clientInstance == null) {
       await discoverGroups();
     }
 
     await _clientInstance!.connectWithCredentials(
       ssid,
-      psk,
+      preSharedKey,
       timeout: const Duration(seconds: 30),
     );
   }
@@ -425,9 +445,9 @@ class P2PConnectionService with ChangeNotifier {
     for (var client in clients) {
       _connectedDevices[client.id] = ConnectedDevice(
         id: client.id,
+        name: client.username,
         isHost: client.isHost,
         connectedAt: DateTime.now(),
-        name: '',
       );
 
       // Sync pending messages for this device
@@ -453,10 +473,9 @@ class P2PConnectionService with ChangeNotifier {
     final credentials = DeviceCredentials(
       deviceId: ssid,
       ssid: ssid,
-      psk: '', // We don't have PSK here, would need to pass it
+      psk: '',
       isHost: true,
       lastSeen: DateTime.now(),
-      userName: '',
     );
 
     await DatabaseService.saveDeviceCredentials(credentials);
@@ -859,7 +878,6 @@ class DeviceCredentials {
   final String psk;
   final bool isHost;
   final DateTime lastSeen;
-  final String userName;
 
   DeviceCredentials({
     required this.deviceId,
@@ -867,7 +885,6 @@ class DeviceCredentials {
     required this.psk,
     required this.isHost,
     required this.lastSeen,
-    required this.userName,
   });
 
   Map<String, dynamic> toJson() {
@@ -877,7 +894,6 @@ class DeviceCredentials {
       'psk': psk,
       'isHost': isHost,
       'lastSeen': lastSeen.millisecondsSinceEpoch,
-      'userName': userName,
     };
   }
 
@@ -888,7 +904,6 @@ class DeviceCredentials {
       psk: json['psk'],
       isHost: json['isHost'],
       lastSeen: DateTime.fromMillisecondsSinceEpoch(json['lastSeen']),
-      userName: json['userName'],
     );
   }
 }

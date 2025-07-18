@@ -750,21 +750,15 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
         throw Exception('Required services not enabled');
       }
 
-      // Check if still mounted before setState
-      if (!mounted) return;
-
       setState(() {
         _discoveredDevices.clear();
       });
 
       // Start scanning
       _scanSubscription = await widget.p2pService.startScan((devices) {
-        // Check if still mounted before setState in callback
-        if (mounted) {
-          setState(() {
-            _discoveredDevices = devices;
-          });
-        }
+        setState(() {
+          _discoveredDevices = devices;
+        });
       });
 
       // Check if still mounted before showing dialog
@@ -773,9 +767,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
       // Show scanning dialog
       _showScanningDialog();
     } catch (e) {
-      // Check if still mounted before showing snackbar
-      if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to start scanning: $e'),
@@ -911,11 +902,11 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
               title: Text(device.ssid),
               subtitle: Text('Last seen: ${_formatDuration(lastSeenAgo)} ago'),
               trailing: ElevatedButton(
+                child: Text('Reconnect'),
                 onPressed: () async {
                   Navigator.of(context).pop();
                   await _reconnectToDevice(device);
                 },
-                child: Text('Reconnect'),
               ),
             );
           }).toList(),
@@ -933,10 +924,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
   Future<void> _reconnectToDevice(DeviceCredentials device) async {
     try {
       await widget.p2pService.connectWithCredentials(device.ssid, device.psk);
-
-      // Check if still mounted before showing snackbar
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Reconnected to ${device.ssid}!'),
@@ -944,9 +932,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage> {
         ),
       );
     } catch (e) {
-      // Check if still mounted before showing error snackbar
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to reconnect: $e'),
@@ -1514,9 +1500,7 @@ class _P2PDevicesPageState extends State<P2PDevicesPage> {
           // Network Info
           Container(
             padding: EdgeInsets.all(16),
-            color: Theme.of(
-              context,
-            ).primaryColor.withAlpha((0.1 * 255).round()),
+            color: Theme.of(context).primaryColor.withAlpha((0.1 * 255).round()),
             child: Column(
               children: [
                 if (widget.p2pService.currentRole == P2PRole.host &&
@@ -1955,7 +1939,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withAlpha((0.1 * 255).round()),
+              color: Colors.black.withAlpha((0.1 * 255).round()), 
               blurRadius: 4,
               offset: Offset(0, 2),
             ),

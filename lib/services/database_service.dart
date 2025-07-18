@@ -318,7 +318,6 @@ class DatabaseService {
             psk: map['psk'],
             isHost: map['is_host'] == 1,
             lastSeen: DateTime.fromMillisecondsSinceEpoch(map['last_seen']),
-            userName: map['user_name'] ?? '',
           ),
         )
         .toList();
