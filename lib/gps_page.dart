@@ -1213,7 +1213,9 @@ class _GpsPageState extends State<GpsPage>
                       border: Border.all(color: Colors.white, width: 2),
                       boxShadow: [
                         BoxShadow(
-                          color: location.getMarkerColor().withAlpha((255 * 0.5).toInt()),
+                          color: location.getMarkerColor().withAlpha(
+                            (255 * 0.5).toInt(),
+                          ),
                           blurRadius: 8,
                           spreadRadius: 1,
                         ),
@@ -1241,109 +1243,117 @@ class _GpsPageState extends State<GpsPage>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Status card
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: ResQLinkTheme.cardDark.withAlpha((255 * 0.9).toInt()),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha((255 * 0.3).toInt()),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        _isConnected ? Icons.cloud_done : Icons.cloud_off,
-                        color: _isConnected
-                            ? ResQLinkTheme.safeGreen
-                            : ResQLinkTheme.emergencyOrange,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _isConnected ? 'ONLINE' : 'OFFLINE',
-                        style: TextStyle(
+            // Status card - using IntrinsicWidth to fit content
+            IntrinsicWidth(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: ResQLinkTheme.cardDark.withAlpha((255 * 0.9).toInt()),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha((255 * 0.3).toInt()),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min, // Make column fit content
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min, // Make row fit content
+                      children: [
+                        Icon(
+                          _isConnected ? Icons.cloud_done : Icons.cloud_off,
                           color: _isConnected
                               ? ResQLinkTheme.safeGreen
                               : ResQLinkTheme.emergencyOrange,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
+                          size: 20,
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.battery_full,
-                        color: _batteryLevel > 20
-                            ? ResQLinkTheme.safeGreen
-                            : ResQLinkTheme.primaryRed,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '$_batteryLevel%',
-                        style: TextStyle(
-                          color: _batteryLevel > 20
-                              ? Colors.white70
-                              : ResQLinkTheme.primaryRed,
-                          fontSize: 12,
-                          fontWeight: _batteryLevel <= 20
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        ),
-                      ),
-                      if (_isOnBatteryPowerSaving) ...[
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.power_settings_new,
-                          color: ResQLinkTheme.warningYellow,
-                          size: 16,
+                        const SizedBox(width: 8),
+                        Text(
+                          _isConnected ? 'ONLINE' : 'OFFLINE',
+                          style: TextStyle(
+                            color: _isConnected
+                                ? ResQLinkTheme.safeGreen
+                                : ResQLinkTheme.emergencyOrange,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  FutureBuilder<int>(
-                    future: LocationService.getUnsyncedCount(),
-                    builder: (context, snapshot) {
-                      final count = snapshot.data ?? 0;
-                      return Row(
-                        children: [
-                          Icon(
-                            Icons.sync,
-                            color: count > 0
-                                ? ResQLinkTheme.warningYellow
-                                : ResQLinkTheme.safeGreen,
-                            size: 20,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min, // Make row fit content
+                      children: [
+                        Icon(
+                          Icons.battery_full,
+                          color: _batteryLevel > 20
+                              ? ResQLinkTheme.safeGreen
+                              : ResQLinkTheme.primaryRed,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '$_batteryLevel%',
+                          style: TextStyle(
+                            color: _batteryLevel > 20
+                                ? Colors.white70
+                                : ResQLinkTheme.primaryRed,
+                            fontSize: 12,
+                            fontWeight: _batteryLevel <= 20
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            count > 0 ? '$count pending' : 'Synced',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
+                        ),
+                        if (_isOnBatteryPowerSaving) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.power_settings_new,
+                            color: ResQLinkTheme.warningYellow,
+                            size: 16,
                           ),
                         ],
-                      );
-                    },
-                  ),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    FutureBuilder<int>(
+                      future: LocationService.getUnsyncedCount(),
+                      builder: (context, snapshot) {
+                        final count = snapshot.data ?? 0;
+                        return Row(
+                          mainAxisSize:
+                              MainAxisSize.min, // Make row fit content
+                          children: [
+                            Icon(
+                              Icons.sync,
+                              color: count > 0
+                                  ? ResQLinkTheme.warningYellow
+                                  : ResQLinkTheme.safeGreen,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              count > 0 ? '$count pending' : 'Synced',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
             // Control buttons
             Column(
+              mainAxisSize: MainAxisSize.min, // Make column fit content
               children: [
                 _buildControlButton(
                   icon: Icons.layers,
