@@ -407,29 +407,31 @@ class _GpsPageState extends State<GpsPage>
     }
   }
 
-  Future<void> _initializeApp() async {
-    try {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = '';
-      });
+ Future<void> _initializeApp() async {
+  try {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
 
-      await _initializeServices();
-      await _loadSavedLocations();
-      _checkConnectivity();
-      _startBatteryMonitoring();
-      await _startLocationTracking();
+    await _initializeServices();
+    await _loadSavedLocations();
+     _checkConnectivity(); // Await this if it's asynchronous
+    _startBatteryMonitoring(); // Await this if it's asynchronous
+    await _startLocationTracking();
 
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Failed to initialize GPS: $e';
-      });
-    }
+    setState(() {
+      _isLoading = false;
+    });
+  } catch (e) {
+    setState(() {
+      _isLoading = false;
+      _errorMessage = 'Failed to initialize GPS: $e';
+    });
+    // Optionally log the error for debugging
+    print('Initialization error: $e');
   }
+}
 
   Future<void> _initializeServices() async {
     await _checkLocationPermission();
