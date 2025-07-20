@@ -4,6 +4,10 @@ import '../services/p2p_services.dart';
 import '../services/database_service.dart';
 import '../models/message_model.dart';
 import 'dart:async';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:vibration/vibration.dart';
+import 'dart:typed_data';
 
 class MessagePage extends StatefulWidget {
   final P2PConnectionService p2pService;
@@ -74,9 +78,21 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  void _showEmergencyNotification(P2PMessage message) {
+  void _showEmergencyNotification(P2PMessage message) async {
     if (!mounted) return;
 
+    // Show notification with sound and vibration
+    await NotificationService.showEmergencyNotification(
+      title: 'EMERGENCY from ${message.senderName}',
+      body: message.message,
+      playSound: true,
+      vibrate: true,
+    );
+
+    // Check mounted before using context
+    if (!mounted) return;
+
+    // Also show SnackBar for in-app notification
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -794,6 +810,95 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   String _formatFullDateTime(DateTime time) {
     return '${time.day}/${time.month}/${time.year} ${_formatTime(time)}';
+  }
+}
+
+class NotificationService {
+  static final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
+  static final AudioPlayer _audioPlayer = AudioPlayer();
+
+  static Future<void> initialize() async {
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
+    const iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+
+    const initSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: iosSettings,
+    );
+
+    await _notifications.initialize(initSettings);
+  }
+
+  static Future<void> showEmergencyNotification({
+    required String title,
+    required String body,
+    required bool playSound,
+    required bool vibrate,
+  }) async {
+    // Vibration pattern for emergency
+    if (vibrate) {
+      final hasVibrator = await Vibration.hasVibrator();
+      if (hasVibrator) {
+        Vibration.vibrate(
+          pattern: [0, 500, 200, 500, 200, 1000], // Emergency pattern
+          intensities: [0, 255, 0, 255, 0, 255],
+        );
+      }
+    }
+
+    // Play emergency sound
+    if (playSound) {
+      try {
+        await _audioPlayer.play(AssetSource('sounds/emergency_alert.mp3'));
+      } catch (e) {
+        print('Error playing sound: $e');
+      }
+    }
+
+    // Show notification
+  final androidDetails = AndroidNotificationDetails(
+  'emergency_channel',
+  'Emergency Alerts',
+  channelDescription: 'Emergency notifications from nearby users',
+  importance: Importance.max,
+  priority: Priority.high,
+  playSound: true,
+  enableVibration: true,
+  vibrationPattern: Int64List.fromList(const [0, 1000, 500, 1000]), // No const here
+  styleInformation: const BigTextStyleInformation(''),
+  color: const Color(0xFFFF0000),
+  icon: '@drawable/ic_emergency',
+);
+
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+      sound: 'emergency_alert.aiff',
+    );
+
+    final details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    await _notifications.show(
+      DateTime.now().millisecondsSinceEpoch.remainder(100000),
+      title,
+      body,
+      details,
+    );
+  }
+
+  static Future<void> cancelAll() async {
+    await _notifications.cancelAll();
   }
 }
 
