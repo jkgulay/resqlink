@@ -24,7 +24,7 @@ dependencies:
   wifi_iot: ^0.3.19
   flutter_p2p_connection: ^3.0.2
   permission_handler: ^11.3.1
-  connectivity_plus: ^5.0.0
+  connectivity_plus: ^6.1.4
   crypto: ^3.0.3
   shared_preferences: ^2.2.2
   flutter_secure_storage: ^9.0.0
@@ -32,6 +32,7 @@ dependencies:
   auto_size_text: ^3.0.0
   battery_plus: ^6.2.2
   cupertino_icons: ^1.0.6
+  vibration: ^3.1.3 
 
 dev_dependencies:
   flutter_test:

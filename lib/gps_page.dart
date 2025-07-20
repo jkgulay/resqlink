@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:resqlink/home_page.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -407,31 +408,31 @@ class _GpsPageState extends State<GpsPage>
     }
   }
 
- Future<void> _initializeApp() async {
-  try {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
+  Future<void> _initializeApp() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = '';
+      });
 
-    await _initializeServices();
-    await _loadSavedLocations();
-     _checkConnectivity(); // Await this if it's asynchronous
-    _startBatteryMonitoring(); // Await this if it's asynchronous
-    await _startLocationTracking();
+      await _initializeServices();
+      await _loadSavedLocations();
+      _checkConnectivity(); // Await this if it's asynchronous
+      _startBatteryMonitoring(); // Await this if it's asynchronous
+      await _startLocationTracking();
 
-    setState(() {
-      _isLoading = false;
-    });
-  } catch (e) {
-    setState(() {
-      _isLoading = false;
-      _errorMessage = 'Failed to initialize GPS: $e';
-    });
-    // Optionally log the error for debugging
-    print('Initialization error: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to initialize GPS: $e';
+      });
+      // Optionally log the error for debugging
+      print('Initialization error: $e');
+    }
   }
-}
 
   Future<void> _initializeServices() async {
     await _checkLocationPermission();
@@ -515,27 +516,38 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _checkConnectivity() {
-    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
-      result,
-    ) async {
-      if (mounted) {
-        final wasConnected = _isConnected;
-        setState(() {
-          _isConnected = result != ConnectivityResult.none;
-        });
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((
+              List<ConnectivityResult> results, // Changed to List
+            ) async {
+              if (mounted) {
+                final wasConnected = _isConnected;
+                setState(() {
+                  _isConnected = results.any(
+                    (result) => result != ConnectivityResult.none,
+                  );
+                });
 
-        if (!wasConnected && _isConnected) {
-          _showMessage('Connection restored! Syncing data...', isSuccess: true);
-          await _syncLocationsToFirebase();
-          final unsyncedCount = await LocationService.getUnsyncedCount();
-          if (unsyncedCount == 0) {
-            _showMessage('All locations synced!', isSuccess: true);
-          }
-        } else if (wasConnected && !_isConnected) {
-          _showMessage('OFFLINE MODE - Data saved locally', isWarning: true);
-        }
-      }
-    });
+                if (!wasConnected && _isConnected) {
+                  _showMessage(
+                    'Connection restored! Syncing data...',
+                    isSuccess: true,
+                  );
+                  await _syncLocationsToFirebase();
+                  final unsyncedCount =
+                      await LocationService.getUnsyncedCount();
+                  if (unsyncedCount == 0) {
+                    _showMessage('All locations synced!', isSuccess: true);
+                  }
+                } else if (wasConnected && !_isConnected) {
+                  _showMessage(
+                    'OFFLINE MODE - Data saved locally',
+                    isWarning: true,
+                  );
+                }
+              }
+            })
+            as StreamSubscription<ConnectivityResult>?;
   }
 
   void _startBatteryMonitoring() {
@@ -547,43 +559,23 @@ class _GpsPageState extends State<GpsPage>
 
   Future<void> _checkBatteryLevel() async {
     try {
-      // Get current battery level
       final level = await _battery.batteryLevel;
 
-      // Check if battery saving mode is enabled
-      final batteryState = await _battery.batteryState;
-      final isInPowerSaving =
-          batteryState == BatteryState.connectedNotCharging || level < 20;
+      // Check if we should show warning before using context
+      final shouldShow = await BatteryWarningManager.shouldShowWarning(level);
 
       if (mounted) {
         setState(() {
           _batteryLevel = level;
-          _isOnBatteryPowerSaving = isInPowerSaving;
         });
 
-        // Show warning if battery is critically low
-        if (level < 10 && !_sosMode) {
-          _showMessage(
-            'Low battery warning! Consider activating SOS mode.',
-            isWarning: true,
-          );
+        // Now use context only if mounted and should show
+        if (shouldShow && mounted) {
+          BatteryWarningManager.showDismissibleWarning(context, level);
         }
       }
-
-      // Listen to battery state changes
-      _battery.onBatteryStateChanged.listen((BatteryState state) {
-        if (mounted) {
-          _checkBatteryLevel(); // Recheck when state changes
-        }
-      });
     } catch (e) {
       print('Error checking battery level: $e');
-      // Fallback to 100% if battery info unavailable
-      if (mounted) {
-        setState(() {
-          _batteryLevel = 100;
-        });
-      }
     }
   }
 

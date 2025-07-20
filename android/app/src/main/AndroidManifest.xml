@@ -27,7 +27,13 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
     <!-- Permissions for Vibration -->
-    <uses-permission android:name="android.permission.VIBRATE"/>
+      <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    
 
     <!-- Declare features required by the app -->
     <uses-feature android:name="android.hardware.wifi" android:required="true" />
@@ -38,6 +44,7 @@
         android:label="resqlink"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true">
         
         <activity
@@ -57,9 +64,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <service
+            android:name=".P2PForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|location" />
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="emergency_channel" />
     </application>
 
     <queries>

@@ -1078,9 +1078,9 @@ class P2PConnectionService with ChangeNotifier {
   // Monitor connectivity for Firebase sync
   void _monitorConnectivity() {
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
-      result,
+      List<ConnectivityResult> results,
     ) async {
-      _isOnline = result != ConnectivityResult.none;
+      _isOnline = results.any((result) => result != ConnectivityResult.none);
 
       if (_isOnline) {
         await _syncToFirebase();

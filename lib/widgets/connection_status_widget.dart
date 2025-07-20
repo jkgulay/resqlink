@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
@@ -9,27 +11,47 @@ class ConnectionStatusWidget extends StatefulWidget {
 }
 
 class _ConnectionStatusWidgetState extends State<ConnectionStatusWidget> {
+  late Stream<List<ConnectivityResult>> _connectivityStream;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool isConnected = false;
-  late Stream<ConnectivityResult> _connectivityStream;
 
   @override
   void initState() {
     super.initState();
     _checkConnection();
+
     _connectivityStream = Connectivity().onConnectivityChanged;
-    _connectivityStream.listen((ConnectivityResult result) {
-      setState(() {
-        isConnected = result != ConnectivityResult.none;
-      });
+    _connectivitySubscription = _connectivityStream.listen((
+      List<ConnectivityResult> results,
+    ) {
+      if (mounted) {
+        setState(() {
+          isConnected = results.any(
+            (result) => result != ConnectivityResult.none,
+          );
+        });
+      }
     });
   }
 
   Future<void> _checkConnection() async {
-    final connectivityResult = await Connectivity().checkConnectivity();
-    setState(() {
-      isConnected = connectivityResult != ConnectivityResult.none;
-    });
+    final List<ConnectivityResult> connectivityResult = await Connectivity()
+        .checkConnectivity();
+    if (mounted) {
+      setState(() {
+        isConnected = connectivityResult.any(
+          (result) => result != ConnectivityResult.none,
+        );
+      });
+    }
   }
+
+    @override
+  void dispose() {
+    _connectivitySubscription?.cancel();
+    super.dispose();
+  }
+
 
   @override
   Widget build(BuildContext context) {
