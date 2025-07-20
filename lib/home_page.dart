@@ -1,23 +1,33 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
 import '../services/p2p_services.dart';
 import '../services/database_service.dart';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomePage extends StatefulWidget {
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage>
+    with WidgetsBindingObserver, AppLifecycleMixin {
   int selectedIndex = 0;
   final P2PConnectionService _p2pService = P2PConnectionService();
   LocationModel? _currentLocation;
   String? _userId = "user_${DateTime.now().millisecondsSinceEpoch}";
   bool _isP2PInitialized = false;
+
+  @override
+  Future<void> onAppResumed() async {
+    // Refresh P2P status
+    await _p2pService.checkAndRequestPermissions();
+    setState(() {});
+  }
 
   late final List<Widget> pages;
 
@@ -66,11 +76,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final success = await _p2pService.initialize(userName);
 
     if (success) {
-      setState(() {
-        _isP2PInitialized = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _isP2PInitialized = true;
+          });
+        }
       });
 
-      // Setup callbacks
       _p2pService.onMessageReceived = (message) {
         _showNotification(message);
       };
@@ -99,16 +112,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         }
       };
 
-      // Listen for changes
       _p2pService.addListener(_updateUI);
-
-      // Enable emergency mode by default
       _p2pService.emergencyMode = true;
     }
   }
 
   void _updateUI() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _shareLocationViaP2P(LocationModel location) async {
@@ -187,9 +201,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               TextButton(
                 onPressed: () {
                   Navigator.of(context).pop();
-                  // Navigate to messages to see full conversation
-                  setState(() {
-                    selectedIndex = 2;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      setState(() {
+                        selectedIndex = 2;
+                      });
+                    }
                   });
                 },
                 child: Text(
@@ -277,8 +294,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.emergency, size: 16, color: Colors.white),
-                  SizedBox(width: 4),
+                  Icon(Icons.emergency, size: 12, color: Colors.white),
+                  SizedBox(width: 3),
                   Text(
                     'EMERGENCY',
                     style: TextStyle(
@@ -304,7 +321,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.wifi_tethering, size: 16, color: Colors.white),
-                SizedBox(width: 4),
+                SizedBox(width: 3),
                 Text(
                   _p2pService.currentRole == P2PRole.host
                       ? 'HOST'
@@ -652,6 +669,11 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
 
             // Instructions Card
             _buildInstructionsCard(),
+
+            const SizedBox(height: 16),
+
+            // Enhanced Device List
+            _buildEnhancedDeviceList(),
           ],
         ),
       ),
@@ -757,12 +779,15 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
             const SizedBox(height: 12),
             _buildStatusRow(
               Icons.person,
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
+
               'Device ID',
               connectionInfo['deviceId']?.toString().substring(0, 8) ??
                   'Not initialized',
             ),
             _buildStatusRow(
               Icons.router,
+
               'Role',
               connectionInfo['role']?.toString().toUpperCase() ?? 'NONE',
               valueColor: widget.p2pService.currentRole != P2PRole.none
@@ -771,6 +796,8 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
             ),
             _buildStatusRow(
               Icons.devices,
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
+
               'Connected',
               '${connectionInfo['connectedDevices'] ?? 0} devices',
             ),
@@ -1052,16 +1079,21 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
             const SizedBox(height: 12),
             _buildLocationRow(
               Icons.map,
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
               "Latitude",
               _latestLocation!.latitude.toStringAsFixed(6),
             ),
             _buildLocationRow(
               Icons.map,
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
+
               "Longitude",
               _latestLocation!.longitude.toStringAsFixed(6),
             ),
             _buildLocationRow(
               Icons.access_time,
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
+
               "Time",
               _formatDateTime(_latestLocation!.timestamp),
             ),
@@ -1113,9 +1145,36 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     );
   }
 
+  // Usage in home page:
+  Widget _buildEnhancedDeviceList() {
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: NeverScrollableScrollPhysics(),
+      itemCount: _discoveredDevices.length,
+      itemBuilder: (context, index) {
+        final device = _discoveredDevices[index];
+        final deviceInfo = widget.p2pService.getDeviceInfo(
+          device.deviceAddress,
+        );
+
+        // Simulate signal strength based on device name/address
+        // In real implementation, this would come from the BLE scan
+        final signalStrength = -50 - (index * 10); // Mock data
+
+        return DeviceSignalWidget(
+          deviceName: device.deviceName,
+          deviceAddress: device.deviceAddress,
+          signalStrength: signalStrength,
+          isConnected: deviceInfo['isConnected'] ?? false,
+          isKnown: deviceInfo['isKnown'] ?? false,
+          onConnect: () => _connectToDevice(device),
+        );
+      },
+    );
+  }
+
   Widget _buildInstructionsCard() {
     return Card(
-      color: Colors.blue.shade50,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -1123,15 +1182,19 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
           children: [
             Row(
               children: [
-                Icon(Icons.info_outline, color: Colors.blue),
+                Icon(
+                  Icons.info_outline,
+                  color: const Color.fromARGB(255, 207, 111, 2),
+                ),
                 const SizedBox(width: 8),
                 Text(
                   'How It Works',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
+
             _buildInstructionItem(
               '1.',
               'Emergency Mode automatically discovers and connects to nearby devices',
@@ -1263,4 +1326,312 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
       return dateTime.toString().substring(0, 19);
     }
   }
+}
+
+class BatteryWarningManager {
+  static const String _lastWarningKey = 'last_battery_warning';
+  static const String _dismissedWarningKey = 'battery_warning_dismissed';
+  static const Duration _warningCooldown = Duration(hours: 1);
+
+  static Future<bool> shouldShowWarning(int batteryLevel) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Check if user dismissed the warning
+    final dismissed = prefs.getBool(_dismissedWarningKey) ?? false;
+    if (dismissed && batteryLevel > 15) {
+      // Reset dismissal if battery improved
+      await prefs.setBool(_dismissedWarningKey, false);
+    } else if (dismissed) {
+      return false;
+    }
+
+    // Check cooldown period
+    final lastWarningTimestamp = prefs.getInt(_lastWarningKey) ?? 0;
+    final lastWarning = DateTime.fromMillisecondsSinceEpoch(
+      lastWarningTimestamp,
+    );
+    final now = DateTime.now();
+
+    if (now.difference(lastWarning) < _warningCooldown) {
+      return false;
+    }
+
+    // Show warning for critical battery levels
+    if (batteryLevel <= 10) {
+      await prefs.setInt(_lastWarningKey, now.millisecondsSinceEpoch);
+      return true;
+    }
+
+    return false;
+  }
+
+  static Future<void> dismissWarning() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_dismissedWarningKey, true);
+  }
+
+  static void showDismissibleWarning(BuildContext context, int batteryLevel) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.battery_alert, color: Colors.white),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Low battery ($batteryLevel%)! Consider activating SOS mode.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 10),
+        action: SnackBarAction(
+          label: 'DISMISS',
+          textColor: Colors.white,
+          onPressed: () async {
+            await BatteryWarningManager.dismissWarning();
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class DeviceSignalWidget extends StatelessWidget {
+  final String deviceName;
+  final String deviceAddress;
+  final int signalStrength; // -100 to 0 dBm
+  final bool isConnected;
+  final bool isKnown;
+  final VoidCallback onConnect;
+
+  const DeviceSignalWidget({
+    required this.deviceName,
+    required this.deviceAddress,
+    required this.signalStrength,
+    required this.isConnected,
+    required this.isKnown,
+    required this.onConnect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final signalLevel = _getSignalLevel(signalStrength);
+    final signalColor = _getSignalColor(signalLevel);
+
+    return Card(
+      elevation: 2,
+      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: ListTile(
+        leading: Stack(
+          alignment: Alignment.center,
+          children: [
+            CircleAvatar(
+              backgroundColor: isConnected
+                  ? Colors.green
+                  : signalColor.withAlpha(51),
+              radius: 24,
+              child: Icon(
+                isKnown ? Icons.star : Icons.devices,
+                color: isConnected ? Colors.white : signalColor,
+                size: 24,
+              ),
+            ),
+            if (!isConnected)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  padding: EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    shape: BoxShape.circle,
+                  ),
+                  child: _buildSignalIndicator(signalLevel, signalColor),
+                ),
+              ),
+          ],
+        ),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                deviceName,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: isConnected ? Colors.green : null,
+                ),
+              ),
+            ),
+            if (isKnown) Icon(Icons.bookmark, size: 16, color: Colors.amber),
+          ],
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(deviceAddress, style: TextStyle(fontSize: 12)),
+            SizedBox(height: 2),
+            Row(
+              children: [
+                _buildSignalBars(signalLevel, signalColor),
+                SizedBox(width: 8),
+                Text(
+                  '$signalStrength dBm',
+                  style: TextStyle(fontSize: 11, color: signalColor),
+                ),
+                if (isKnown) ...[
+                  SizedBox(width: 8),
+                  Text(
+                    '• Known device',
+                    style: TextStyle(fontSize: 11, color: Colors.green),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+        trailing: isConnected
+            ? Chip(
+                label: Text('Connected'),
+                backgroundColor: Colors.green,
+                labelStyle: TextStyle(color: Colors.white, fontSize: 12),
+              )
+            : ElevatedButton(
+                onPressed: onConnect,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: signalLevel >= 3
+                      ? Colors.blue
+                      : Colors.orange,
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                ),
+                child: Text('Connect'),
+              ),
+      ),
+    );
+  }
+
+  int _getSignalLevel(int dbm) {
+    if (dbm >= -50) return 5; // Excellent
+    if (dbm >= -60) return 4; // Good
+    if (dbm >= -70) return 3; // Fair
+    if (dbm >= -80) return 2; // Weak
+    if (dbm >= -90) return 1; // Very weak
+    return 0; // No signal
+  }
+
+  Color _getSignalColor(int level) {
+    switch (level) {
+      case 5:
+      case 4:
+        return Colors.green;
+      case 3:
+        return Colors.amber;
+      case 2:
+      case 1:
+        return Colors.orange;
+      default:
+        return Colors.red;
+    }
+  }
+
+  Widget _buildSignalIndicator(int level, Color color) {
+    return Icon(Icons.signal_cellular_alt, size: 16, color: color);
+  }
+
+  Widget _buildSignalBars(int level, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (index) {
+        final isActive = index < level;
+        return Container(
+          width: 3,
+          height: 4.0 + (index * 2),
+          margin: EdgeInsets.only(right: 1),
+          decoration: BoxDecoration(
+            color: isActive ? color : Colors.grey.shade300,
+            borderRadius: BorderRadius.circular(1),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+mixin AppLifecycleMixin<T extends StatefulWidget>
+    on State<T>, WidgetsBindingObserver {
+  bool _isInBackground = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // Enable state restoration
+    if (mounted) {
+      SystemChannels.lifecycle.setMessageHandler(_handleLifecycleMessage);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    SystemChannels.lifecycle.setMessageHandler(null);
+    super.dispose();
+  }
+
+  Future<String?> _handleLifecycleMessage(String? message) async {
+    debugPrint('Lifecycle message: $message');
+
+    switch (message) {
+      case 'AppLifecycleState.paused':
+        await onAppPaused();
+      case 'AppLifecycleState.resumed':
+        await onAppResumed();
+      case 'AppLifecycleState.inactive':
+        await onAppInactive();
+      case 'AppLifecycleState.detached':
+        await onAppDetached();
+    }
+
+    return null;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _isInBackground = false;
+        onAppResumed();
+      case AppLifecycleState.paused:
+        _isInBackground = true;
+        onAppPaused();
+      case AppLifecycleState.inactive:
+        onAppInactive();
+      case AppLifecycleState.detached:
+        onAppDetached();
+      case AppLifecycleState.hidden:
+        onAppHidden();
+    }
+  }
+
+  // Override these in your widgets
+  Future<void> onAppResumed() async {
+    debugPrint('App resumed - restoring state');
+    // Restore P2P connections, refresh UI, etc.
+  }
+
+  Future<void> onAppPaused() async {
+    debugPrint('App paused - saving state');
+    // Save current state, maintain P2P connections
+  }
+
+  Future<void> onAppInactive() async {}
+  Future<void> onAppDetached() async {}
+  Future<void> onAppHidden() async {}
+
+  bool get isInBackground => _isInBackground;
 }
