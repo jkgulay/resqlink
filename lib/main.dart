@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:english_words/english_words.dart';
@@ -5,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:resqlink/message_page.dart';
 import 'firebase_options.dart';
 import 'home_page.dart';
 import 'services/auth_service.dart';
@@ -108,8 +110,15 @@ Future<void> saveToken(
   );
 }
 
-Future<String?> loadIdToken() async =>
-    await _secureStorage.read(key: 'idToken');
+Future<String?> loadIdToken() async {
+  try {
+    return await _secureStorage.read(key: 'idToken');
+  } catch (e) {
+    debugPrint('Error reading idToken: $e');
+    return null;
+  }
+}
+
 Future<String?> loadRefreshToken() async =>
     await _secureStorage.read(key: 'refreshToken');
 Future<DateTime?> loadExpiresAt() async {
@@ -122,8 +131,10 @@ Future<void> clearTokens() async {
 }
 
 Future<bool> isOnline() async {
-  final conn = await Connectivity().checkConnectivity();
-  return conn == ConnectivityResult.mobile || conn == ConnectivityResult.wifi;
+  final List<ConnectivityResult> connectivityResult = (await Connectivity()
+      .checkConnectivity());
+  return connectivityResult.contains(ConnectivityResult.mobile) ||
+      connectivityResult.contains(ConnectivityResult.wifi);
 }
 
 Future<String?> refreshIdToken() async {
@@ -139,23 +150,35 @@ Future<String?> refreshIdToken() async {
 }
 
 Future<UserModel?> trySilentFirebaseLogin() async {
-  final idToken = await loadIdToken();
-  final expiresAt = await loadExpiresAt();
-  final firebaseUser = FirebaseAuth.instance.currentUser;
+  try {
+    final firebaseUser = FirebaseAuth.instance.currentUser;
 
-  if (idToken != null &&
-      expiresAt != null &&
-      DateTime.now().isBefore(expiresAt)) {
     if (firebaseUser != null && firebaseUser.email != null) {
-      final email = firebaseUser.email!;
+      final idToken = await firebaseUser.getIdToken();
+      final expiresAt = DateTime.now().add(const Duration(hours: 1));
+      await saveToken(idToken!, '', expiresAt);
+
+      // Try to find local user by email
       final localUser = await DatabaseService.loginUser(
-        email,
+        firebaseUser.email!,
         '',
-      ); // dummy login to lookup
+      );
+
       if (localUser != null) {
         return localUser;
       }
+
+      // If not found, optionally create one with dummy password
+      final newUser = await DatabaseService.createUser(
+        firebaseUser.email!,
+        '', // blank password for online user
+        isOnlineUser: true,
+      );
+
+      return newUser;
     }
+  } catch (e) {
+    debugPrint('Silent Firebase login failed: $e');
   }
   return null;
 }
@@ -173,7 +196,10 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Firebase init failed (offline?): $e');
   }
-  await DatabaseService.deleteDatabaseFile(); // ⚠️ dev only
+  await NotificationService.initialize();
+  if (kDebugMode) {
+    await DatabaseService.deleteDatabaseFile();
+  }
   await DatabaseService.database;
   runApp(const MyApp());
 }
@@ -236,14 +262,29 @@ class AuthWrapper extends StatefulWidget {
   State<AuthWrapper> createState() => _AuthWrapperState();
 }
 
-class _AuthWrapperState extends State<AuthWrapper> {
+class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   UserModel? _currentUser;
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // Add this
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(
+      this,
+    ); // Remove 'as WidgetsBindingObserver'
+    super.dispose();
+  }
+
+  // Add this required method
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Handle app lifecycle changes
   }
 
   Future<void> _bootstrap() async {
@@ -591,11 +632,10 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
   }
 
   void _showSnackBar(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
