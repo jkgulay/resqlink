@@ -442,45 +442,111 @@ class _GpsPageState extends State<GpsPage>
 
   Future<void> _checkLocationPermission() async {
     try {
+      // First check if location services are enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        setState(() {
-          _isLocationServiceEnabled = false;
-          _errorMessage = 'Location services disabled. Enable in settings.';
-        });
+        // Check if widget is still mounted before using context
+        if (!mounted) return;
+
+        // Show dialog to enable location services
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: Text('Location Services Disabled'),
+            content: Text(
+              'Location services are required for this app to work. '
+              'Please enable location services in your device settings.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Geolocator.openLocationSettings();
+                },
+                child: Text('Open Settings'),
+              ),
+            ],
+          ),
+        );
         return;
       }
 
+      // Check permission
       LocationPermission permission = await Geolocator.checkPermission();
+
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
+
         if (permission == LocationPermission.denied) {
-          setState(() {
-            _isLocationServiceEnabled = false;
-            _errorMessage = 'Location permission denied.';
-          });
+          _showLocationError('Location permissions are denied');
           return;
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
-        setState(() {
-          _isLocationServiceEnabled = false;
-          _errorMessage = 'Location permissions permanently denied.';
-        });
+        // Check if widget is still mounted before using context
+        if (!mounted) return;
+
+        // Show dialog to open app settings
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: Text('Location Permission Required'),
+            content: Text(
+              'Location permission is permanently denied. '
+              'Please enable it in app settings to use this feature.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Geolocator.openAppSettings();
+                },
+                child: Text('Open Settings'),
+              ),
+            ],
+          ),
+        );
         return;
       }
 
-      setState(() {
-        _isLocationServiceEnabled = true;
-        _errorMessage = '';
-      });
+      // Permission granted, start location tracking
+      // Check if widget is still mounted before calling setState
+      if (mounted) {
+        setState(() {
+          _isLocationServiceEnabled = true;
+          _errorMessage = '';
+        });
+      }
+
+      await _startLocationTracking();
     } catch (e) {
-      setState(() {
-        _isLocationServiceEnabled = false;
-        _errorMessage = 'Error checking permissions: $e';
-      });
+      _showLocationError('Error: $e');
     }
+  }
+
+  void _showLocationError(String message) {
+    setState(() {
+      _isLocationServiceEnabled = false;
+      _errorMessage = message;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        action: SnackBarAction(
+          label: 'Retry',
+          onPressed: _checkLocationPermission,
+        ),
+      ),
+    );
   }
 
   Future<void> _loadLastKnownLocation() async {
