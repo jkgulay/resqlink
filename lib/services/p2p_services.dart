@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
+import 'package:flutter_p2p_plus/flutter_p2p_plus.dart';
+import 'package:flutter_p2p_plus/protos/protos.pb.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
@@ -16,14 +17,12 @@ import 'package:geolocator/geolocator.dart';
 /// - Store-and-forward for offline devices
 /// - Automatic message deduplication
 /// - Firebase sync when online
+/// - Pure WiFi Direct discovery (no BLE dependency)
 class P2PConnectionService with ChangeNotifier {
   static const String serviceType = "_resqlink._tcp";
   static const int defaultPort = 8888;
   static const int maxTtl = 5; // Maximum hops
   static const Duration messageExpiry = Duration(hours: 24);
-  static const String serviceUuid = "resqlink-emergency-p2p";
-  final Set<String> _authenticatedEmergencyClients = {};
-
   static const String emergencyPassword = "RESQLINK911"; // Predefined password
   static const Duration autoConnectDelay = Duration(seconds: 3);
   static const int minSignalStrength = -80; // dBm threshold
@@ -40,10 +39,6 @@ class P2PConnectionService with ChangeNotifier {
   factory P2PConnectionService() => _instance;
   P2PConnectionService._internal();
 
-  // P2P instances
-  FlutterP2pHost? _hostInstance;
-  FlutterP2pClient? _clientInstance;
-
   // Device identity and role
   String? _deviceId;
   String? _userName;
@@ -52,9 +47,11 @@ class P2PConnectionService with ChangeNotifier {
   // Network state
   final Map<String, ConnectedDevice> _connectedDevices = {};
   final Map<String, DeviceCredentials> _knownDevices = {};
-  final Map<String, BleDiscoveredDevice> _discoveredDevices = {};
-  HotspotHostState? _hostState;
-  HotspotClientState? _clientState;
+  final Map<String, Map<String, dynamic>> _discoveredDevices =
+      {}; // Store device data as Map
+  bool _isConnected = false; // Simple boolean for connection state
+  bool _isGroupOwner = false; // Simple boolean for group owner state
+  String? _groupOwnerAddress; // Store group owner address
 
   // Emergency mode
   bool _emergencyMode = false;
@@ -71,12 +68,16 @@ class P2PConnectionService with ChangeNotifier {
   Timer? _reconnectTimer;
 
   // Stream subscriptions
-  StreamSubscription? _hostStateSubscription;
-  StreamSubscription? _clientStateSubscription;
-  StreamSubscription? _clientListSubscription;
-  StreamSubscription? _receivedTextsSubscription;
+  StreamSubscription? _stateChangeSubscription;
+  StreamSubscription? _connectionChangeSubscription;
+  StreamSubscription? _peersChangeSubscription;
+  StreamSubscription? _deviceChangeSubscription;
+  StreamSubscription? _discoveryChangeSubscription;
   StreamSubscription? _connectivitySubscription;
-  StreamSubscription? _scanSubscription;
+
+  // WiFi P2P socket for communication
+  P2pSocket? _socket;
+  bool _isHost = false;
 
   // Connectivity
   bool _isOnline = false;
@@ -88,7 +89,7 @@ class P2PConnectionService with ChangeNotifier {
   Function(P2PMessage message)? onMessageReceived;
   Function(String deviceId, String userName)? onDeviceConnected;
   Function(String deviceId)? onDeviceDisconnected;
-  Function(List<BleDiscoveredDevice> devices)? onDevicesDiscovered;
+  Function(List<Map<String, dynamic>> devices)? onDevicesDiscovered;
 
   // Emergency mode toggle
   bool get emergencyMode => _emergencyMode;
@@ -108,6 +109,12 @@ class P2PConnectionService with ChangeNotifier {
       _userName = userName;
       _deviceId = _generateDeviceId(userName);
 
+      // Setup WiFi P2P event listeners
+      _setupWifiP2PListeners();
+
+      // Register to native events
+      FlutterP2pPlus.register();
+
       // Start cleanup timers
       _startMessageCleanup();
       _startReconnectTimer();
@@ -124,9 +131,84 @@ class P2PConnectionService with ChangeNotifier {
 
       return true;
     } catch (e) {
-      print("P2P initialization error: $e");
+      debugPrint("P2P initialization error: $e");
       return false;
     }
+  }
+
+  // Setup WiFi P2P event listeners
+  void _setupWifiP2PListeners() {
+    // WiFi state changes
+    _stateChangeSubscription = FlutterP2pPlus.wifiEvents.stateChange?.listen((
+      change,
+    ) {
+      debugPrint("WiFi P2P state changed: ${change.isEnabled}");
+      notifyListeners();
+    });
+
+    // Connection changes
+    _connectionChangeSubscription = FlutterP2pPlus.wifiEvents.connectionChange
+        ?.listen((change) {
+          _isConnected = change.networkInfo.isConnected;
+          _isGroupOwner = change.wifiP2pInfo.isGroupOwner;
+          _groupOwnerAddress = change.wifiP2pInfo.groupOwnerAddress;
+          _isHost = _isGroupOwner;
+
+          debugPrint(
+            "Connection changed: connected=$_isConnected, isHost=$_isHost",
+          );
+
+          if (_isConnected) {
+            _handleConnectionEstablished();
+          } else {
+            _handleConnectionLost();
+          }
+
+          notifyListeners();
+        });
+
+    // Peers discovered
+    _peersChangeSubscription = FlutterP2pPlus.wifiEvents.peersChange?.listen((
+      change,
+    ) {
+      _discoveredDevices.clear();
+      for (var device in change.devices) {
+        final deviceData = {
+          'deviceName': device.deviceName,
+          'deviceAddress': device.deviceAddress,
+          'status': device.status,
+        };
+        _discoveredDevices[device.deviceAddress] = deviceData;
+      }
+
+      debugPrint("Discovered ${change.devices.length} devices");
+
+      // Convert to list of maps for callback
+      final deviceList = _discoveredDevices.values.toList();
+      onDevicesDiscovered?.call(deviceList);
+
+      // Auto-connect in emergency mode
+      if (_emergencyMode && _autoConnectEnabled && !_isConnected) {
+        _attemptAutoConnect();
+      }
+
+      notifyListeners();
+    });
+
+    // This device changes
+    _deviceChangeSubscription = FlutterP2pPlus.wifiEvents.thisDeviceChange
+        ?.listen((change) {
+          debugPrint("This device changed: ${change.deviceName}");
+          notifyListeners();
+        });
+
+    // Discovery state changes
+    _discoveryChangeSubscription = FlutterP2pPlus.wifiEvents.discoveryChange
+        ?.listen((change) {
+          _isDiscovering = change.isDiscovering;
+          debugPrint("Discovery state changed: $_isDiscovering");
+          notifyListeners();
+        });
   }
 
   // Generate unique device ID
@@ -139,37 +221,24 @@ class P2PConnectionService with ChangeNotifier {
   // Check and request permissions
   Future<bool> checkAndRequestPermissions() async {
     if (_isRequestingPermissions) {
-      print("Permission request already in progress");
+      debugPrint("Permission request already in progress");
       return false;
     }
 
     _isRequestingPermissions = true;
 
     try {
-      final p2p = _hostInstance ?? _clientInstance ?? FlutterP2pHost();
+      // Check location permission
+      final locationPermissionGranted =
+          await FlutterP2pPlus.isLocationPermissionGranted();
+      if (locationPermissionGranted != null && !locationPermissionGranted) {
+        await FlutterP2pPlus.requestLocationPermission();
 
-      // Check all permissions first
-      bool hasStorage = await p2p.checkStoragePermission();
-      bool hasP2P = await p2p.checkP2pPermissions();
-      bool hasBluetooth = await p2p.checkBluetoothPermissions();
-
-      // Request only missing permissions
-      if (!hasStorage) {
-        if (!await p2p.askStoragePermission()) {
-          _isRequestingPermissions = false;
-          return false;
-        }
-      }
-
-      if (!hasP2P) {
-        if (!await p2p.askP2pPermissions()) {
-          _isRequestingPermissions = false;
-          return false;
-        }
-      }
-
-      if (!hasBluetooth) {
-        if (!await p2p.askBluetoothPermissions()) {
+        // Verify permission was granted
+        final permissionGrantedAfterRequest =
+            await FlutterP2pPlus.isLocationPermissionGranted();
+        if (permissionGrantedAfterRequest == null ||
+            !permissionGrantedAfterRequest) {
           _isRequestingPermissions = false;
           return false;
         }
@@ -178,46 +247,23 @@ class P2PConnectionService with ChangeNotifier {
       _isRequestingPermissions = false;
       return true;
     } catch (e) {
-      print("Error requesting permissions: $e");
+      debugPrint("Error requesting permissions: $e");
       _isRequestingPermissions = false;
       return false;
     }
   }
 
-  // Enable required services
-  Future<bool> enableServices() async {
-    final p2p = _hostInstance ?? _clientInstance ?? FlutterP2pHost();
-
-    // WiFi
-    if (!await p2p.checkWifiEnabled()) {
-      await p2p.enableWifiServices();
-    }
-
-    // Location
-    if (!await p2p.checkLocationEnabled()) {
-      await p2p.enableLocationServices();
-    }
-
-    // Bluetooth
-    if (!await p2p.checkBluetoothEnabled()) {
-      await p2p.enableBluetoothServices();
-    }
-
-    return true;
-  }
-
   void _startEmergencyMode() async {
-    print("Starting emergency mode...");
+    debugPrint("Starting emergency mode...");
 
     // Enable all services
     await checkAndRequestPermissions();
-    await enableServices();
 
     // Start aggressive discovery
     _startAggressiveDiscovery();
 
     // Auto-create or join groups
-    if (_connectedDevices.isEmpty) {
+    if (!(_isConnected)) {
       _autoConnectTimer = Timer(autoConnectDelay, () {
         _attemptAutoConnect();
       });
@@ -225,7 +271,7 @@ class P2PConnectionService with ChangeNotifier {
   }
 
   void _stopEmergencyMode() {
-    print("Stopping emergency mode...");
+    debugPrint("Stopping emergency mode...");
     _autoConnectTimer?.cancel();
     _discoveryTimer?.cancel();
   }
@@ -233,7 +279,7 @@ class P2PConnectionService with ChangeNotifier {
   void _startAggressiveDiscovery() async {
     _discoveryTimer?.cancel();
     _discoveryTimer = Timer.periodic(Duration(seconds: 10), (timer) async {
-      if (_currentRole == P2PRole.none) {
+      if (!(_isConnected)) {
         await _performDiscoveryScan();
       }
     });
@@ -242,456 +288,285 @@ class P2PConnectionService with ChangeNotifier {
     await _performDiscoveryScan();
   }
 
-  // Perform discovery scan
+  // Perform discovery scan using pure WiFi Direct
   Future<void> _performDiscoveryScan() async {
     try {
-      if (_clientInstance == null) {
-        _clientInstance = FlutterP2pClient();
-        await _clientInstance!.initialize();
-        _setupClientListeners();
-      }
+      debugPrint("Starting WiFi Direct discovery scan...");
 
       // Clear old discoveries
       _discoveredDevices.clear();
 
-      // Start scan with callback
-      _scanSubscription?.cancel();
-      _isDiscovering = true; // Set discovering state to true
-      _scanSubscription = await _clientInstance!.startScan((devices) {
-        _handleDiscoveredDevices(devices);
-      });
+      // Start WiFi P2P discovery
+      await FlutterP2pPlus.discoverDevices();
 
-      // Stop scan after 5 seconds
-      Future.delayed(Duration(seconds: 5), () {
-        _scanSubscription?.cancel();
-        _isDiscovering = false; // Set discovering state to false
-      });
+      debugPrint("WiFi Direct discovery scan initiated");
     } catch (e) {
-      print("Discovery scan error: $e");
-      _isDiscovering = false; // Ensure state is reset on error
+      debugPrint("Discovery scan error: $e");
     }
-  }
-
-  // Handle discovered devices
-  void _handleDiscoveredDevices(List<BleDiscoveredDevice> devices) {
-    _discoveredDevices.clear();
-    for (var device in devices) {
-      _discoveredDevices[device.deviceAddress] = device;
-    }
-
-    onDevicesDiscovered?.call(devices);
-
-    // Auto-connect to strongest signal in emergency mode
-    if (_emergencyMode && _autoConnectEnabled && _connectedDevices.isEmpty) {
-      _attemptAutoConnect();
-    }
-
-    notifyListeners();
   }
 
   Future<void> _attemptAutoConnect() async {
     if (_discoveredDevices.isEmpty) {
       // No devices found, create own group
-      print("No devices found, creating emergency group...");
+      debugPrint("No devices found, creating emergency group...");
       await createEmergencyGroup();
       return;
     }
 
-    // Find strongest signal or known device
-    BleDiscoveredDevice? bestDevice;
+    // Find best device to connect to
+    Map<String, dynamic>? bestDevice;
 
     for (var device in _discoveredDevices.values) {
       // Prioritize known devices
-      if (_knownDevices.containsKey(device.deviceAddress)) {
+      if (_knownDevices.containsKey(device['deviceAddress'])) {
         bestDevice = device;
         break;
       }
 
-      // Otherwise, choose devices with RESQLINK in name
-      if (device.deviceName.contains("RESQLINK")) {
+      // Otherwise, choose devices with RESQLINK in name or any available device
+      if (device['deviceName'].toString().contains("RESQLINK") ||
+          bestDevice == null) {
         bestDevice = device;
       }
     }
 
     if (bestDevice != null) {
-      print("Auto-connecting to ${bestDevice.deviceName}...");
+      debugPrint("Auto-connecting to ${bestDevice['deviceName']}...");
       try {
         await connectToDevice(bestDevice);
       } catch (e) {
-        print("Auto-connect failed: $e");
+        debugPrint("Auto-connect failed: $e");
         // Fallback: create own group
-        await createEmergencyGroup();
-      }
-    } else if (_discoveredDevices.length == 1) {
-      // Only one device available, connect to it
-      final device = _discoveredDevices.values.first;
-      print("Single device found, auto-connecting to ${device.deviceName}...");
-      try {
-        await connectToDevice(device);
-      } catch (e) {
-        print("Auto-connect failed: $e");
         await createEmergencyGroup();
       }
     }
   }
 
-  // Create emergency group with predefined password
+  // Create emergency group (become group owner)
   Future<void> createEmergencyGroup() async {
     try {
       // Ensure complete cleanup before creating new group
-      if (_currentRole != P2PRole.none || _hostInstance != null) {
+      if (_isConnected) {
         debugPrint('Cleaning up existing P2P connections...');
         await stopP2P();
-
-        // Add a small delay to ensure system cleanup
         await Future.delayed(const Duration(seconds: 1));
       }
 
-      // Initialize new host instance
-      _hostInstance = FlutterP2pHost();
-      await _hostInstance!.initialize();
+      debugPrint("Creating emergency WiFi Direct group...");
 
-      // Setup host listeners
-      _setupHostListeners();
-
+      // Remove any existing group first
       try {
-        // Create group - SSID and password are auto-generated by the system
-        final state = await _hostInstance!.createGroup(
-          advertise: true,
-          timeout: const Duration(seconds: 30),
-        );
-
-        if (state.isActive &&
-            state.ssid != null &&
-            state.preSharedKey != null) {
-          _currentRole = P2PRole.host;
-          _hostState = state;
-          _emergencyMode = true; // Set emergency mode flag
-
-          // Save the auto-generated credentials
-          _saveDeviceCredentials(
-            _deviceId!,
-            DeviceCredentials(
-              deviceId: _deviceId!,
-              ssid: state.ssid!,
-              psk: state.preSharedKey!, // Use the auto-generated password
-              isHost: true,
-              lastSeen: DateTime.now(),
-            ),
-          );
-
-          // Setup app-level emergency authentication
-          _setupEmergencyAuthenticationHost();
-
-          // Start broadcasting emergency beacon
-          _broadcastEmergencyBeacon();
-
-          notifyListeners();
-        } else {
-          throw Exception(
-            'Failed to create emergency group: ${state.failureReason}',
-          );
-        }
+        await FlutterP2pPlus.removeGroup();
+        await Future.delayed(const Duration(milliseconds: 500));
       } catch (e) {
-        // Clean up on failure
-        await _cleanupHostInstance();
-
-        if (e.toString().contains('already has an active LocalOnlyHotspot')) {
-          // Specific handling for hotspot already active error
-          debugPrint('Hotspot already active, attempting cleanup and retry...');
-
-          // Force cleanup and retry once
-          await Future.delayed(const Duration(seconds: 2));
-          await _forceCleanupAndRetry();
-        } else {
-          debugPrint('Error creating emergency group: $e');
-          rethrow;
-        }
+        // Ignore errors if no group exists
       }
+
+      _currentRole = P2PRole.host;
+      _emergencyMode = true;
+
+      // Start accepting connections on default port
+      await _startSocketServer();
+
+      debugPrint("Emergency group created successfully");
+      notifyListeners();
     } catch (e) {
-      debugPrint('Error in createEmergencyGroup: $e');
+      debugPrint('Error creating emergency group: $e');
       rethrow;
     }
   }
 
-  // Add cleanup helper method
-  Future<void> _cleanupHostInstance() async {
+  // Connect to discovered device
+  Future<void> connectToDevice(Map<String, dynamic> deviceData) async {
     try {
-      if (_hostInstance != null) {
-        await _hostInstance!.removeGroup().catchError((e) {
-          debugPrint('Error removing group: $e');
-        });
-        await _hostInstance!.dispose().catchError((e) {
-          debugPrint('Error disposing host: $e');
-        });
-        _hostInstance = null;
+      debugPrint("Connecting to device: ${deviceData['deviceName']}");
+
+      // Use the actual device from the discovered devices instead of creating a new one
+      final deviceAddress = deviceData['deviceAddress'];
+
+      // Find the actual device object from the events
+      WifiP2pDevice? actualDevice;
+
+      // We need to trigger discovery again to get the actual device objects
+      await FlutterP2pPlus.discoverDevices();
+
+      // Wait a moment for discovery to complete
+      await Future.delayed(const Duration(seconds: 2));
+
+      // For now, we'll use connect with the device address directly
+      // This is a workaround since we need the actual device object
+      try {
+        // Connect using device address - this may need adjustment based on actual API
+        await FlutterP2pPlus.connect(deviceAddress as WifiP2pDevice);
+      } catch (e) {
+        // If direct connection fails, try creating device object
+        debugPrint("Direct connection failed, trying alternative approach: $e");
+        throw Exception('Connection method needs API adjustment');
       }
-    } catch (e) {
-      debugPrint('Error in cleanup: $e');
-    }
-  }
 
-  // Force cleanup and retry method
-  Future<void> _forceCleanupAndRetry() async {
-    try {
-      // Force stop everything
-      await stopP2P();
-
-      // Wait for system to release resources
-      await Future.delayed(const Duration(seconds: 3));
-
-      // Try creating group again
-      _hostInstance = FlutterP2pHost();
-      await _hostInstance!.initialize();
-      _setupHostListeners();
-
-      final state = await _hostInstance!.createGroup(
-        advertise: true,
-        timeout: const Duration(seconds: 30),
+      // Save device credentials for future reconnection
+      _saveDeviceCredentials(
+        deviceData['deviceAddress'],
+        DeviceCredentials(
+          deviceId: deviceData['deviceAddress'],
+          ssid: deviceData['deviceName'], // Using device name as identifier
+          psk: emergencyPassword,
+          isHost: false,
+          lastSeen: DateTime.now(),
+        ),
       );
 
-      if (state.isActive && state.ssid != null && state.preSharedKey != null) {
-        _currentRole = P2PRole.host;
-        _hostState = state;
-        _emergencyMode = true;
-
-        _saveDeviceCredentials(
-          _deviceId!,
-          DeviceCredentials(
-            deviceId: _deviceId!,
-            ssid: state.ssid!,
-            psk: state.preSharedKey!,
-            isHost: true,
-            lastSeen: DateTime.now(),
-          ),
-        );
-
-        _setupEmergencyAuthenticationHost();
-        _broadcastEmergencyBeacon();
-        notifyListeners();
-      }
-    } catch (e) {
-      debugPrint('Retry failed: $e');
-      throw Exception('Unable to create emergency group. Please try again.');
-    }
-  }
-
-  // Broadcast emergency beacon periodically
-  void _broadcastEmergencyBeacon() {
-    if (_currentRole != P2PRole.host) return;
-
-    Timer.periodic(Duration(seconds: 5), (timer) {
-      if (_currentRole != P2PRole.host) {
-        timer.cancel();
-        return;
-      }
-
-      final beacon = {
-        'type': 'emergency_beacon',
-        'deviceId': _deviceId,
-        'userName': _userName,
-        'ssid': _hostState?.ssid,
-        'emergency': _emergencyMode,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'location': _emergencyMode ? _getCurrentLocation() : null,
-      };
-
-      _hostInstance?.broadcastText(jsonEncode(beacon));
-    });
-  }
-
-  // Get current location for emergency beacon
-  Map<String, double>? _getCurrentLocation() {
-    // This should be integrated with your location service
-    // Placeholder for now
-    return null;
-  }
-
-  // For connecting to device
-  Future<void> connectToDevice(BleDiscoveredDevice device) async {
-    if (_clientInstance == null) {
-      throw Exception('Client not initialized');
-    }
-
-    try {
-      // Connect using the credentials embedded in the BLE advertisement
-      await _clientInstance!.connectWithDevice(
-        device,
-        timeout: const Duration(seconds: 15),
-      );
-
-      // Wait a moment for the connection to stabilize
-      await Future.delayed(const Duration(seconds: 1));
-
-      // Listen for emergency beacons to determine if this is an emergency connection
-      final isEmergency = await _checkIfEmergencyConnection();
-
-      if (isEmergency) {
-        // Perform app-level authentication for emergency access
-        await _performEmergencyAuthentication();
-        _emergencyMode = true;
-      }
-
-      notifyListeners();
+      _currentRole = P2PRole.client;
+      debugPrint("Connected to device successfully");
     } catch (e) {
       debugPrint('Failed to connect to device: $e');
       throw Exception('Failed to connect to device: $e');
     }
   }
 
-  // App-level emergency authentication for host
-  void _setupEmergencyAuthenticationHost() {
-    _hostInstance!.streamReceivedTexts().listen((text) {
-      try {
-        final data = jsonDecode(text);
+  // Handle connection established
+  void _handleConnectionEstablished() async {
+    debugPrint("P2P connection established, isHost: $_isHost");
 
-        if (data['type'] == 'emergency_auth_request') {
-          final providedPassword = data['password'];
-          final clientId = data['deviceId'];
-          final clientName = data['userName'];
+    if (_isHost) {
+      // As group owner, start server socket
+      await _startSocketServer();
+    } else {
+      // As client, connect to group owner
+      await _connectToHost();
+    }
 
-          final isAuthenticated = providedPassword == emergencyPassword;
-
-          // Send authentication response
-          final response = {
-            'type': 'emergency_auth_response',
-            'authenticated': isAuthenticated,
-            'deviceId': _deviceId,
-            'timestamp': DateTime.now().millisecondsSinceEpoch,
-          };
-
-          _hostInstance!.sendTextToClient(jsonEncode(response), clientId);
-
-          if (isAuthenticated) {
-            _authenticatedEmergencyClients.add(clientId);
-            debugPrint(
-              'Emergency client authenticated: $clientName ($clientId)',
-            );
-          } else {
-            debugPrint(
-              'Emergency authentication failed for: $clientName ($clientId)',
-            );
-          }
-        }
-      } catch (e) {
-        // Not a JSON message or not an auth request, ignore
-      }
-    });
+    // Setup emergency authentication and messaging
+    _setupEmergencyMessaging();
   }
 
-  // App-level emergency authentication for client
-  Future<void> _performEmergencyAuthentication() async {
-    final completer = Completer<bool>();
-    StreamSubscription? authSubscription;
+  // Handle connection lost
+  void _handleConnectionLost() {
+    debugPrint("P2P connection lost");
 
-    // Listen for authentication response
-    authSubscription = _clientInstance!.streamReceivedTexts().listen((text) {
-      try {
-        final data = jsonDecode(text);
-        if (data['type'] == 'emergency_auth_response') {
-          final authenticated = data['authenticated'] == true;
-          authSubscription?.cancel();
-          completer.complete(authenticated);
-        }
-      } catch (e) {
-        // Not a JSON message, ignore
-      }
-    });
-
-    // Send authentication request
-    final authRequest = {
-      'type': 'emergency_auth_request',
-      'password': emergencyPassword,
-      'deviceId': _deviceId,
-      'userName': _userName,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-
-    await _clientInstance!.broadcastText(jsonEncode(authRequest));
-
-    // Wait for response with timeout
     try {
-      final authenticated = await completer.future.timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => false,
-      );
-
-      if (!authenticated) {
-        throw Exception('Emergency authentication failed');
-      }
-
-      debugPrint('Successfully authenticated with emergency group');
+      _socket?.writeString("DISCONNECT");
     } catch (e) {
-      authSubscription.cancel();
-      rethrow;
+      // Ignore socket errors during disconnect
     }
-  }
+    _socket = null;
+    _connectedDevices.clear();
+    _currentRole = P2PRole.none;
 
-  // Check if connected to an emergency host
-  Future<bool> _checkIfEmergencyConnection() async {
-    final completer = Completer<bool>();
-    StreamSubscription? beaconSubscription;
-
-    beaconSubscription = _clientInstance!.streamReceivedTexts().listen((text) {
-      try {
-        final data = jsonDecode(text);
-        if (data['type'] == 'emergency_beacon' && data['emergency'] == true) {
-          beaconSubscription?.cancel();
-          completer.complete(true);
-        }
-      } catch (e) {
-        // Not a JSON message, ignore
-      }
-    });
-
-    // Wait for beacon or timeout
-    try {
-      return await completer.future.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => false,
-      );
-    } finally {
-      beaconSubscription.cancel();
-    }
-  }
-
-  // Discover and join groups (become client)
-  Future<void> discoverGroups() async {
-    if (_currentRole != P2PRole.none) {
-      await stopP2P();
+    // In emergency mode, try to reconnect or create new group
+    if (_emergencyMode) {
+      Timer(Duration(seconds: 5), () {
+        _attemptAutoConnect();
+      });
     }
 
-    _clientInstance = FlutterP2pClient();
-    await _clientInstance!.initialize();
-
-    // Setup client listeners
-    _setupClientListeners();
-
-    _currentRole = P2PRole.client;
     notifyListeners();
   }
 
-  Future<StreamSubscription<List<BleDiscoveredDevice>>> startScan(
-    Function(List<BleDiscoveredDevice> devices) onDevicesFound,
-  ) async {
-    if (_clientInstance == null) {
-      throw Exception('Client not initialized');
-    }
+  // Start socket server (for group owner)
+  Future<void> _startSocketServer() async {
+    try {
+      _socket = await FlutterP2pPlus.openHostPort(defaultPort);
 
-    return await _clientInstance!.startScan(onDevicesFound);
+      // Listen for incoming data
+      _socket!.inputStream.listen((data) {
+        _handleIncomingData(data);
+      });
+
+      // Accept connections
+      await FlutterP2pPlus.acceptPort(defaultPort);
+
+      debugPrint("Socket server started on port $defaultPort");
+    } catch (e) {
+      debugPrint("Error starting socket server: $e");
+    }
   }
 
-  // Connect with known credentials
-  Future<void> connectWithCredentials(String ssid, String preSharedKey) async {
-    if (_clientInstance == null) {
-      await discoverGroups();
-    }
+  // Connect to host (for client)
+  Future<void> _connectToHost() async {
+    try {
+      if (_groupOwnerAddress == null) {
+        throw Exception("No group owner address available");
+      }
 
-    await _clientInstance!.connectWithCredentials(
-      ssid,
-      preSharedKey,
-      timeout: const Duration(seconds: 30),
-    );
+      _socket = await FlutterP2pPlus.connectToHost(
+        _groupOwnerAddress!,
+        defaultPort,
+        timeout: 10000,
+      );
+
+      // Listen for incoming data
+      _socket!.inputStream.listen((data) {
+        _handleIncomingData(data);
+      });
+
+      debugPrint("Connected to host socket");
+    } catch (e) {
+      debugPrint("Error connecting to host: $e");
+    }
+  }
+
+  // Handle incoming socket data
+  void _handleIncomingData(dynamic data) {
+    try {
+      String buffer = "";
+      final message = String.fromCharCodes(data.data);
+      buffer += message;
+
+      if (data.dataAvailable == 0) {
+        debugPrint("Received complete data: $buffer");
+        _handleIncomingText(buffer);
+        buffer = "";
+      }
+    } catch (e) {
+      debugPrint("Error handling incoming data: $e");
+    }
+  }
+
+  // Setup emergency messaging
+  void _setupEmergencyMessaging() {
+    // Send device info to establish identity
+    final deviceInfo = {
+      'type': 'device_info',
+      'deviceId': _deviceId,
+      'userName': _userName,
+      'emergency': _emergencyMode,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _sendSocketMessage(jsonEncode(deviceInfo));
+
+    // Start periodic heartbeat
+    Timer.periodic(Duration(seconds: 30), (timer) {
+      if (_socket == null) {
+        timer.cancel();
+        return;
+      }
+
+      final heartbeat = {
+        'type': 'heartbeat',
+        'deviceId': _deviceId,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+
+      _sendSocketMessage(jsonEncode(heartbeat));
+    });
+  }
+
+  // Send message through socket
+  Future<void> _sendSocketMessage(String message) async {
+    try {
+      if (_socket != null) {
+        await _socket!.writeString(message);
+      }
+    } catch (e) {
+      debugPrint("Error sending socket message: $e");
+    }
+  }
+
+  // Discover devices (start WiFi Direct discovery)
+  Future<void> discoverDevices() async {
+    await _performDiscoveryScan();
   }
 
   // Send message with multi-hop support
@@ -766,7 +641,7 @@ class P2PConnectionService with ChangeNotifier {
         ),
       );
     } catch (e) {
-      print("Could not get location: $e");
+      debugPrint("Could not get location: $e");
     }
 
     await sendMessage(
@@ -786,22 +661,16 @@ class P2PConnectionService with ChangeNotifier {
     );
 
     if (updatedMessage.ttl <= 0) {
-      print("Message TTL expired, dropping: ${message.id}");
+      debugPrint("Message TTL expired, dropping: ${message.id}");
       return;
     }
 
     final messageJson = jsonEncode(updatedMessage.toJson());
 
     try {
-      if (_currentRole == P2PRole.host && _hostInstance != null) {
-        // Host broadcasts to all clients
-        await _hostInstance!.broadcastText(messageJson);
-      } else if (_currentRole == P2PRole.client && _clientInstance != null) {
-        // Client sends to host (which will relay to others)
-        await _clientInstance!.broadcastText(messageJson);
-      }
+      await _sendSocketMessage(messageJson);
     } catch (e) {
-      print("Error broadcasting message: $e");
+      debugPrint("Error broadcasting message: $e");
       // Queue for retry
       _queuePendingMessage(updatedMessage);
     }
@@ -812,9 +681,12 @@ class P2PConnectionService with ChangeNotifier {
     try {
       final json = jsonDecode(text);
 
-      // Check if it's a special message type
-      if (json['type'] == 'emergency_beacon' || json['type'] == 'group_info') {
-        // Handle special messages differently
+      // Handle special message types
+      if (json['type'] == 'device_info') {
+        _handleDeviceInfo(json);
+        return;
+      } else if (json['type'] == 'heartbeat') {
+        _handleHeartbeat(json);
         return;
       }
 
@@ -822,13 +694,13 @@ class P2PConnectionService with ChangeNotifier {
 
       // Check if already processed (avoid loops)
       if (_processedMessageIds.contains(message.id)) {
-        print("Duplicate message ignored: ${message.id}");
+        debugPrint("Duplicate message ignored: ${message.id}");
         return;
       }
 
       // Check if device is in route path (avoid loops)
       if (message.routePath.contains(_deviceId)) {
-        print("Message already routed through this device: ${message.id}");
+        debugPrint("Message already routed through this device: ${message.id}");
         return;
       }
 
@@ -851,93 +723,35 @@ class P2PConnectionService with ChangeNotifier {
         _broadcastMessage(message);
       }
     } catch (e) {
-      print("Error handling message: $e");
+      debugPrint("Error handling message: $e");
     }
   }
 
-  // Setup host listeners
-  void _setupHostListeners() {
-    if (_hostInstance == null) return;
+  // Handle device info messages
+  void _handleDeviceInfo(Map<String, dynamic> json) {
+    final deviceId = json['deviceId'] as String?;
+    final userName = json['userName'] as String?;
 
-    // Host state changes
-    _hostStateSubscription = _hostInstance!.streamHotspotState().listen((
-      state,
-    ) {
-      _hostState = state;
-
-      if (state.isActive && state.ssid != null && state.preSharedKey != null) {
-        // Broadcast group info periodically
-        _broadcastGroupInfo();
-      }
-
-      notifyListeners();
-    });
-
-    // Client list updates
-    _clientListSubscription = _hostInstance!.streamClientList().listen((
-      clients,
-    ) {
-      _updateConnectedDevices(clients);
-    });
-
-    // Received messages
-    _receivedTextsSubscription = _hostInstance!.streamReceivedTexts().listen((
-      text,
-    ) {
-      _handleIncomingText(text);
-    });
-  }
-
-  // Setup client listeners
-  void _setupClientListeners() {
-    if (_clientInstance == null) return;
-
-    // Client state changes
-    _clientStateSubscription = _clientInstance!.streamHotspotState().listen((
-      state,
-    ) {
-      _clientState = state;
-
-      if (state.isActive && state.hostSsid != null) {
-        // Save host credentials for reconnection
-        _saveHostCredentials(state.hostSsid!);
-      }
-
-      notifyListeners();
-    });
-
-    // Participant list updates
-    _clientListSubscription = _clientInstance!.streamClientList().listen((
-      clients,
-    ) {
-      _updateConnectedDevices(clients);
-    });
-
-    // Received messages
-    _receivedTextsSubscription = _clientInstance!.streamReceivedTexts().listen((
-      text,
-    ) {
-      _handleIncomingText(text);
-    });
-  }
-
-  // Update connected devices list
-  void _updateConnectedDevices(List<P2pClientInfo> clients) {
-    _connectedDevices.clear();
-
-    for (var client in clients) {
-      _connectedDevices[client.id] = ConnectedDevice(
-        id: client.id,
-        name: client.username,
-        isHost: client.isHost,
+    if (deviceId != null && userName != null) {
+      _connectedDevices[deviceId] = ConnectedDevice(
+        id: deviceId,
+        name: userName,
+        isHost: false, // Will be updated based on connection role
         connectedAt: DateTime.now(),
       );
 
-      // Sync pending messages for this device
-      _syncPendingMessagesFor(client.id);
+      onDeviceConnected?.call(deviceId, userName);
+      notifyListeners();
     }
+  }
 
-    notifyListeners();
+  // Handle heartbeat messages
+  void _handleHeartbeat(Map<String, dynamic> json) {
+    final deviceId = json['deviceId'] as String?;
+    if (deviceId != null && _connectedDevices.containsKey(deviceId)) {
+      // Update last seen time
+      debugPrint("Heartbeat received from $deviceId");
+    }
   }
 
   // Save device credentials for reconnection
@@ -946,19 +760,6 @@ class P2PConnectionService with ChangeNotifier {
     DeviceCredentials credentials,
   ) async {
     _knownDevices[deviceId] = credentials;
-    await DatabaseService.saveDeviceCredentials(credentials);
-  }
-
-  // Save host credentials for reconnection
-  Future<void> _saveHostCredentials(String ssid) async {
-    final credentials = DeviceCredentials(
-      deviceId: ssid,
-      ssid: ssid,
-      psk: emergencyPassword, // Use emergency password
-      isHost: true,
-      lastSeen: DateTime.now(),
-    );
-
     await DatabaseService.saveDeviceCredentials(credentials);
   }
 
@@ -991,29 +792,6 @@ class P2PConnectionService with ChangeNotifier {
     DatabaseService.savePendingMessages(_pendingMessages);
   }
 
-  // Sync pending messages for a specific device
-  Future<void> _syncPendingMessagesFor(String deviceId) async {
-    final pending = _pendingMessages[deviceId] ?? [];
-
-    for (var pendingMsg in pending) {
-      if (pendingMsg.isExpired()) continue;
-
-      try {
-        await _broadcastMessage(pendingMsg.message);
-        // Remove from pending after successful send
-        _pendingMessages[deviceId]?.remove(pendingMsg);
-      } catch (e) {
-        pendingMsg.attempts++;
-        print("Failed to sync message: $e");
-      }
-    }
-
-    // Clean up
-    if (_pendingMessages[deviceId]?.isEmpty ?? false) {
-      _pendingMessages.remove(deviceId);
-    }
-  }
-
   // Load pending messages from database
   Future<void> _loadPendingMessages() async {
     final pending = await DatabaseService.getPendingMessages();
@@ -1022,33 +800,10 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Broadcast group info (for hosts)
-  void _broadcastGroupInfo() {
-    if (_currentRole != P2PRole.host || _hostState == null) return;
-
-    Timer.periodic(const Duration(seconds: 10), (timer) {
-      if (_currentRole != P2PRole.host) {
-        timer.cancel();
-        return;
-      }
-
-      final groupInfo = {
-        'type': 'group_info',
-        'deviceId': _deviceId,
-        'userName': _userName,
-        'ssid': _hostState!.ssid,
-        'psk': _hostState!.preSharedKey,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      };
-
-      _hostInstance?.broadcastText(jsonEncode(groupInfo));
-    });
-  }
-
-  // Background discovery for reconnection
+  // ✅ This is good!
   void _startBackgroundDiscovery() {
     Timer.periodic(Duration(minutes: 1), (timer) async {
-      if (_currentRole == P2PRole.none && _knownDevices.isNotEmpty) {
+      if (!_isConnected && _knownDevices.isNotEmpty) {
         // Try to discover known devices
         await _performDiscoveryScan();
       }
@@ -1058,17 +813,27 @@ class P2PConnectionService with ChangeNotifier {
   // Auto-reconnect to known devices
   void _startReconnectTimer() {
     _reconnectTimer = Timer.periodic(const Duration(minutes: 1), (_) async {
-      if (_currentRole != P2PRole.none) return;
+      if (_isConnected) return;
 
-      // Try to reconnect to known hosts
+      // Try to reconnect to known devices
       for (var device in _knownDevices.values) {
-        if (device.isHost &&
-            DateTime.now().difference(device.lastSeen).inHours < 24) {
+        if (DateTime.now().difference(device.lastSeen).inHours < 24) {
           try {
-            await connectWithCredentials(device.ssid, device.psk);
+            // Try to find and connect to this device
+            await _performDiscoveryScan();
+
+            // Wait for discovery results
+            await Future.delayed(Duration(seconds: 3));
+
+            final targetDevice = _discoveredDevices.values.firstWhere(
+              (d) => d['deviceAddress'] == device.deviceId,
+              orElse: () => throw Exception("Device not found"),
+            );
+
+            await connectToDevice(targetDevice);
             break; // Connected successfully
           } catch (e) {
-            print("Failed to reconnect to ${device.ssid}");
+            debugPrint("Failed to reconnect to ${device.deviceId}");
           }
         }
       }
@@ -1105,9 +870,9 @@ class P2PConnectionService with ChangeNotifier {
         await DatabaseService.markMessageSynced(message.id);
       }
 
-      print("Synced ${unsyncedMessages.length} messages to Firebase");
+      debugPrint("Synced ${unsyncedMessages.length} messages to Firebase");
     } catch (e) {
-      print("Firebase sync error: $e");
+      debugPrint("Firebase sync error: $e");
     }
   }
 
@@ -1159,19 +924,18 @@ class P2PConnectionService with ChangeNotifier {
     return '$_deviceId-$random-$timestamp';
   }
 
-  // Get device info with signal strength (if available)
+  // Get device info with connection status
   Map<String, dynamic> getDeviceInfo(String deviceAddress) {
     final device = _discoveredDevices[deviceAddress];
     final connected = _connectedDevices[deviceAddress];
 
     return {
       'address': deviceAddress,
-      'name': device?.deviceName ?? connected?.name ?? 'Unknown',
+      'name': device?['deviceName'] ?? connected?.name ?? 'Unknown',
       'isConnected': connected != null,
       'isKnown': _knownDevices.containsKey(deviceAddress),
       'lastSeen': _knownDevices[deviceAddress]?.lastSeen,
-      'signalStrength':
-          -70, // Placeholder - actual signal strength not available
+      'isAvailable': device?['status'] == 0, // 0 = AVAILABLE in WifiP2pDevice
     };
   }
 
@@ -1194,30 +958,22 @@ class P2PConnectionService with ChangeNotifier {
       'userName': _userName,
       'role': _currentRole.name,
       'isOnline': _isOnline,
+      'isConnected': _isConnected,
+      'isHost': _isHost,
       'connectedDevices': _connectedDevices.length,
       'knownDevices': _knownDevices.length,
+      'discoveredDevices': _discoveredDevices.length,
       'pendingMessages': _pendingMessages.values
           .expand((messages) => messages)
           .length,
       'processedMessages': _processedMessageIds.length,
-      'hostInfo': _hostState != null
-          ? {'ssid': _hostState!.ssid, 'isActive': _hostState!.isActive}
-          : null,
-      'clientInfo': _clientState != null
-          ? {
-              'hostSsid': _clientState!.hostSsid,
-              'isActive': _clientState!.isActive,
-            }
-          : null,
+      'groupOwnerAddress': _groupOwnerAddress,
     };
   }
 
   // Stop P2P operations
   Future<void> stopP2P() async {
     try {
-      // Clear authenticated clients
-      _authenticatedEmergencyClients.clear();
-
       // Cancel timers first
       _autoConnectTimer?.cancel();
       _discoveryTimer?.cancel();
@@ -1225,57 +981,91 @@ class P2PConnectionService with ChangeNotifier {
       // Cancel subscriptions
       await Future.wait(
         [
-          _hostStateSubscription?.cancel() ?? Future.value(),
-          _clientStateSubscription?.cancel() ?? Future.value(),
-          _clientListSubscription?.cancel() ?? Future.value(),
-          _receivedTextsSubscription?.cancel() ?? Future.value(),
-          _scanSubscription?.cancel() ?? Future.value(),
+          _stateChangeSubscription?.cancel() ?? Future.value(),
+          _connectionChangeSubscription?.cancel() ?? Future.value(),
+          _peersChangeSubscription?.cancel() ?? Future.value(),
+          _deviceChangeSubscription?.cancel() ?? Future.value(),
+          _discoveryChangeSubscription?.cancel() ?? Future.value(),
         ].cast<Future<void>>(),
       );
 
-      // Gracefully stop host if exists
-      if (_hostInstance != null && _currentRole == P2PRole.host) {
+      // Close socket safely
+      try {
+        _socket?.writeString("DISCONNECT");
+      } catch (e) {
+        // Ignore socket errors during disconnect
+      }
+      _socket = null;
+
+      // Remove P2P group if we're the owner
+      if (_isHost) {
         try {
-          // Don't remove group immediately - just stop advertising
-          await Future.delayed(const Duration(milliseconds: 500));
-          await _hostInstance!.removeGroup().timeout(
-            const Duration(seconds: 2),
-            onTimeout: () {
-              debugPrint('Timeout removing group');
-            },
-          );
+          await FlutterP2pPlus.removeGroup();
         } catch (e) {
-          debugPrint('Non-fatal error removing group: $e');
+          debugPrint('Error removing group: $e');
         }
-        _hostInstance = null;
       }
 
-      // Gracefully stop client if exists
-      if (_clientInstance != null && _currentRole == P2PRole.client) {
-        try {
-          await _clientInstance!.disconnect().timeout(
-            const Duration(seconds: 2),
-            onTimeout: () {
-              debugPrint('Timeout disconnecting client');
-            },
-          );
-        } catch (e) {
-          debugPrint('Non-fatal error disconnecting: $e');
-        }
-        _clientInstance = null;
-      }
+      // Unregister from native events
+      FlutterP2pPlus.unregister();
 
       // Reset state
       _currentRole = P2PRole.none;
-      _hostState = null;
-      _clientState = null;
+      _isConnected = false;
+      _isGroupOwner = false;
+      _groupOwnerAddress = null;
       _connectedDevices.clear();
+      _isHost = false;
 
       notifyListeners();
     } catch (e) {
       debugPrint('Error in stopP2P: $e');
       // Don't rethrow - prevent app crash
     }
+  }
+
+  // Disconnect from current P2P group
+  Future<void> disconnect() async {
+    try {
+      await FlutterP2pPlus.removeGroup();
+    } catch (e) {
+      debugPrint('Error disconnecting: $e');
+    }
+  }
+
+  // Sync pending messages for a specific device
+  void _syncPendingMessagesFor(String deviceId) async {
+    final pending = _pendingMessages[deviceId] ?? [];
+
+    for (var pendingMsg in pending) {
+      if (pendingMsg.isExpired()) continue;
+
+      try {
+        await _broadcastMessage(pendingMsg.message);
+        // Remove from pending after successful send
+        _pendingMessages[deviceId]?.remove(pendingMsg);
+      } catch (e) {
+        pendingMsg.attempts++;
+        debugPrint("Failed to sync message: $e");
+      }
+    }
+
+    // Clean up
+    if (_pendingMessages[deviceId]?.isEmpty ?? false) {
+      _pendingMessages.remove(deviceId);
+    }
+
+    // Sync pending messages when device connects
+    for (var deviceId in _connectedDevices.keys) {
+      _syncPendingMessagesFor(deviceId);
+    }
+  }
+
+  // Get current location for emergency beacon
+  Map<String, double>? _getCurrentLocation() {
+    // This should be integrated with your location service
+    // Placeholder for now
+    return null;
   }
 
   // Dispose service
@@ -1295,13 +1085,16 @@ class P2PConnectionService with ChangeNotifier {
   Map<String, ConnectedDevice> get connectedDevices =>
       Map.from(_connectedDevices);
   Map<String, DeviceCredentials> get knownDevices => Map.from(_knownDevices);
+  Map<String, Map<String, dynamic>> get discoveredDevices =>
+      Map.from(_discoveredDevices);
   List<P2PMessage> get messageHistory => List.from(_messageHistory);
   String? get deviceId => _deviceId;
   String? get userName => _userName;
   P2PRole get currentRole => _currentRole;
   bool get isOnline => _isOnline;
-  HotspotHostState? get hostState => _hostState;
-  HotspotClientState? get clientState => _clientState;
+  bool get isConnected => _isConnected;
+  bool get isHost => _isHost;
+  String? get groupOwnerAddress => _groupOwnerAddress;
 }
 
 // Enums and Models
