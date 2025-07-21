@@ -398,14 +398,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "8.2.1"
-  flutter_p2p_connection:
+  flutter_p2p_plus:
     dependency: "direct main"
     description:
-      name: flutter_p2p_connection
-      sha256: "814a6e35a47a368a9e0812d8375ca3715885abd55049f3371eefd6c25d19e082"
+      name: flutter_p2p_plus
+      sha256: "1cc033e6f2b8b2f2985f41e9bef62ed74a62e775beb7777431a5884b5e0b7ee1"
       url: "https://pub.dev"
     source: hosted
-    version: "3.0.2"
+    version: "1.0.2"
   flutter_secure_storage:
     dependency: "direct main"
     description:
@@ -821,6 +821,14 @@ packages:
     description:
       name: proj4dart
       sha256: c8a659ac9b6864aa47c171e78d41bbe6f5e1d7bd790a5814249e6b68bc44324e
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
+  protobuf:
+    dependency: transitive
+    description:
+      name: protobuf
+      sha256: "01dd9bd0fa02548bf2ceee13545d4a0ec6046459d847b6b061d8a27237108a08"
       url: "https://pub.dev"
     source: hosted
     version: "2.1.0"

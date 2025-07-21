@@ -6,7 +6,6 @@ import 'gps_page.dart';
 import 'settings_page.dart';
 import '../services/p2p_services.dart';
 import '../services/database_service.dart';
-import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class HomePage extends StatefulWidget {
@@ -460,7 +459,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
   LocationModel? _latestLocation;
   bool _isLoadingLocation = true;
   int _unsyncedCount = 0;
-  List<BleDiscoveredDevice> _discoveredDevices = [];
+  List<Map<String, dynamic>> _discoveredDevices = []; // Updated type
   bool _isScanning = false;
 
   // Animation controller for emergency pulse
@@ -509,7 +508,8 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     if (mounted) setState(() {});
   }
 
-  void _onDevicesDiscovered(List<BleDiscoveredDevice> devices) {
+  void _onDevicesDiscovered(List<Map<String, dynamic>> devices) {
+    // Updated signature
     if (mounted) {
       setState(() {
         _discoveredDevices = devices;
@@ -593,18 +593,12 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
 
     try {
       await widget.p2pService.checkAndRequestPermissions();
-      await widget.p2pService.enableServices();
 
-      // Start discovery scan
-      final subscription = await widget.p2pService.startScan((devices) {
-        setState(() {
-          _discoveredDevices = devices;
-        });
-      });
+      // Start WiFi Direct discovery scan
+      await widget.p2pService.discoverDevices();
 
       // Stop scan after 10 seconds
       Future.delayed(Duration(seconds: 10), () {
-        subscription.cancel();
         if (mounted) {
           setState(() {
             _isScanning = false;
@@ -779,15 +773,13 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
             const SizedBox(height: 12),
             _buildStatusRow(
               Icons.person,
-              valueColor: const Color.fromARGB(223, 175, 163, 163),
-
               'Device ID',
               connectionInfo['deviceId']?.toString().substring(0, 8) ??
                   'Not initialized',
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
             ),
             _buildStatusRow(
               Icons.router,
-
               'Role',
               connectionInfo['role']?.toString().toUpperCase() ?? 'NONE',
               valueColor: widget.p2pService.currentRole != P2PRole.none
@@ -796,10 +788,9 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
             ),
             _buildStatusRow(
               Icons.devices,
-              valueColor: const Color.fromARGB(223, 175, 163, 163),
-
               'Connected',
               '${connectionInfo['connectedDevices'] ?? 0} devices',
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
             ),
             if (isConnected) ...[
               const SizedBox(height: 12),
@@ -949,7 +940,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                 itemBuilder: (context, index) {
                   final device = _discoveredDevices[index];
                   final deviceInfo = widget.p2pService.getDeviceInfo(
-                    device.deviceAddress,
+                    device['deviceAddress'],
                   );
 
                   return ListTile(
@@ -963,11 +954,11 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                         size: 20,
                       ),
                     ),
-                    title: Text(device.deviceName),
+                    title: Text(device['deviceName']),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(device.deviceAddress),
+                        Text(device['deviceAddress']),
                         if (deviceInfo['isKnown'])
                           Text(
                             'Known device',
@@ -1004,7 +995,8 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     );
   }
 
-  Future<void> _connectToDevice(BleDiscoveredDevice device) async {
+  Future<void> _connectToDevice(Map<String, dynamic> device) async {
+    // Updated parameter
     try {
       await widget.p2pService.connectToDevice(device);
 
@@ -1013,7 +1005,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Connected to ${device.deviceName}'),
+          content: Text('Connected to ${device['deviceName']}'),
           backgroundColor: Colors.green,
         ),
       );
@@ -1079,23 +1071,21 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
             const SizedBox(height: 12),
             _buildLocationRow(
               Icons.map,
-              valueColor: const Color.fromARGB(223, 175, 163, 163),
               "Latitude",
               _latestLocation!.latitude.toStringAsFixed(6),
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
             ),
             _buildLocationRow(
               Icons.map,
-              valueColor: const Color.fromARGB(223, 175, 163, 163),
-
               "Longitude",
               _latestLocation!.longitude.toStringAsFixed(6),
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
             ),
             _buildLocationRow(
               Icons.access_time,
-              valueColor: const Color.fromARGB(223, 175, 163, 163),
-
               "Time",
               _formatDateTime(_latestLocation!.timestamp),
+              valueColor: const Color.fromARGB(223, 175, 163, 163),
             ),
             const SizedBox(height: 8),
             Row(
@@ -1154,16 +1144,16 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
       itemBuilder: (context, index) {
         final device = _discoveredDevices[index];
         final deviceInfo = widget.p2pService.getDeviceInfo(
-          device.deviceAddress,
+          device['deviceAddress'],
         );
 
         // Simulate signal strength based on device name/address
-        // In real implementation, this would come from the BLE scan
+        // In real implementation, this would come from the WiFi Direct scan
         final signalStrength = -50 - (index * 10); // Mock data
 
         return DeviceSignalWidget(
-          deviceName: device.deviceName,
-          deviceAddress: device.deviceAddress,
+          deviceName: device['deviceName'],
+          deviceAddress: device['deviceAddress'],
           signalStrength: signalStrength,
           isConnected: deviceInfo['isConnected'] ?? false,
           isKnown: deviceInfo['isKnown'] ?? false,
@@ -1189,15 +1179,14 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                 const SizedBox(width: 8),
                 Text(
                   'How It Works',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, ),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-
             _buildInstructionItem(
               '1.',
-              'Emergency Mode automatically discovers and connects to nearby devices',
+              'Emergency Mode automatically discovers and connects to nearby devices using WiFi Direct (up to 200m range)',
             ),
             _buildInstructionItem(
               '2.',
@@ -1205,7 +1194,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
             ),
             _buildInstructionItem(
               '3.',
-              'All devices use the same emergency password: ${P2PConnectionService.emergencyPassword}',
+              'No internet required - pure peer-to-peer communication',
             ),
             _buildInstructionItem(
               '4.',
