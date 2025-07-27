@@ -3,25 +3,12 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:resqlink/home_page.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'dart:async';
-
-// Emergency-optimized theme colors
-class ResQLinkTheme {
-  static const Color primaryRed = Color(0xFFE53935);
-  static const Color darkRed = Color(0xFFB71C1C);
-  static const Color emergencyOrange = Color(0xFFFF6F00);
-  static const Color safeGreen = Color(0xFF43A047);
-  static const Color warningYellow = Color(0xFFFFD600);
-  static const Color offlineGray = Color(0xFF616161);
-  static const Color backgroundDark = Color(0xFF121212);
-  static const Color surfaceDark = Color(0xFF1E1E1E);
-  static const Color cardDark = Color(0xFF2C2C2C);
-}
+import '../utils/resqlink_theme.dart';
 
 // Location types for emergency scenarios
 enum LocationType {
@@ -108,7 +95,6 @@ class LocationModel {
     };
   }
 
-  // Get marker color based on type and emergency level
   Color getMarkerColor() {
     switch (type) {
       case LocationType.emergency:
@@ -282,7 +268,7 @@ class FirebaseLocationService {
         await LocationService.markLocationSynced(location.id!);
       }
     } catch (e) {
-      print('Error syncing location to Firebase: $e');
+      debugPrint('Error syncing location to Firebase: $e');
       rethrow;
     }
   }
@@ -294,7 +280,7 @@ class FirebaseLocationService {
         await syncLocation(location);
       }
     } catch (e) {
-      print('Error syncing all locations: $e');
+      debugPrint('Error syncing all locations: $e');
       rethrow;
     }
   }
@@ -312,43 +298,36 @@ class GpsPage extends StatefulWidget {
 
 class _GpsPageState extends State<GpsPage>
     with WidgetsBindingObserver, TickerProviderStateMixin {
-  // Core variables
   final List<LocationModel> savedLocations = [];
   final MapController _mapController = MapController();
   final Battery _battery = Battery();
 
-  // Location and connectivity
   LocationModel? _lastKnownLocation;
   LatLng? _currentLocation;
   bool _isLocationServiceEnabled = false;
   bool _isConnected = false;
 
-  // Emergency states
   EmergencyLevel _currentEmergencyLevel = EmergencyLevel.safe;
   bool _sosMode = false;
   int _batteryLevel = 100;
   bool _isOnBatteryPowerSaving = false;
 
-  // UI states
   bool _isLoading = true;
   String _errorMessage = '';
   bool _showMapTypeSelector = false;
-  int _selectedMapType = 0; // 0: Street, 1: Satellite, 2: Terrain
+  int _selectedMapType = 0;
 
-  // Timers and streams
   Timer? _locationTimer;
   Timer? _sosTimer;
   Timer? _batteryTimer;
   StreamSubscription<Position>? _positionStream;
-  StreamSubscription<ConnectivityResult>? _connectivitySubscription;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
 
-  // Animation controllers
   late AnimationController _pulseController;
   late AnimationController _sosAnimationController;
   late Animation<double> _pulseAnimation;
   late Animation<double> _sosAnimation;
 
-  // Map tile sources
   final List<String> _mapTypes = ['Street', 'Satellite', 'Terrain'];
   final List<String> _tileUrls = [
     'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -417,8 +396,8 @@ class _GpsPageState extends State<GpsPage>
 
       await _initializeServices();
       await _loadSavedLocations();
-      _checkConnectivity(); // Await this if it's asynchronous
-      _startBatteryMonitoring(); // Await this if it's asynchronous
+      await _checkConnectivity();
+      await _startBatteryMonitoring();
       await _startLocationTracking();
 
       setState(() {
@@ -429,8 +408,7 @@ class _GpsPageState extends State<GpsPage>
         _isLoading = false;
         _errorMessage = 'Failed to initialize GPS: $e';
       });
-      // Optionally log the error for debugging
-      print('Initialization error: $e');
+      debugPrint('Initialization error: $e');
     }
   }
 
@@ -442,13 +420,9 @@ class _GpsPageState extends State<GpsPage>
 
   Future<void> _checkLocationPermission() async {
     try {
-      // First check if location services are enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        // Check if widget is still mounted before using context
         if (!mounted) return;
-
-        // Show dialog to enable location services
         await showDialog(
           context: context,
           barrierDismissible: false,
@@ -472,12 +446,9 @@ class _GpsPageState extends State<GpsPage>
         return;
       }
 
-      // Check permission
       LocationPermission permission = await Geolocator.checkPermission();
-
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-
         if (permission == LocationPermission.denied) {
           _showLocationError('Location permissions are denied');
           return;
@@ -485,10 +456,7 @@ class _GpsPageState extends State<GpsPage>
       }
 
       if (permission == LocationPermission.deniedForever) {
-        // Check if widget is still mounted before using context
         if (!mounted) return;
-
-        // Show dialog to open app settings
         await showDialog(
           context: context,
           barrierDismissible: false,
@@ -516,8 +484,6 @@ class _GpsPageState extends State<GpsPage>
         return;
       }
 
-      // Permission granted, start location tracking
-      // Check if widget is still mounted before calling setState
       if (mounted) {
         setState(() {
           _isLocationServiceEnabled = true;
@@ -532,6 +498,7 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _showLocationError(String message) {
+    if (!mounted) return;
     setState(() {
       _isLocationServiceEnabled = false;
       _errorMessage = message;
@@ -563,7 +530,7 @@ class _GpsPageState extends State<GpsPage>
         _mapController.move(_currentLocation!, 15.0);
       }
     } catch (e) {
-      print('Error loading last location: $e');
+      debugPrint('Error loading last location: $e');
     }
   }
 
@@ -577,71 +544,58 @@ class _GpsPageState extends State<GpsPage>
         });
       }
     } catch (e) {
-      print('Error loading locations: $e');
+      debugPrint('Error loading locations: $e');
     }
   }
 
-  void _checkConnectivity() {
-    _connectivitySubscription =
-        Connectivity().onConnectivityChanged.listen((
-              List<ConnectivityResult> results, // Changed to List
-            ) async {
-              if (mounted) {
-                final wasConnected = _isConnected;
-                setState(() {
-                  _isConnected = results.any(
-                    (result) => result != ConnectivityResult.none,
-                  );
-                });
+  Future<void> _checkConnectivity() async {
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+      List<ConnectivityResult> results,
+    ) async {
+      if (!mounted) return;
+      final wasConnected = _isConnected;
+      setState(() {
+        _isConnected = results.any(
+          (result) => result != ConnectivityResult.none,
+        );
+      });
 
-                if (!wasConnected && _isConnected) {
-                  _showMessage(
-                    'Connection restored! Syncing data...',
-                    isSuccess: true,
-                  );
-                  await _syncLocationsToFirebase();
-                  final unsyncedCount =
-                      await LocationService.getUnsyncedCount();
-                  if (unsyncedCount == 0) {
-                    _showMessage('All locations synced!', isSuccess: true);
-                  }
-                } else if (wasConnected && !_isConnected) {
-                  _showMessage(
-                    'OFFLINE MODE - Data saved locally',
-                    isWarning: true,
-                  );
-                }
-              }
-            })
-            as StreamSubscription<ConnectivityResult>?;
+      if (!wasConnected && _isConnected) {
+        _showMessage('Connection restored! Syncing data...', isSuccess: true);
+        await _syncLocationsToFirebase();
+        final unsyncedCount = await LocationService.getUnsyncedCount();
+        if (unsyncedCount == 0) {
+          _showMessage('All locations synced!', isSuccess: true);
+        }
+      } else if (wasConnected && !_isConnected) {
+        _showMessage('OFFLINE MODE - Data saved locally', isWarning: true);
+      }
+    });
   }
 
-  void _startBatteryMonitoring() {
+  Future<void> _startBatteryMonitoring() async {
     _checkBatteryLevel();
+    _batteryTimer?.cancel();
     _batteryTimer = Timer.periodic(const Duration(minutes: 5), (timer) {
-      _checkBatteryLevel();
+      if (mounted) {
+        _checkBatteryLevel();
+      } else {
+        timer.cancel();
+      }
     });
   }
 
   Future<void> _checkBatteryLevel() async {
     try {
       final level = await _battery.batteryLevel;
-
-      // Check if we should show warning before using context
-      final shouldShow = await BatteryWarningManager.shouldShowWarning(level);
-
       if (mounted) {
         setState(() {
           _batteryLevel = level;
         });
-
-        // Now use context only if mounted and should show
-        if (shouldShow && mounted) {
-          BatteryWarningManager.showDismissibleWarning(context, level);
-        }
       }
     } catch (e) {
-      print('Error checking battery level: $e');
+      debugPrint('Error checking battery level: $e');
     }
   }
 
@@ -652,21 +606,18 @@ class _GpsPageState extends State<GpsPage>
     }
 
     try {
-      // First, try to get current location immediately
       await _getCurrentLocation();
 
-      // Adjust tracking frequency based on battery level
-      final distanceFilter = _batteryLevel < 20 ? 20 : 10; // meters
+      final distanceFilter = _batteryLevel < 20 ? 20 : 10;
       final accuracy = _batteryLevel < 20
           ? LocationAccuracy.medium
           : LocationAccuracy.high;
-
-      // Use the distanceFilter and accuracy in LocationSettings
       final locationSettings = LocationSettings(
-        accuracy: accuracy, // Use the accuracy variable
-        distanceFilter: distanceFilter, // Use the distanceFilter variable
+        accuracy: accuracy,
+        distanceFilter: distanceFilter,
       );
 
+      _positionStream?.cancel();
       _positionStream =
           Geolocator.getPositionStream(
             locationSettings: locationSettings,
@@ -677,35 +628,38 @@ class _GpsPageState extends State<GpsPage>
               }
             },
             onError: (error) {
-              print('Position stream error: $error');
-              setState(() {
-                _errorMessage = 'GPS tracking error: $error';
-              });
-
-              // Try to restart tracking after error
-              Future.delayed(Duration(seconds: 5), () {
-                if (mounted && _isLocationServiceEnabled) {
-                  _startLocationTracking();
-                }
-              });
+              debugPrint('Position stream error: $error');
+              if (mounted) {
+                setState(() {
+                  _errorMessage = 'GPS tracking error: $error';
+                });
+                Future.delayed(Duration(seconds: 5), () {
+                  if (mounted && _isLocationServiceEnabled) {
+                    _startLocationTracking();
+                  }
+                });
+              }
             },
           );
 
-      // Update location periodically (less frequent if low battery)
       final updateInterval = _batteryLevel < 20
           ? Duration(minutes: 2)
           : Duration(seconds: 30);
-
+      _locationTimer?.cancel();
       _locationTimer = Timer.periodic(updateInterval, (timer) {
         if (mounted && _isLocationServiceEnabled) {
           _getCurrentLocation();
+        } else {
+          timer.cancel();
         }
       });
     } catch (e) {
-      print('Error starting location tracking: $e');
-      setState(() {
-        _errorMessage = 'Failed to start tracking: $e';
-      });
+      debugPrint('Error starting location tracking: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Failed to start tracking: $e';
+        });
+      }
     }
   }
 
@@ -713,27 +667,46 @@ class _GpsPageState extends State<GpsPage>
     if (!_isLocationServiceEnabled) return;
 
     try {
-      // Show loading indicator
       _showMessage('Getting current location...', isSuccess: false);
 
-      // Configure location settings based on battery level
       final locationSettings = LocationSettings(
         accuracy: _batteryLevel < 20
             ? LocationAccuracy.medium
             : LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 15),
+        timeLimit: const Duration(seconds: 5),
       );
 
-      Position position = await Geolocator.getCurrentPosition(
-        locationSettings: locationSettings,
-      );
+      Position position;
+      if (bool.fromEnvironment('dart.vm.product') == false) {
+        try {
+          position = await Geolocator.getCurrentPosition(
+            locationSettings: locationSettings,
+          );
+        } catch (e) {
+          position = Position(
+            latitude: 14.5995,
+            longitude: 120.9842,
+            timestamp: DateTime.now(),
+            accuracy: 0.0,
+            altitude: 0.0,
+            heading: 0.0,
+            speed: 0.0,
+            speedAccuracy: 0.0,
+            altitudeAccuracy: 0.0,
+            headingAccuracy: 0.0,
+          );
+          debugPrint('Using mock location due to emulator: $e');
+        }
+      } else {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: locationSettings,
+        );
+      }
 
       _updateCurrentLocation(position);
       _showMessage('Location updated!', isSuccess: true);
     } catch (e) {
-      print('Error getting location: $e');
-
-      // Try to get last known position as fallback
+      debugPrint('Error getting location: $e');
       try {
         Position? lastPosition = await Geolocator.getLastKnownPosition();
         if (lastPosition != null) {
@@ -743,7 +716,7 @@ class _GpsPageState extends State<GpsPage>
           _showMessage('Unable to get location', isDanger: true);
         }
       } catch (e2) {
-        print('Error getting last known position: $e2');
+        debugPrint('Error getting last known position: $e2');
         _showMessage('Location service error', isDanger: true);
       }
     }
@@ -769,7 +742,6 @@ class _GpsPageState extends State<GpsPage>
       _errorMessage = '';
     });
 
-    // Auto-save location in emergency situations
     if (_currentEmergencyLevel.index >= EmergencyLevel.warning.index ||
         _sosMode) {
       _saveCurrentLocation(silent: true);
@@ -777,6 +749,7 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _activateSOS() {
+    if (!mounted) return;
     setState(() {
       _sosMode = true;
       _currentEmergencyLevel = EmergencyLevel.critical;
@@ -785,18 +758,20 @@ class _GpsPageState extends State<GpsPage>
     _sosAnimationController.repeat(reverse: true);
     _showMessage('SOS ACTIVATED! Broadcasting location...', isDanger: true);
 
-    // Send immediate SOS location
     _sendSOSLocation();
 
-    // Send SOS signal every 30 seconds
+    _sosTimer?.cancel();
     _sosTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       if (_sosMode && mounted) {
         _sendSOSLocation();
+      } else {
+        timer.cancel();
       }
     });
   }
 
   void _deactivateSOS() {
+    if (!mounted) return;
     setState(() {
       _sosMode = false;
       _currentEmergencyLevel = EmergencyLevel.safe;
@@ -838,8 +813,12 @@ class _GpsPageState extends State<GpsPage>
       }
     }
 
-    if (widget.onLocationShare != null) {
+    if (widget.onLocationShare != null &&
+        bool.fromEnvironment('dart.vm.product')) {
       widget.onLocationShare!(sosLocation);
+    } else {
+      debugPrint('Skipping P2P location share on emulator');
+      _showMessage('P2P sharing disabled on emulator', isWarning: true);
     }
 
     await _loadSavedLocations();
@@ -879,7 +858,7 @@ class _GpsPageState extends State<GpsPage>
       await FirebaseLocationService.syncAllUnsyncedLocations();
       await _loadSavedLocations();
     } catch (e) {
-      print('Sync error: $e');
+      debugPrint('Sync error: $e');
     }
   }
 
@@ -915,6 +894,7 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _showLocationTypeDialog() {
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -1157,15 +1137,12 @@ class _GpsPageState extends State<GpsPage>
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
-        initialCenter:
-            _currentLocation ??
-            const LatLng(14.5995, 120.9842), // Manila, Philippines default
+        initialCenter: _currentLocation ?? const LatLng(14.5995, 120.9842),
         initialZoom: 13.0,
         maxZoom: 18.0,
         minZoom: 5.0,
         onLongPress: (tapPos, latLng) => _showLocationTypeDialog(),
         onMapReady: () {
-          // Center on current location when map is ready
           if (_currentLocation != null) {
             _mapController.move(_currentLocation!, 15.0);
           }
@@ -1177,28 +1154,24 @@ class _GpsPageState extends State<GpsPage>
           subdomains: const ['a', 'b', 'c'],
           userAgentPackageName: 'com.resqlink.app',
         ),
-        // Route lines for saved locations
         if (savedLocations.length > 1)
           PolylineLayer(
             polylines: [
               Polyline(
                 points: savedLocations
+                    .take(50)
                     .map((loc) => LatLng(loc.latitude, loc.longitude))
                     .toList(),
                 strokeWidth: 3.0,
                 color: ResQLinkTheme.emergencyOrange.withAlpha(
                   (255 * 0.7).toInt(),
                 ),
-                pattern: StrokePattern.dashed(
-                  segments: [6.0, 4.0],
-                ), // Use pattern instead of isDotted
+                pattern: StrokePattern.dashed(segments: [6.0, 4.0]),
               ),
             ],
           ),
-        // Markers layer
         MarkerLayer(
           markers: [
-            // Current location marker
             if (_currentLocation != null)
               Marker(
                 width: 80,
@@ -1207,7 +1180,6 @@ class _GpsPageState extends State<GpsPage>
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    // Pulse animation for current location
                     AnimatedBuilder(
                       animation: _pulseAnimation,
                       builder: (context, child) {
@@ -1258,38 +1230,39 @@ class _GpsPageState extends State<GpsPage>
                   ],
                 ),
               ),
-            // Saved location markers
-            ...savedLocations.map(
-              (location) => Marker(
-                width: 60,
-                height: 60,
-                point: LatLng(location.latitude, location.longitude),
-                child: GestureDetector(
-                  onTap: () => _showLocationDetails(location),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: location.getMarkerColor(),
-                      border: Border.all(color: Colors.white, width: 2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: location.getMarkerColor().withAlpha(
-                            (255 * 0.5).toInt(),
-                          ),
-                          blurRadius: 8,
-                          spreadRadius: 1,
+            ...savedLocations
+                .take(50)
+                .map(
+                  (location) => Marker(
+                    width: 60,
+                    height: 60,
+                    point: LatLng(location.latitude, location.longitude),
+                    child: GestureDetector(
+                      onTap: () => _showLocationDetails(location),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: location.getMarkerColor(),
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: location.getMarkerColor().withAlpha(
+                                (255 * 0.5).toInt(),
+                              ),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    child: Icon(
-                      location.getMarkerIcon(),
-                      color: Colors.white,
-                      size: 28,
+                        child: Icon(
+                          location.getMarkerIcon(),
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
           ],
         ),
       ],
@@ -1303,7 +1276,6 @@ class _GpsPageState extends State<GpsPage>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Status card - using IntrinsicWidth to fit content
             IntrinsicWidth(
               child: Container(
                 padding: const EdgeInsets.all(12),
@@ -1319,11 +1291,11 @@ class _GpsPageState extends State<GpsPage>
                   ],
                 ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min, // Make column fit content
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      mainAxisSize: MainAxisSize.min, // Make row fit content
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
                           _isConnected ? Icons.cloud_done : Icons.cloud_off,
@@ -1347,7 +1319,7 @@ class _GpsPageState extends State<GpsPage>
                     ),
                     const SizedBox(height: 4),
                     Row(
-                      mainAxisSize: MainAxisSize.min, // Make row fit content
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
                           Icons.battery_full,
@@ -1385,8 +1357,7 @@ class _GpsPageState extends State<GpsPage>
                       builder: (context, snapshot) {
                         final count = snapshot.data ?? 0;
                         return Row(
-                          mainAxisSize:
-                              MainAxisSize.min, // Make row fit content
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
                               Icons.sync,
@@ -1411,9 +1382,8 @@ class _GpsPageState extends State<GpsPage>
                 ),
               ),
             ),
-            // Control buttons
             Column(
-              mainAxisSize: MainAxisSize.min, // Make column fit content
+              mainAxisSize: MainAxisSize.min,
               children: [
                 _buildControlButton(
                   icon: Icons.layers,
@@ -1690,6 +1660,7 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _showLocationDetails(LocationModel location) {
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       backgroundColor: ResQLinkTheme.surfaceDark,
@@ -1773,11 +1744,17 @@ class _GpsPageState extends State<GpsPage>
                   ),
                   TextButton.icon(
                     onPressed: () {
-                      // Share location functionality
-                      if (widget.onLocationShare != null) {
+                      if (widget.onLocationShare != null &&
+                          bool.fromEnvironment('dart.vm.product')) {
                         widget.onLocationShare!(location);
                         Navigator.pop(context);
                         _showMessage('Location shared!', isSuccess: true);
+                      } else {
+                        Navigator.pop(context);
+                        _showMessage(
+                          'P2P sharing disabled on emulator',
+                          isWarning: true,
+                        );
                       }
                     },
                     icon: const Icon(
