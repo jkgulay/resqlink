@@ -88,10 +88,13 @@ class _HomePageState extends State<HomePage>
       };
 
       _p2pService.onDeviceConnected = (deviceId, userName) {
+        _p2pService.syncPendingMessagesFor(deviceId);
+
+        final device = _p2pService.connectedDevices[deviceId];
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Connected to $userName'),
+              content: Text('Connected to ${device?.name ?? userName}'),
               backgroundColor: Colors.green,
               duration: Duration(seconds: 2),
             ),
