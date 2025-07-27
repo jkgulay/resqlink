@@ -385,8 +385,11 @@ class P2PConnectionService with ChangeNotifier {
       final deviceAddress = deviceData['deviceAddress'];
 
       // Find the actual device object from the events
-      WifiP2pDevice? actualDevice;
-
+      final device = _discoveredDevices[deviceAddress] as WifiP2pDevice?;
+      if (device == null) {
+        throw Exception("Device not found in discovered devices");
+      }
+      
       // We need to trigger discovery again to get the actual device objects
       await FlutterP2pPlus.discoverDevices();
 
@@ -1034,7 +1037,7 @@ class P2PConnectionService with ChangeNotifier {
   }
 
   // Sync pending messages for a specific device
-  void _syncPendingMessagesFor(String deviceId) async {
+  void syncPendingMessagesFor(String deviceId) async {
     final pending = _pendingMessages[deviceId] ?? [];
 
     for (var pendingMsg in pending) {
@@ -1057,15 +1060,8 @@ class P2PConnectionService with ChangeNotifier {
 
     // Sync pending messages when device connects
     for (var deviceId in _connectedDevices.keys) {
-      _syncPendingMessagesFor(deviceId);
+      syncPendingMessagesFor(deviceId);
     }
-  }
-
-  // Get current location for emergency beacon
-  Map<String, double>? _getCurrentLocation() {
-    // This should be integrated with your location service
-    // Placeholder for now
-    return null;
   }
 
   // Dispose service
