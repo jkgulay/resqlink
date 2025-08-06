@@ -367,15 +367,42 @@ class _GpsPageState extends State<GpsPage>
   }
 
   @override
+  @override
   void dispose() {
+    print('🔧 GpsPage: Starting disposal...');
+
+    // 1. Remove lifecycle observer FIRST
     WidgetsBinding.instance.removeObserver(this);
+
+    // 2. Cancel all timers immediately
     _locationTimer?.cancel();
+    _locationTimer = null;
+
     _sosTimer?.cancel();
+    _sosTimer = null;
+
     _batteryTimer?.cancel();
+    _batteryTimer = null;
+
+    // 3. Cancel all stream subscriptions
     _positionStream?.cancel();
+    _positionStream = null;
+
     _connectivitySubscription?.cancel();
+    _connectivitySubscription = null;
+
+    // 4. Stop and dispose animations
+    if (_pulseController.isAnimating) {
+      _pulseController.stop();
+    }
     _pulseController.dispose();
+
+    if (_sosAnimationController.isAnimating) {
+      _sosAnimationController.stop();
+    }
     _sosAnimationController.dispose();
+
+    print('✅ GpsPage: Disposal completed');
     super.dispose();
   }
 
@@ -389,25 +416,38 @@ class _GpsPageState extends State<GpsPage>
 
   Future<void> _initializeApp() async {
     try {
+      if (!mounted) return; // Early exit if already disposed
+
       setState(() {
         _isLoading = true;
         _errorMessage = '';
       });
 
       await _initializeServices();
+      if (!mounted) return;
+
       await _loadSavedLocations();
+      if (!mounted) return;
+
       await _checkConnectivity();
+      if (!mounted) return;
+
       await _startBatteryMonitoring();
+      if (!mounted) return;
+
       await _startLocationTracking();
+      if (!mounted) return;
 
       setState(() {
         _isLoading = false;
       });
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Failed to initialize GPS: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Failed to initialize GPS: $e';
+        });
+      }
       debugPrint('Initialization error: $e');
     }
   }
@@ -528,6 +568,8 @@ class _GpsPageState extends State<GpsPage>
           );
         });
         _mapController.move(_currentLocation!, 15.0);
+      } else if (!mounted) {
+        print('⚠️ Skipping last location update - widget not mounted');
       }
     } catch (e) {
       debugPrint('Error loading last location: $e');
@@ -542,6 +584,8 @@ class _GpsPageState extends State<GpsPage>
           savedLocations.clear();
           savedLocations.addAll(locations);
         });
+      } else {
+        print('⚠️ Skipping saved locations update - widget not mounted');
       }
     } catch (e) {
       debugPrint('Error loading locations: $e');
@@ -553,7 +597,11 @@ class _GpsPageState extends State<GpsPage>
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
       List<ConnectivityResult> results,
     ) async {
-      if (!mounted) return;
+      if (!mounted) {
+        print('⚠️ Connectivity change ignored - widget not mounted');
+        return;
+      }
+
       final wasConnected = _isConnected;
       setState(() {
         _isConnected = results.any(
@@ -565,10 +613,10 @@ class _GpsPageState extends State<GpsPage>
         _showMessage('Connection restored! Syncing data...', isSuccess: true);
         await _syncLocationsToFirebase();
         final unsyncedCount = await LocationService.getUnsyncedCount();
-        if (unsyncedCount == 0) {
+        if (unsyncedCount == 0 && mounted) {
           _showMessage('All locations synced!', isSuccess: true);
         }
-      } else if (wasConnected && !_isConnected) {
+      } else if (wasConnected && !_isConnected && mounted) {
         _showMessage('OFFLINE MODE - Data saved locally', isWarning: true);
       }
     });
@@ -581,6 +629,7 @@ class _GpsPageState extends State<GpsPage>
       if (mounted) {
         _checkBatteryLevel();
       } else {
+        print('🛑 Canceling battery timer - widget disposed');
         timer.cancel();
       }
     });
@@ -593,6 +642,8 @@ class _GpsPageState extends State<GpsPage>
         setState(() {
           _batteryLevel = level;
         });
+      } else {
+        print('⚠️ Skipping battery level update - widget not mounted');
       }
     } catch (e) {
       debugPrint('Error checking battery level: $e');
@@ -625,6 +676,8 @@ class _GpsPageState extends State<GpsPage>
             (Position position) {
               if (mounted) {
                 _updateCurrentLocation(position);
+              } else {
+                print('⚠️ Position update ignored - widget not mounted');
               }
             },
             onError: (error) {
@@ -650,6 +703,7 @@ class _GpsPageState extends State<GpsPage>
         if (mounted && _isLocationServiceEnabled) {
           _getCurrentLocation();
         } else {
+          print('🛑 Canceling location timer - widget disposed');
           timer.cancel();
         }
       });
@@ -723,7 +777,11 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _updateCurrentLocation(Position position) {
-    if (!mounted) return;
+    // Add mounted check at the very beginning
+    if (!mounted) {
+      print('⚠️ Skipping location update - widget not mounted');
+      return;
+    }
 
     final newLocation = LatLng(position.latitude, position.longitude);
     final locationModel = LocationModel(
@@ -749,7 +807,11 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _activateSOS() {
-    if (!mounted) return;
+    if (!mounted) {
+      print('⚠️ Skipping SOS activation - widget not mounted');
+      return;
+    }
+
     setState(() {
       _sosMode = true;
       _currentEmergencyLevel = EmergencyLevel.critical;
@@ -771,7 +833,11 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _deactivateSOS() {
-    if (!mounted) return;
+    if (!mounted) {
+      print('⚠️ Skipping SOS deactivation - widget not mounted');
+      return;
+    }
+
     setState(() {
       _sosMode = false;
       _currentEmergencyLevel = EmergencyLevel.safe;
@@ -868,7 +934,10 @@ class _GpsPageState extends State<GpsPage>
     bool isWarning = false,
     bool isDanger = false,
   }) {
-    if (!mounted) return;
+    if (!mounted) {
+      print('⚠️ Message ignored - widget not mounted: $message');
+      return;
+    }
 
     final color = isDanger
         ? ResQLinkTheme.primaryRed
