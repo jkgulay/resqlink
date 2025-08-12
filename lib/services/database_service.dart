@@ -216,6 +216,25 @@ class DatabaseService {
     }
   }
 
+  static Future<UserModel?> getUserByEmail(String email) async {
+    try {
+      final db = await database;
+      final result = await db.query(
+        _userTable,
+        where: 'email = ?',
+        whereArgs: [email.toLowerCase()],
+      );
+
+      if (result.isNotEmpty) {
+        return UserModel.fromMap(result.first);
+      }
+      return null;
+    } catch (e) {
+      print('Error getting user by email: $e');
+      return null;
+    }
+  }
+
   static Future<void> clearUsers() async {
     final db = await database;
     await db.delete(_userTable);
@@ -292,15 +311,17 @@ class DatabaseService {
 
   // Device operations
   static Future<void> saveDeviceCredentials(
-    DeviceCredentials credentials,
-  ) async {
+    DeviceCredentials credentials, {
+    String? userName,
+  }) async {
     final db = await database;
-    await db.insert('known_devices', {
+    await db.insert(_knownDevicesTable, {
       'device_id': credentials.deviceId,
       'ssid': credentials.ssid,
       'psk': credentials.psk,
       'is_host': credentials.isHost ? 1 : 0,
       'last_seen': credentials.lastSeen.millisecondsSinceEpoch,
+      'user_name': userName, // Add this
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -341,6 +362,44 @@ class DatabaseService {
       }
     }
     await batch.commit();
+  }
+
+  static Future<void> markFirebaseSynced(String messageId) async {
+    final db = await database;
+    await db.update(
+      _messagesTable,
+      {'synced_to_firebase': 1},
+      where: 'message_id = ?',
+      whereArgs: [messageId],
+    );
+  }
+
+  static Future<List<P2PMessage>> getUnsyncedToFirebase() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      _messagesTable,
+      where: 'synced_to_firebase = 0',
+      orderBy: 'timestamp ASC',
+    );
+
+    return maps.map((map) {
+      return P2PMessage(
+        id: map['message_id'] ?? 'legacy_${map['id']}',
+        senderId: map['endpoint_id'],
+        senderName: map['from_user'],
+        message: map['message'],
+        type: MessageType.values.firstWhere(
+          (e) => e.name == map['type'],
+          orElse: () => MessageType.text,
+        ),
+        timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp']),
+        ttl: 0,
+        latitude: map['latitude'],
+        longitude: map['longitude'],
+        routePath: [],
+        synced: false,
+      );
+    }).toList();
   }
 
   static Future<List<MapEntry<String, List<PendingMessage>>>>
