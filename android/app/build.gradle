@@ -2,7 +2,7 @@ plugins {
     id "com.android.application"
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
-    id "com.google.gms.google-services" version "4.4.2" apply false
+    id "com.google.gms.google-services"  
 }
 
 def localProperties = new Properties()
@@ -23,25 +23,26 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+
 android {
     namespace "com.example.resqlink"
-    compileSdk 35  // Changed from 34 to 35
-    ndkVersion "27.0.12077973"  // Changed from 25.1.8937393 to 27.0.12077973
+    compileSdk 34  // Keep this stable version
+    ndkVersion "25.1.8937393"  // Keep this stable version
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_1_8  // Downgrade from 17
+        targetCompatibility JavaVersion.VERSION_1_8
+        // Remove coreLibraryDesugaringEnabled
     }
 
     kotlinOptions {
-        jvmTarget = '17'
+        jvmTarget = '1.8'  // Downgrade from 17
     }
 
     defaultConfig {
         applicationId "com.example.resqlink"
-        minSdkVersion 23
-        targetSdk 35  // Changed from 34 to 35
+        minSdkVersion 21  // Change from 23 to 21 for broader compatibility
+        targetSdkVersion 34  // Keep stable
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
@@ -58,7 +59,7 @@ flutter {
 }
 
 dependencies {
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
-    implementation platform('com.google.firebase:firebase-bom:33.15.0')
+    // Remove coreLibraryDesugaring
+    implementation platform('com.google.firebase:firebase-bom:32.7.0')  // Use stable version
     implementation 'com.google.firebase:firebase-analytics'
 }
