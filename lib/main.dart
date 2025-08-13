@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:resqlink/message_page.dart';
+import 'package:resqlink/services/map_service.dart';
 import 'firebase_options.dart';
 import 'home_page.dart';
 import 'services/auth_service.dart';
@@ -209,6 +210,7 @@ Future<UserModel?> tryOfflineLogin() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -216,6 +218,15 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Firebase init failed (offline?): $e');
   }
+
+  // Initialize map service early
+  try {
+    await PhilippinesMapService.instance.initialize();
+    debugPrint('Map service initialized successfully');
+  } catch (e) {
+    debugPrint('Map service initialization failed: $e');
+  }
+
   await NotificationService.initialize();
   if (kDebugMode) {
     await DatabaseService.deleteDatabaseFile();
