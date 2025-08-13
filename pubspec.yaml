@@ -36,7 +36,9 @@ dependencies:
   device_info_plus: ^11.5.0
   image_picker: ^1.1.2
   file_picker: ^10.2.0
+  flutter_map_tile_caching: ^10.1.1
   path_provider: ^2.1.5
+  http: ^1.5.0
 
 dev_dependencies:
   flutter_test:
@@ -47,6 +49,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/1.png
+    - assets/maps/philippines_base.mbtiles
   fonts:
     - family: Ubuntu
       fonts:

@@ -7,6 +7,7 @@ import 'settings_page.dart';
 import '../services/p2p_services.dart';
 import '../services/database_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'services/map_service.dart';
 
 class HomePage extends StatefulWidget {
   @override
@@ -36,6 +37,7 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.addObserver(this);
     _loadCurrentLocation();
     _initializeP2P();
+    _initializeMapService();
 
     pages = [
       EmergencyHomePage(
@@ -66,6 +68,15 @@ class _HomePageState extends State<HomePage>
     if (state == AppLifecycleState.resumed) {
       // Check permissions when app resumes
       _p2pService.checkAndRequestPermissions();
+    }
+  }
+
+  Future<void> _initializeMapService() async {
+    try {
+      await PhilippinesMapService.instance.initialize();
+      debugPrint('Map service initialized successfully');
+    } catch (e) {
+      debugPrint('Failed to initialize map service: $e');
     }
   }
 

@@ -63,3 +63,10 @@ app.*.map.json
 
 # local.properties (sdk paths etc, do not commit)
 /android/local.properties
+
+# FMTC cache files
+*.mbtiles
+*.sqlite
+lib/data/cache/
+flutter_map_tile_caching/
+assets/maps/*.mbtiles

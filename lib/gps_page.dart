@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -9,6 +10,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'dart:async';
 import '../utils/resqlink_theme.dart';
+import 'services/map_service.dart';
 
 // Location types for emergency scenarios
 enum LocationType {
@@ -146,6 +148,7 @@ class LocationModel {
   }
 }
 
+// Enhanced Location Service (same as your existing one)
 class LocationService {
   static Database? _database;
   static const String _tableName = 'locations';
@@ -310,12 +313,17 @@ class _GpsPageState extends State<GpsPage>
   EmergencyLevel _currentEmergencyLevel = EmergencyLevel.safe;
   bool _sosMode = false;
   int _batteryLevel = 100;
-  bool _isOnBatteryPowerSaving = false;
 
   bool _isLoading = true;
   String _errorMessage = '';
   bool _showMapTypeSelector = false;
   int _selectedMapType = 0;
+
+  // Offline map features
+  bool _isDownloadingMaps = false;
+  double _downloadProgress = 0.0;
+  bool _offlineMode = false;
+  Map<String, dynamic> _cacheInfo = {};
 
   Timer? _locationTimer;
   Timer? _sosTimer;
@@ -367,14 +375,11 @@ class _GpsPageState extends State<GpsPage>
   }
 
   @override
-  @override
   void dispose() {
     print('🔧 GpsPage: Starting disposal...');
 
-    // 1. Remove lifecycle observer FIRST
     WidgetsBinding.instance.removeObserver(this);
 
-    // 2. Cancel all timers immediately
     _locationTimer?.cancel();
     _locationTimer = null;
 
@@ -384,14 +389,12 @@ class _GpsPageState extends State<GpsPage>
     _batteryTimer?.cancel();
     _batteryTimer = null;
 
-    // 3. Cancel all stream subscriptions
     _positionStream?.cancel();
     _positionStream = null;
 
     _connectivitySubscription?.cancel();
     _connectivitySubscription = null;
 
-    // 4. Stop and dispose animations
     if (_pulseController.isAnimating) {
       _pulseController.stop();
     }
@@ -411,17 +414,22 @@ class _GpsPageState extends State<GpsPage>
     if (state == AppLifecycleState.resumed) {
       _checkLocationPermission();
       _checkBatteryLevel();
+      _updateCacheInfo();
     }
   }
 
   Future<void> _initializeApp() async {
     try {
-      if (!mounted) return; // Early exit if already disposed
+      if (!mounted) return;
 
       setState(() {
         _isLoading = true;
         _errorMessage = '';
       });
+
+      // Initialize offline maps
+      await PhilippinesMapService.instance.initialize();
+      await _updateCacheInfo();
 
       await _initializeServices();
       if (!mounted) return;
@@ -450,6 +458,101 @@ class _GpsPageState extends State<GpsPage>
       }
       debugPrint('Initialization error: $e');
     }
+  }
+
+  Widget _buildDownloadDialog() {
+    double radius = 5.0; // km
+    int minZoom = 10;
+    int maxZoom = 16;
+
+    return StatefulBuilder(
+      builder: (context, setState) {
+        return AlertDialog(
+          backgroundColor: ResQLinkTheme.cardDark,
+          title: const Text(
+            'Download Offline Maps',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Download maps for offline use around your current location',
+                style: TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Text('Radius: ', style: TextStyle(color: Colors.white)),
+                  Expanded(
+                    child: Slider(
+                      value: radius,
+                      min: 1.0,
+                      max: 20.0,
+                      divisions: 19,
+                      label: '${radius.toInt()} km',
+                      onChanged: (value) => setState(() => radius = value),
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Text('Min Zoom: ', style: TextStyle(color: Colors.white)),
+                  Expanded(
+                    child: Slider(
+                      value: minZoom.toDouble(),
+                      min: 8,
+                      max: 18,
+                      divisions: 10,
+                      label: minZoom.toString(),
+                      onChanged: (value) =>
+                          setState(() => minZoom = value.toInt()),
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Text('Max Zoom: ', style: TextStyle(color: Colors.white)),
+                  Expanded(
+                    child: Slider(
+                      value: maxZoom.toDouble(),
+                      min: minZoom.toDouble(),
+                      max: 18,
+                      divisions: 18 - minZoom,
+                      label: maxZoom.toString(),
+                      onChanged: (value) =>
+                          setState(() => maxZoom = value.toInt()),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, {
+                'radius': radius,
+                'minZoom': minZoom,
+                'maxZoom': maxZoom,
+              }),
+              child: const Text(
+                'Download',
+                style: TextStyle(color: ResQLinkTheme.primaryRed),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _initializeServices() async {
@@ -554,6 +657,122 @@ class _GpsPageState extends State<GpsPage>
         ),
       ),
     );
+  }
+
+  Future<void> _updateCacheInfo() async {
+    try {
+      final stats = await PhilippinesMapService.instance.getCacheStats();
+      final totalSize = stats.values.fold(
+        0,
+        (total, stat) => total + stat.sizeBytes, // Changed 'sum' to 'total'
+      );
+      final totalTiles = stats.values.fold(
+        0,
+        (total, stat) => total + stat.tileCount, // Changed 'sum' to 'total'
+      );
+      final info = {
+        'cachedTiles': totalTiles,
+        'storageSize': totalSize,
+        'storageSizeMB': (totalSize / (1024 * 1024)).toStringAsFixed(2),
+      };
+
+      if (mounted) {
+        setState(() {
+          _cacheInfo = info;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error updating cache info: $e');
+    }
+  }
+
+  LatLngBounds _calculateBounds(LatLng center, double radiusKm) {
+    // Approximate conversion: 1 degree ≈ 111 km
+    final latOffset = radiusKm / 111.0;
+    final lngOffset =
+        radiusKm / (111.0 * math.cos(center.latitude * math.pi / 180));
+
+    return LatLngBounds(
+      LatLng(center.latitude - latOffset, center.longitude - lngOffset), // SW
+      LatLng(center.latitude + latOffset, center.longitude + lngOffset), // NE
+    );
+  }
+
+  Future<void> _downloadOfflineMaps() async {
+    if (_currentLocation == null) {
+      _showMessage('No location available for download', isWarning: true);
+      return;
+    }
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => _buildDownloadDialog(),
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      _isDownloadingMaps = true;
+      _downloadProgress = 0.0;
+    });
+
+    try {
+      // Calculate bounds for the download area
+      final radiusKm = result['radius'];
+      final bounds = _calculateBounds(_currentLocation!, radiusKm);
+
+      // Use PhilippinesMapService for caching
+      final downloadProgress = await PhilippinesMapService.instance.cacheArea(
+        bounds: bounds,
+        minZoom: result['minZoom'],
+        maxZoom: result['maxZoom'],
+        regionName: 'Current Area Download',
+        isEmergencyCache: false,
+      );
+
+      // Listen to download progress
+      downloadProgress.stream.listen(
+        (progress) {
+          // Remove the percentageProgress access since it doesn't exist
+          if (mounted) {
+            setState(() {
+              _downloadProgress =
+                  0.5; // Use a placeholder or implement proper progress tracking
+            });
+          }
+        },
+        onDone: () {
+          if (mounted) {
+            setState(() {
+              _isDownloadingMaps = false;
+              _downloadProgress = 0.0;
+            });
+            _showMessage(
+              'Offline maps downloaded successfully!',
+              isSuccess: true,
+            );
+            _updateCacheInfo();
+          }
+        },
+        onError: (error) {
+          if (mounted) {
+            setState(() {
+              _isDownloadingMaps = false;
+              _downloadProgress = 0.0;
+            });
+            _showMessage('Download failed: $error', isDanger: true);
+          }
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isDownloadingMaps = false;
+          _downloadProgress = 0.0;
+        });
+        _showMessage('Download failed: $e', isDanger: true);
+      }
+    }
   }
 
   Future<void> _loadLastKnownLocation() async {
@@ -1222,6 +1441,12 @@ class _GpsPageState extends State<GpsPage>
           urlTemplate: _tileUrls[_selectedMapType],
           subdomains: const ['a', 'b', 'c'],
           userAgentPackageName: 'com.resqlink.app',
+          tileProvider: _offlineMode
+              ? PhilippinesMapService.instance
+                    .getTileLayer(zoom: _mapController.camera.zoom.toInt())
+                    .tileProvider
+              : NetworkTileProvider(),
+          fallbackUrl: _offlineMode ? null : _tileUrls[_selectedMapType],
         ),
         if (savedLocations.length > 1)
           PolylineLayer(
@@ -1345,6 +1570,7 @@ class _GpsPageState extends State<GpsPage>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
+            // Enhanced status panel with PhilippinesMapService info
             IntrinsicWidth(
               child: Container(
                 padding: const EdgeInsets.all(12),
@@ -1363,6 +1589,7 @@ class _GpsPageState extends State<GpsPage>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Connection status
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -1387,6 +1614,31 @@ class _GpsPageState extends State<GpsPage>
                       ],
                     ),
                     const SizedBox(height: 4),
+                    // Offline maps status (enhanced with Philippines info)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.map,
+                          color: _cacheInfo['cachedTiles'] > 0
+                              ? ResQLinkTheme.safeGreen
+                              : Colors.grey,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _cacheInfo['cachedTiles'] > 0
+                              ? '${_cacheInfo['storageSizeMB']} MB + PH Base'
+                              : 'PH Base Ready',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // Battery status
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -1410,47 +1662,13 @@ class _GpsPageState extends State<GpsPage>
                                 : FontWeight.normal,
                           ),
                         ),
-                        if (_isOnBatteryPowerSaving) ...[
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.power_settings_new,
-                            color: ResQLinkTheme.warningYellow,
-                            size: 16,
-                          ),
-                        ],
                       ],
-                    ),
-                    const SizedBox(height: 4),
-                    FutureBuilder<int>(
-                      future: LocationService.getUnsyncedCount(),
-                      builder: (context, snapshot) {
-                        final count = snapshot.data ?? 0;
-                        return Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.sync,
-                              color: count > 0
-                                  ? ResQLinkTheme.warningYellow
-                                  : ResQLinkTheme.safeGreen,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              count > 0 ? '$count pending' : 'Synced',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        );
-                      },
                     ),
                   ],
                 ),
               ),
             ),
+            // Enhanced control buttons
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1472,6 +1690,27 @@ class _GpsPageState extends State<GpsPage>
                   icon: Icons.save_alt,
                   onPressed: () => _saveCurrentLocation(),
                 ),
+                const SizedBox(height: 8),
+                _buildControlButton(
+                  icon: Icons.download,
+                  onPressed: _downloadOfflineMaps,
+                  isActive: _isDownloadingMaps,
+                ),
+                const SizedBox(height: 8),
+                _buildControlButton(
+                  icon: _offlineMode ? Icons.cloud_off : Icons.cloud,
+                  onPressed: () {
+                    setState(() {
+                      _offlineMode = !_offlineMode;
+                    });
+                    _showMessage(
+                      _offlineMode
+                          ? 'Offline mode enabled'
+                          : 'Online mode enabled',
+                      isSuccess: true,
+                    );
+                  },
+                ),
               ],
             ),
           ],
@@ -1483,10 +1722,13 @@ class _GpsPageState extends State<GpsPage>
   Widget _buildControlButton({
     required IconData icon,
     required VoidCallback onPressed,
+    bool isActive = false,
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: ResQLinkTheme.cardDark.withAlpha((255 * 0.9).toInt()),
+        color: isActive
+            ? ResQLinkTheme.primaryRed.withAlpha((255 * 0.9).toInt())
+            : ResQLinkTheme.cardDark.withAlpha((255 * 0.9).toInt()),
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
@@ -1496,10 +1738,196 @@ class _GpsPageState extends State<GpsPage>
           ),
         ],
       ),
-      child: IconButton(
-        icon: Icon(icon, color: Colors.white),
-        onPressed: onPressed,
-        iconSize: 24,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          IconButton(
+            icon: Icon(icon, color: Colors.white),
+            onPressed: onPressed,
+            iconSize: 24,
+          ),
+          if (_isDownloadingMaps && icon == Icons.download)
+            SizedBox(
+              width: 48,
+              height: 48,
+              child: CircularProgressIndicator(
+                value: _downloadProgress,
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomInfo() {
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: IntrinsicHeight(
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: ResQLinkTheme.surfaceDark.withAlpha((255 * 0.95).toInt()),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(24),
+              topRight: Radius.circular(24),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha((255 * 0.3).toInt()),
+                blurRadius: 10,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_lastKnownLocation != null) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Current Location',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${_lastKnownLocation!.latitude.toStringAsFixed(6)}, '
+                            '${_lastKnownLocation!.longitude.toStringAsFixed(6)}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Flexible(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            _offlineMode ? 'OFFLINE MODE' : 'Last Update',
+                            style: TextStyle(
+                              color: _offlineMode
+                                  ? ResQLinkTheme.emergencyOrange
+                                  : Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _formatTime(_lastKnownLocation!.timestamp),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ] else
+                const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Long press map to mark locations • Hold SOS for emergency',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  if (_cacheInfo['cachedTiles'] > 0)
+                    GestureDetector(
+                      onTap: _showOfflineMapInfo,
+                      child: Icon(
+                        Icons.info_outline,
+                        color: Colors.white54,
+                        size: 16,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showOfflineMapInfo() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: ResQLinkTheme.cardDark,
+        title: const Text(
+          'Offline Maps',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Cached Tiles: ${_cacheInfo['cachedTiles'] ?? 0}',
+              style: TextStyle(color: Colors.white70),
+            ),
+            Text(
+              'Storage Used: ${_cacheInfo['storageSizeMB'] ?? '0'} MB',
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Offline maps allow you to use GPS even without internet connection. '
+              'Philippines base maps are pre-loaded.',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await PhilippinesMapService.instance.clearCache(null);
+              await _updateCacheInfo();
+              _showMessage('User cache cleared', isSuccess: true);
+            },
+            child: const Text(
+              'Clear Cache',
+              style: TextStyle(color: ResQLinkTheme.primaryRed),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
       ),
     );
   }
@@ -1618,111 +2046,6 @@ class _GpsPageState extends State<GpsPage>
               ),
             );
           }),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBottomInfo() {
-    return Positioned(
-      bottom: 0,
-      left: 0,
-      right: 0,
-      child: IntrinsicHeight(
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: ResQLinkTheme.surfaceDark.withAlpha((255 * 0.95).toInt()),
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(24),
-              topRight: Radius.circular(24),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha((255 * 0.3).toInt()),
-                blurRadius: 10,
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (_lastKnownLocation != null) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Flexible(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Current Location',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${_lastKnownLocation!.latitude.toStringAsFixed(6)}, '
-                            '${_lastKnownLocation!.longitude.toStringAsFixed(6)}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Flexible(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          const Text(
-                            'Last Update',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _formatTime(_lastKnownLocation!.timestamp),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-              ] else
-                const SizedBox(height: 8),
-              const Text(
-                'Long press map to mark locations • Hold SOS for emergency',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
         ),
       ),
     );
