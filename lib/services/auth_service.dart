@@ -198,3 +198,5 @@ class AuthResult {
       user = null,
       method = null;
 }
+
+

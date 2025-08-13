@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:resqlink/gps_page.dart';
+import 'package:resqlink/services/message_sync_service.dart';
 import '../services/p2p_services.dart';
 import '../services/database_service.dart';
 import '../models/message_model.dart';
@@ -136,6 +137,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
+  // Services
+  final MessageSyncService _syncService = MessageSyncService();
+
   // State Variables
   List<MessageSummary> _conversations = [];
   List<MessageModel> _selectedConversationMessages = [];
@@ -143,6 +147,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isChatView = false;
   Timer? _refreshTimer;
+  StreamSubscription? _p2pSubscription;
 
   // Lifecycle Methods
   @override
@@ -153,46 +158,79 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
   void _initialize() {
+    _syncService.initialize();
     _loadConversations();
+
+    // Setup P2P listener with proper cleanup
+    _p2pSubscription = widget.p2pService.messageHistory.isNotEmpty
+        ? Stream.periodic(
+            const Duration(seconds: 1),
+          ).listen((_) => _onP2PUpdate())
+        : null;
+
     widget.p2pService.addListener(_onP2PUpdate);
     widget.p2pService.onMessageReceived = _onMessageReceived;
-    _refreshTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => _loadConversations(),
-    );
+
+    // Refresh conversations every 10 seconds, but only if mounted
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) {
+        _loadConversations();
+      }
+    });
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    debugPrint('🗑️ MessagePage disposing...');
+
+    // Cancel all timers and subscriptions FIRST
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
+
+    _p2pSubscription?.cancel();
+    _p2pSubscription = null;
+
+    // Remove listeners
+    widget.p2pService.removeListener(_onP2PUpdate);
+    widget.p2pService.onMessageReceived = null;
+
+    // Dispose controllers
     _messageController.dispose();
     _scrollController.dispose();
-    _refreshTimer?.cancel();
-    widget.p2pService.removeListener(_onP2PUpdate);
+
+    // Dispose services
+    _syncService.dispose();
+
+    // Remove observer
+    WidgetsBinding.instance.removeObserver(this);
+
+    debugPrint('✅ MessagePage disposed');
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed && mounted) {
       await _loadConversations();
     }
   }
 
   // Data Loading Methods
   Future<void> _loadConversations() async {
+    if (!mounted) return;
+
     try {
       final messages = await DatabaseService.getAllMessages();
       final connectedDevices = widget.p2pService.connectedDevices;
       final knownDevices = await DatabaseService.getKnownDevices();
+
       final deviceMap = {
         for (final device in knownDevices)
-          device.deviceId:
-              widget.p2pService.getDeviceInfo(device.deviceId)['name'] ??
-              device.deviceId.substring(0, 8),
+          device.deviceId: device.deviceId.substring(0, 8), // Fallback name
       };
 
       final Map<String, MessageSummary> conversationMap = {};
+
       for (final message in messages) {
         final endpointId = message.endpointId;
         final deviceName =
@@ -201,17 +239,18 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             endpointId.substring(0, 8);
 
         if (!conversationMap.containsKey(endpointId)) {
-          final messageCount = await DatabaseService.getMessages(
-            endpointId,
-          ).then((msgs) => msgs.length);
-          final unreadCount = await DatabaseService.getMessages(
-            endpointId,
-          ).then((msgs) => msgs.where((m) => !m.synced).length);
+          final endpointMessages = messages
+              .where((m) => m.endpointId == endpointId)
+              .toList();
+          final unreadCount = endpointMessages
+              .where((m) => !m.synced && !m.isMe)
+              .length;
+
           conversationMap[endpointId] = MessageSummary(
             endpointId: endpointId,
             deviceName: deviceName,
             lastMessage: message,
-            messageCount: messageCount,
+            messageCount: endpointMessages.length,
             unreadCount: unreadCount,
             isConnected: connectedDevices.containsKey(endpointId),
           );
@@ -222,11 +261,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           )) {
             conversationMap[endpointId] = MessageSummary(
               endpointId: endpointId,
-              deviceName: deviceName,
+              deviceName: currentSummary.deviceName,
               lastMessage: message,
               messageCount: currentSummary.messageCount,
               unreadCount: currentSummary.unreadCount,
-              isConnected: connectedDevices.containsKey(endpointId),
+              isConnected: currentSummary.isConnected,
             );
           }
         }
@@ -244,7 +283,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         });
       }
     } catch (e) {
-      print('Error loading conversations: $e');
+      debugPrint('❌ Error loading conversations: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -254,6 +293,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
   Future<void> _loadMessagesForDevice(String endpointId) async {
+    if (!mounted) return;
+
     try {
       final messages = await DatabaseService.getMessages(endpointId);
       if (mounted) {
@@ -261,19 +302,21 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           _selectedConversationMessages = messages;
         });
         _scrollToBottom();
-        final validMessageId =
-            messages
-                .where((m) => m.messageId != null)
-                .map((m) => m.messageId!)
-                .firstOrNull ??
-            '';
-        if (validMessageId.isNotEmpty) {
-          await DatabaseService.markMessageSynced(validMessageId);
+
+        // Mark messages as read
+        for (final message in messages.where((m) => !m.isMe && !m.synced)) {
+          if (message.messageId != null) {
+            await DatabaseService.updateMessageStatus(
+              message.messageId!,
+              MessageStatus.delivered,
+            );
+          }
         }
+
         await _loadConversations();
       }
     } catch (e) {
-      print('Error loading messages for device $endpointId: $e');
+      debugPrint('❌ Error loading messages for device $endpointId: $e');
     }
   }
 
@@ -281,11 +324,31 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void _onP2PUpdate() async {
     if (mounted) {
       await _loadConversations();
-      setState(() {});
+      if (mounted) setState(() {});
     }
   }
 
   void _onMessageReceived(P2PMessage message) async {
+    if (!mounted) return;
+
+    // Save received message to database
+    final messageModel = MessageModel(
+      endpointId: message.senderId,
+      fromUser: message.senderName,
+      message: message.message,
+      isMe: false,
+      isEmergency:
+          message.type == MessageType.emergency ||
+          message.type == MessageType.sos,
+      timestamp: message.timestamp.millisecondsSinceEpoch,
+      latitude: message.latitude,
+      longitude: message.longitude,
+      messageId: message.id,
+      type: message.type.name,
+      status: MessageStatus.delivered,
+    );
+
+    await DatabaseService.insertMessage(messageModel);
     await _loadConversations();
 
     if (message.type == MessageType.emergency ||
@@ -307,67 +370,80 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           '\nLocation: ${message.latitude!.toStringAsFixed(6)}, ${message.longitude!.toStringAsFixed(6)}';
     }
 
-    await NotificationService.showEmergencyNotification(
-      title: '${message.type.name.toUpperCase()} from ${message.senderName}',
-      body: body,
-      playSound: true,
-      vibrate: true,
-    );
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.warning, color: Colors.white),
-            SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '${message.type.name.toUpperCase()} from ${message.senderName}',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  Text(body),
-                ],
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.warning, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${message.type.name.toUpperCase()} from ${message.senderName}',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(body),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+          backgroundColor: ResQLinkTheme.primaryRed,
+          duration: Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'VIEW',
+            textColor: Colors.white,
+            onPressed: () {
+              _openConversation(message.senderId);
+            },
+          ),
         ),
-        backgroundColor: ResQLinkTheme.primaryRed,
-        duration: Duration(seconds: 5),
-        action: SnackBarAction(
-          label: 'VIEW',
-          textColor: Colors.white,
-          onPressed: () {
-            _openConversation(message.senderId);
-          },
-        ),
-      ),
-    );
+      );
+    }
   }
 
   // Message Sending Methods
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
-    if (text.isEmpty || _selectedEndpointId == null) return;
+    if (text.isEmpty || _selectedEndpointId == null || !mounted) return;
 
     _messageController.clear();
 
-    await widget.p2pService.sendMessage(
-      message: text,
-      type: MessageType.text,
-      targetDeviceId: _selectedEndpointId,
-    );
+    try {
+      // Remove the unused messageId variable since we don't need it here
+      await _syncService.sendMessage(
+        endpointId: _selectedEndpointId!,
+        message: text,
+        fromUser: widget.p2pService.userName ?? 'Unknown',
+        isEmergency: false,
+        messageType: MessageType.text,
+        p2pService: widget.p2pService,
+      );
 
-    await _loadMessagesForDevice(_selectedEndpointId!);
+      if (mounted) {
+        await _loadMessagesForDevice(_selectedEndpointId!);
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending message: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send message: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _sendLocationMessage() async {
-    if (widget.currentLocation == null || _selectedEndpointId == null) {
+    if (widget.currentLocation == null ||
+        _selectedEndpointId == null ||
+        !mounted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -379,19 +455,28 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       return;
     }
 
-    await widget.p2pService.sendMessage(
-      message: '📍 Shared my location',
-      type: MessageType.location,
-      latitude: widget.currentLocation!.latitude,
-      longitude: widget.currentLocation!.longitude,
-      targetDeviceId: _selectedEndpointId,
-    );
+    try {
+      await _syncService.sendMessage(
+        endpointId: _selectedEndpointId!,
+        message: '📍 Shared my location',
+        fromUser: widget.p2pService.userName ?? 'Unknown',
+        isEmergency: false,
+        messageType: MessageType.location,
+        latitude: widget.currentLocation!.latitude,
+        longitude: widget.currentLocation!.longitude,
+        p2pService: widget.p2pService,
+      );
 
-    await _loadMessagesForDevice(_selectedEndpointId!);
+      if (mounted) {
+        await _loadMessagesForDevice(_selectedEndpointId!);
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending location: $e');
+    }
   }
 
   Future<void> _sendEmergencyMessage() async {
-    if (_selectedEndpointId == null) return;
+    if (_selectedEndpointId == null || !mounted) return;
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -416,103 +501,49 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       ),
     );
 
+    // Add mounted check after async dialog operation
     if (confirm == true && mounted && _selectedEndpointId != null) {
-      await widget.p2pService.sendMessage(
-        message: '🚨 Emergency SOS',
-        type: MessageType.sos,
-        latitude: widget.currentLocation?.latitude,
-        longitude: widget.currentLocation?.longitude,
-        targetDeviceId: _selectedEndpointId,
-      );
-      await _loadMessagesForDevice(_selectedEndpointId!);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Emergency SOS sent')));
-      }
-    }
-  }
-
-  // Conversation Management
-  Future<void> _clearConversation(String endpointId) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Clear Conversation?'),
-        content: Text(
-          'This will delete all messages with this device from your device. Messages on other devices will not be affected.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              'Clear',
-              style: TextStyle(color: ResQLinkTheme.primaryRed),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true && mounted) {
-      // Note: DatabaseService lacks clearMessagesForDevice; using clearAllData as fallback
-      await DatabaseService.clearAllData();
-      if (_selectedEndpointId == endpointId) {
-        setState(() {
-          _isChatView = false;
-          _selectedEndpointId = null;
-          _selectedConversationMessages.clear();
-        });
-      }
-      await _loadConversations();
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Conversation cleared')));
-      }
-    }
-  }
-
-  Future<void> _reconnectToDevice(String endpointId) async {
-    try {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Attempting to reconnect to device...')),
+      try {
+        await _syncService.sendMessage(
+          endpointId: _selectedEndpointId!,
+          message: '🚨 Emergency SOS',
+          fromUser: widget.p2pService.userName ?? 'Unknown',
+          isEmergency: true,
+          messageType: MessageType.sos,
+          latitude: widget.currentLocation?.latitude,
+          longitude: widget.currentLocation?.longitude,
+          p2pService: widget.p2pService,
         );
-      }
-      // P2PConnectionService lacks reconnectToDevice; using connectToDevice with discovered device
-      final deviceInfo = widget.p2pService.getDeviceInfo(endpointId);
-      if (deviceInfo['isAvailable']) {
-        await widget.p2pService.connectToDevice({
-          'deviceAddress': endpointId,
-          'deviceName': deviceInfo['name'],
-        });
-        await _loadConversations();
+
+        // Add mounted check before using context after async operation
+        if (mounted) {
+          await _loadMessagesForDevice(_selectedEndpointId!);
+
+          // Add another mounted check before using ScaffoldMessenger
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Emergency SOS sent')));
+          }
+        }
+      } catch (e) {
+        debugPrint('❌ Error sending emergency message: $e');
+
+        // Add mounted check before showing error message
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Reconnection attempt completed')),
+            SnackBar(
+              content: Text('Failed to send emergency SOS: $e'),
+              backgroundColor: Colors.red,
+            ),
           );
         }
-      } else {
-        throw Exception('Device not available');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to reconnect: $e'),
-            backgroundColor: ResQLinkTheme.warningYellow,
-          ),
-        );
       }
     }
   }
 
   void _openConversation(String endpointId) {
+    if (!mounted) return;
     setState(() {
       _selectedEndpointId = endpointId;
       _isChatView = true;
@@ -522,7 +553,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
+      if (mounted && _scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: Duration(milliseconds: 300),
@@ -590,11 +621,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           ? IconButton(
               icon: Icon(Icons.arrow_back),
               onPressed: () {
-                setState(() {
-                  _isChatView = false;
-                  _selectedEndpointId = null;
-                  _selectedConversationMessages.clear();
-                });
+                if (mounted) {
+                  setState(() {
+                    _isChatView = false;
+                    _selectedEndpointId = null;
+                    _selectedConversationMessages.clear();
+                  });
+                }
               },
             )
           : null,
@@ -604,38 +637,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           color: widget.p2pService.isOnline
               ? ResQLinkTheme.safeGreen
               : ResQLinkTheme.offlineGray,
-        ),
-        PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'clear' && _selectedEndpointId != null) {
-              _clearConversation(_selectedEndpointId!);
-            } else if (value == 'message') {
-              _showConnectionInfo();
-            }
-          },
-          itemBuilder: (context) => [
-            PopupMenuItem(
-              value: 'message',
-              child: Row(
-                children: [
-                  Icon(Icons.circle, size: 20, color: Colors.white70),
-                  SizedBox(width: 8),
-                  Text('Messages', style: TextStyle(color: Colors.white70)),
-                ],
-              ),
-            ),
-            if (_isChatView)
-              PopupMenuItem(
-                value: 'clear',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete, size: 20, color: Colors.white70),
-                    SizedBox(width: 8),
-                    Text('Clear Chat', style: TextStyle(color: Colors.white70)),
-                  ],
-                ),
-              ),
-          ],
         ),
       ],
     );
@@ -728,19 +729,28 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (message != null)
-              Text(
-                message.message,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: Colors.black),
+            if (message != null) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      message.message,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  _buildMessageStatusIcon(message.status),
+                ],
               ),
-            SizedBox(height: 4),
+              SizedBox(height: 4),
+            ],
             Text(
               message != null
                   ? _formatFullDateTime(message.dateTime)
                   : 'No messages available',
-              style: TextStyle(fontSize: 12, color: Colors.black),
+              style: TextStyle(fontSize: 12, color: Colors.white54),
             ),
           ],
         ),
@@ -759,17 +769,27 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                   style: TextStyle(color: Colors.white, fontSize: 12),
                 ),
               ),
-            if (!conversation.isConnected)
-              IconButton(
-                icon: Icon(Icons.refresh, color: ResQLinkTheme.warningYellow),
-                onPressed: () => _reconnectToDevice(conversation.endpointId),
-                tooltip: 'Reconnect',
-              ),
           ],
         ),
         onTap: () => _openConversation(conversation.endpointId),
       ),
     );
+  }
+
+  Widget _buildMessageStatusIcon(MessageStatus status) {
+    switch (status) {
+      case MessageStatus.pending:
+        return Icon(Icons.schedule, size: 16, color: Colors.orange);
+      case MessageStatus.sent:
+        return Icon(Icons.check, size: 16, color: Colors.blue);
+      case MessageStatus.delivered:
+        return Icon(Icons.done_all, size: 16, color: Colors.green);
+      case MessageStatus.failed:
+        return Icon(Icons.error, size: 16, color: Colors.red);
+      case MessageStatus.synced:
+        return Icon(Icons.cloud_done, size: 16, color: Colors.green);
+      // Remove the default case since all enum values are covered
+    }
   }
 
   Widget _buildChatView() {
@@ -837,8 +857,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         child: Text(
           dateText,
           style: TextStyle(
-            fontSize: 12,
             color: Colors.white70,
+            fontSize: 12,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -910,6 +930,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                     Padding(
                       padding: EdgeInsets.only(bottom: 4),
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
                             message.type == 'sos' ? Icons.sos : Icons.warning,
@@ -995,16 +1016,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                           fontSize: 12,
                         ),
                       ),
-                      if (!message.synced) ...[
+                      if (isMe) ...[
                         SizedBox(width: 4),
-                        Icon(
-                          Icons.schedule,
-                          size: 12,
-                          color:
-                              isMe || message.type == 'location' || isEmergency
-                              ? Colors.white70
-                              : Colors.black54,
-                        ),
+                        _buildMessageStatusIcon(message.status),
                       ],
                     ],
                   ),
@@ -1204,103 +1218,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     );
   }
 
-  void _showConnectionInfo() {
-    final info = widget.p2pService.getConnectionInfo();
-    final devices = widget.p2pService.connectedDevices;
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: ResQLinkTheme.cardDark,
-        title: Text(
-          'Connection Information',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildInfoRow(
-                'Device ID:',
-                info['deviceId']?.substring(0, 8) ?? 'Unknown',
-              ),
-              _buildInfoRow('Role:', info['role']?.toUpperCase() ?? 'NONE'),
-              _buildInfoRow('Connected Devices:', devices.length.toString()),
-              _buildInfoRow(
-                'Sync Status:',
-                Text(
-                  info['isOnline'] == true ? 'Online' : 'Offline',
-                  style: TextStyle(
-                    color: info['isOnline'] == true
-                        ? ResQLinkTheme.safeGreen
-                        : ResQLinkTheme.warningYellow,
-                  ),
-                ),
-              ),
-              _buildInfoRow(
-                'Pending Messages:',
-                info['pendingMessages']?.toString() ?? '0',
-              ),
-              _buildInfoRow(
-                'Messages Processed:',
-                info['processedMessages']?.toString() ?? '0',
-              ),
-              if (devices.isNotEmpty) ...[
-                SizedBox(height: 16),
-                Text(
-                  'Connected Devices:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                SizedBox(height: 8),
-                ...devices.entries.map(
-                  (entry) => Padding(
-                    padding: EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      '• ${entry.value.name} (${entry.key.substring(0, 8)})',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Close',
-              style: TextStyle(color: ResQLinkTheme.primaryRed),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInfoRow(String label, dynamic value, [Widget? builder]) =>
-      Padding(
-        padding: EdgeInsets.only(bottom: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: TextStyle(color: Colors.white70)),
-            builder ??
-                Text(
-                  value.toString(),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w500,
-                    color: Colors.white,
-                  ),
-                ),
-          ],
-        ),
-      );
-
   // Utility Methods
   String _formatTime(DateTime time) {
     final hour = time.hour.toString().padLeft(2, '0');
@@ -1314,8 +1231,4 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     final year = dateTime.year;
     return '$day/$month/$year ${_formatTime(dateTime)}';
   }
-}
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }
