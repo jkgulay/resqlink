@@ -1,4 +1,4 @@
-// lib/models/message_model.dart
+enum MessageStatus { pending, sent, delivered, failed, synced }
 
 class MessageModel {
   final int? id;
@@ -14,6 +14,7 @@ class MessageModel {
   final bool syncedToFirebase;
   final String? messageId;
   final String type;
+  final MessageStatus status; // Added status tracking
 
   MessageModel({
     this.id,
@@ -29,6 +30,7 @@ class MessageModel {
     this.syncedToFirebase = false,
     this.messageId,
     String? type,
+    this.status = MessageStatus.pending, // Default to pending
   }) : type = type ?? (isEmergency ? 'emergency' : 'message');
 
   // DateTime getter for convenience
@@ -60,6 +62,7 @@ class MessageModel {
     bool? syncedToFirebase,
     String? messageId,
     String? type,
+    MessageStatus? status,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -75,6 +78,7 @@ class MessageModel {
       syncedToFirebase: syncedToFirebase ?? this.syncedToFirebase,
       messageId: messageId ?? this.messageId,
       type: type ?? this.type,
+      status: status ?? this.status,
     );
   }
 
@@ -94,6 +98,7 @@ class MessageModel {
       'synced_to_firebase': syncedToFirebase ? 1 : 0,
       'message_id': messageId,
       'type': type,
+      'status': status.index, // Store status as integer
     };
   }
 
@@ -113,44 +118,9 @@ class MessageModel {
       syncedToFirebase: map['synced_to_firebase'] == 1,
       messageId: map['message_id'],
       type: map['type'] ?? 'message',
-    );
-  }
-
-  // Convert to JSON for network transmission
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'endpointId': endpointId,
-      'fromUser': fromUser,
-      'message': message,
-      'isMe': isMe,
-      'isEmergency': isEmergency,
-      'timestamp': timestamp,
-      'latitude': latitude,
-      'longitude': longitude,
-      'synced': synced,
-      'syncedToFirebase': syncedToFirebase,
-      'messageId': messageId,
-      'type': type,
-    };
-  }
-
-  // Create from JSON
-  factory MessageModel.fromJson(Map<String, dynamic> json) {
-    return MessageModel(
-      id: json['id'],
-      endpointId: json['endpointId'] ?? '',
-      fromUser: json['fromUser'] ?? '',
-      message: json['message'] ?? '',
-      isMe: json['isMe'] ?? false,
-      isEmergency: json['isEmergency'] ?? false,
-      timestamp: json['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
-      latitude: json['latitude']?.toDouble(),
-      longitude: json['longitude']?.toDouble(),
-      synced: json['synced'] ?? false,
-      syncedToFirebase: json['syncedToFirebase'] ?? false,
-      messageId: json['messageId'],
-      type: json['type'] ?? 'message',
+      status: map['status'] != null
+          ? MessageStatus.values[map['status']]
+          : MessageStatus.pending,
     );
   }
 
@@ -166,6 +136,7 @@ class MessageModel {
       'longitude': longitude,
       'type': type,
       'messageId': messageId ?? '${endpointId}_$timestamp',
+      'status': status.name,
     };
   }
 
@@ -175,7 +146,7 @@ class MessageModel {
         'message: $message, isMe: $isMe, isEmergency: $isEmergency, '
         'timestamp: $timestamp, latitude: $latitude, longitude: $longitude, '
         'synced: $synced, syncedToFirebase: $syncedToFirebase, '
-        'messageId: $messageId, type: $type)';
+        'messageId: $messageId, type: $type, status: $status)';
   }
 
   @override
@@ -192,4 +163,3 @@ class MessageModel {
     return messageId.hashCode ^ endpointId.hashCode ^ timestamp.hashCode;
   }
 }
-

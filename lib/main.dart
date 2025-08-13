@@ -8,6 +8,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:resqlink/message_page.dart';
 import 'package:resqlink/services/map_service.dart';
+import 'package:resqlink/services/message_sync_service.dart';
 import 'firebase_options.dart';
 import 'home_page.dart';
 import 'services/auth_service.dart';
@@ -219,15 +220,11 @@ Future<void> main() async {
     debugPrint('Firebase init failed (offline?): $e');
   }
 
-  // Initialize map service early
-  try {
-    await PhilippinesMapService.instance.initialize();
-    debugPrint('Map service initialized successfully');
-  } catch (e) {
-    debugPrint('Map service initialization failed: $e');
-  }
-
+  // Initialize services
+  await PhilippinesMapService.instance.initialize();
   await NotificationService.initialize();
+  MessageSyncService().initialize(); // Add this line
+  
   if (kDebugMode) {
     await DatabaseService.deleteDatabaseFile();
   }

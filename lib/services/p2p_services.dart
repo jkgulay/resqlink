@@ -665,9 +665,50 @@ class P2PConnectionService with ChangeNotifier {
 
   // Load pending messages from database
   Future<void> _loadPendingMessages() async {
-    final pending = await DatabaseService.getPendingMessages();
-    for (var entry in pending) {
-      _pendingMessages[entry.key] = entry.value;
+    try {
+      final pending = await DatabaseService.getPendingMessages();
+
+      // Group messages by endpoint ID since DatabaseService returns List<MessageModel>
+      for (var message in pending) {
+        final deviceId = message.endpointId;
+
+        final p2pMessage = P2PMessage(
+          id: message.messageId ?? _generateMessageId(),
+          senderId: message.isMe
+              ? _deviceId!
+              : message.endpointId, // Fix: use correct sender
+          senderName: message.fromUser,
+          message: message.message,
+          type: MessageType.values.firstWhere(
+            (e) => e.name == message.type,
+            orElse: () => MessageType.text,
+          ),
+          timestamp: message.dateTime,
+          ttl: maxTtl,
+          targetDeviceId: message.isMe
+              ? message.endpointId
+              : null, // Fix: add required parameter
+          latitude: message.latitude,
+          longitude: message.longitude,
+          routePath: [_deviceId!],
+        );
+
+        _pendingMessages
+            .putIfAbsent(deviceId, () => [])
+            .add(
+              PendingMessage(
+                message: p2pMessage,
+                queuedAt: message.dateTime,
+                attempts: 0,
+              ),
+            );
+      }
+
+      debugPrint(
+        'Loaded ${pending.length} pending messages for ${_pendingMessages.length} devices',
+      );
+    } catch (e) {
+      debugPrint('Error loading pending messages: $e');
     }
   }
 
@@ -728,7 +769,7 @@ class P2PConnectionService with ChangeNotifier {
         await FirebaseFirestore.instance
             .collection('emergency_messages')
             .add(message.toFirebaseJson());
-        await DatabaseService.markMessageSynced(message.id);
+        await DatabaseService.markMessageSynced(message.id as String);
       }
       debugPrint("Synced ${unsyncedMessages.length} messages to Firebase");
     } catch (e) {
@@ -753,22 +794,28 @@ class P2PConnectionService with ChangeNotifier {
 
   // Save message to database
   Future<void> _saveMessage(P2PMessage message, bool isMe) async {
-    final dbMessage = MessageModel(
-      endpointId: message.senderId,
-      fromUser: message.senderName,
-      message: message.message,
-      isMe: isMe,
-      isEmergency:
-          message.type == MessageType.emergency ||
-          message.type == MessageType.sos,
-      timestamp: message.timestamp.millisecondsSinceEpoch,
-      type: message.type.name,
-      latitude: message.latitude ?? 0.0,
-      longitude: message.longitude,
-      messageId: message.id,
-    );
+    try {
+      final dbMessage = MessageModel(
+        endpointId: message.senderId,
+        fromUser: message.senderName,
+        message: message.message,
+        isMe: isMe,
+        isEmergency:
+            message.type == MessageType.emergency ||
+            message.type == MessageType.sos,
+        timestamp: message.timestamp.millisecondsSinceEpoch,
+        type: message.type.name,
+        latitude: message.latitude,
+        longitude: message.longitude,
+        messageId:
+            message.id, // Fix: use message.id instead of undefined getter
+        status: MessageStatus.delivered, // Add the required status field
+      );
 
-    await DatabaseService.insertMessage(dbMessage);
+      await DatabaseService.insertMessage(dbMessage);
+    } catch (e) {
+      debugPrint('Error saving message to database: $e');
+    }
   }
 
   // Generate unique message ID

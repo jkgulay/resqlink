@@ -37,62 +37,73 @@ class DatabaseService {
   static Future<void> _createDB(Database db, int version) async {
     // Create user table
     await db.execute('''
-      CREATE TABLE $_userTable (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        display_name TEXT,
-        created_at TEXT NOT NULL,
-        last_login TEXT NOT NULL,
-        is_online_user INTEGER DEFAULT 0
-      )
-    ''');
+    CREATE TABLE $_userTable (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      display_name TEXT,
+      created_at TEXT NOT NULL,
+      last_login TEXT NOT NULL,
+      is_online_user INTEGER DEFAULT 0
+    )
+  ''');
 
-    // Create messages table
+    // Enhanced messages table with status
     await db.execute('''
-      CREATE TABLE $_messagesTable (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        endpoint_id TEXT NOT NULL,
-        from_user TEXT NOT NULL,
-        message TEXT NOT NULL,
-        is_me BOOLEAN NOT NULL,
-        is_emergency BOOLEAN NOT NULL,
-        timestamp INTEGER NOT NULL,
-        type TEXT DEFAULT 'message',
-        latitude REAL,
-        longitude REAL,
-        synced BOOLEAN DEFAULT 0,
-        message_id TEXT UNIQUE,
-        synced_to_firebase BOOLEAN DEFAULT 0
-      )
-    ''');
+    CREATE TABLE $_messagesTable (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      endpoint_id TEXT NOT NULL,
+      from_user TEXT NOT NULL,
+      message TEXT NOT NULL,
+      is_me BOOLEAN NOT NULL,
+      is_emergency BOOLEAN NOT NULL,
+      timestamp INTEGER NOT NULL,
+      type TEXT DEFAULT 'message',
+      latitude REAL,
+      longitude REAL,
+      synced BOOLEAN DEFAULT 0,
+      message_id TEXT UNIQUE,
+      synced_to_firebase BOOLEAN DEFAULT 0,
+      status INTEGER DEFAULT 0,
+      retry_count INTEGER DEFAULT 0,
+      last_retry_at INTEGER
+    )
+  ''');
 
-    // Create known devices table
-    await db.execute('''
-      CREATE TABLE $_knownDevicesTable (
-        device_id TEXT PRIMARY KEY,
-        ssid TEXT NOT NULL,
-        psk TEXT NOT NULL,
-        is_host INTEGER NOT NULL,
-        last_seen INTEGER NOT NULL,
-        user_name TEXT
-      )
-    ''');
-
-    // Create pending messages table
-    await db.execute('''
-      CREATE TABLE $_pendingMessagesTable (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        device_id TEXT NOT NULL,
-        message_json TEXT NOT NULL,
-        queued_at INTEGER NOT NULL,
-        attempts INTEGER DEFAULT 0
-      )
-    ''');
+    // Add indexes for better performance (FIXED - removed duplicate)
     await db.execute(
       'CREATE INDEX idx_messages_endpoint ON messages(endpoint_id)',
     );
+    await db.execute('CREATE INDEX idx_messages_status ON messages(status)');
+    await db.execute(
+      'CREATE INDEX idx_messages_timestamp ON messages(timestamp)',
+    );
     await db.execute('CREATE INDEX idx_messages_synced ON messages(synced)');
+
+    // Create known devices table
+    await db.execute('''
+    CREATE TABLE $_knownDevicesTable (
+      device_id TEXT PRIMARY KEY,
+      ssid TEXT NOT NULL,
+      psk TEXT NOT NULL,
+      is_host INTEGER NOT NULL,
+      last_seen INTEGER NOT NULL,
+      user_name TEXT
+    )
+  ''');
+
+    // Create pending messages table
+    await db.execute('''
+    CREATE TABLE $_pendingMessagesTable (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT NOT NULL,
+      message_json TEXT NOT NULL,
+      queued_at INTEGER NOT NULL,
+      attempts INTEGER DEFAULT 0
+    )
+  ''');
+
+    // Index for pending messages (FIXED - corrected table name)
     await db.execute(
       'CREATE INDEX idx_pending_device ON pending_messages(device_id)',
     );
@@ -251,6 +262,22 @@ class DatabaseService {
     return await db.insert('messages', message.toMap());
   }
 
+  static Future<void> updateMessageStatus(
+    String messageId,
+    MessageStatus status,
+  ) async {
+    final db = await database;
+    await db.update(
+      'messages',
+      {
+        'status': status.index,
+        'synced': status == MessageStatus.synced ? 1 : 0,
+      },
+      where: 'message_id = ?',
+      whereArgs: [messageId],
+    );
+  }
+
   static Future<List<MessageModel>> getMessages(String endpointId) async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
@@ -271,39 +298,40 @@ class DatabaseService {
     return List.generate(maps.length, (i) => MessageModel.fromMap(maps[i]));
   }
 
-  static Future<List<P2PMessage>> getUnsyncedMessages() async {
+  static Future<List<MessageModel>> getUnsyncedMessages() async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'messages',
-      where: 'synced = 0',
+      where: 'synced_to_firebase = 0 AND status != ?',
+      whereArgs: [MessageStatus.failed.index],
       orderBy: 'timestamp ASC',
     );
+    return maps.map((map) => MessageModel.fromMap(map)).toList();
+  }
 
-    return maps.map((map) {
-      return P2PMessage(
-        id: map['message_id'] ?? 'legacy_${map['id']}',
-        senderId: map['endpoint_id'],
-        senderName: map['from_user'],
-        message: map['message'],
-        type: MessageType.values.firstWhere(
-          (e) => e.name == map['type'],
-          orElse: () => MessageType.text,
-        ),
-        timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp']),
-        ttl: 0, // Already delivered
-        latitude: map['latitude'],
-        longitude: map['longitude'],
-        routePath: [],
-        synced: false,
-      );
-    }).toList();
+  static Future<void> incrementRetryCount(String messageId) async {
+    final db = await database;
+    await db.rawUpdate(
+      '''
+    UPDATE messages 
+    SET retry_count = retry_count + 1, 
+        last_retry_at = ?,
+        status = ?
+    WHERE message_id = ?
+  ''',
+      [
+        DateTime.now().millisecondsSinceEpoch,
+        MessageStatus.failed.index,
+        messageId,
+      ],
+    );
   }
 
   static Future<void> markMessageSynced(String messageId) async {
     final db = await database;
     await db.update(
       'messages',
-      {'synced': 1},
+      {'synced_to_firebase': 1, 'status': MessageStatus.synced.index},
       where: 'message_id = ?',
       whereArgs: [messageId],
     );
@@ -349,15 +377,20 @@ class DatabaseService {
     Map<String, List<PendingMessage>> pendingMessages,
   ) async {
     final db = await database;
+
+    // Clear existing pending messages
     await db.delete('pending_messages');
+
     final batch = db.batch();
     for (var entry in pendingMessages.entries) {
-      for (var pending in entry.value) {
+      final deviceId = entry.key;
+      final messages = entry.value;
+
+      for (var pendingMsg in messages) {
         batch.insert('pending_messages', {
-          'device_id': entry.key,
-          'message_json': jsonEncode(pending.toJson()),
-          'queued_at': pending.queuedAt.millisecondsSinceEpoch,
-          'attempts': pending.attempts,
+          'device_id': deviceId,
+          'message_data': jsonEncode(pendingMsg.toJson()),
+          'created_at': DateTime.now().millisecondsSinceEpoch,
         });
       }
     }
@@ -402,20 +435,33 @@ class DatabaseService {
     }).toList();
   }
 
-  static Future<List<MapEntry<String, List<PendingMessage>>>>
-  getPendingMessages() async {
+  static Future<Map<String, List<PendingMessage>>>
+  getPendingMessagesMap() async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'pending_messages',
-      orderBy: 'queued_at ASC',
-    );
-    final Map<String, List<PendingMessage>> grouped = {};
+    final List<Map<String, dynamic>> maps = await db.query('pending_messages');
+
+    final Map<String, List<PendingMessage>> result = {};
+
     for (var map in maps) {
       final deviceId = map['device_id'] as String;
-      final pending = PendingMessage.fromJson(jsonDecode(map['message_json']));
-      grouped.putIfAbsent(deviceId, () => []).add(pending);
+      final messageData = jsonDecode(map['message_data'] as String);
+      final pendingMessage = PendingMessage.fromJson(messageData);
+
+      result.putIfAbsent(deviceId, () => []).add(pendingMessage);
     }
-    return grouped.entries.toList();
+
+    return result;
+  }
+
+  static Future<List<MessageModel>> getPendingMessages() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'messages',
+      where: 'status = ? OR status = ?',
+      whereArgs: [MessageStatus.pending.index, MessageStatus.failed.index],
+      orderBy: 'timestamp ASC',
+    );
+    return List.generate(maps.length, (i) => MessageModel.fromMap(maps[i]));
   }
 
   // Clean up old data
