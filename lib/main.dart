@@ -158,20 +158,26 @@ Future<UserModel?> trySilentFirebaseLogin() async {
       final expiresAt = DateTime.now().add(const Duration(hours: 1));
       await saveToken(idToken!, '', expiresAt);
 
+      // Store the Firebase UID as a way to verify offline login
+      await _secureStorage.write(key: 'firebase_uid', value: firebaseUser.uid);
+      await _secureStorage.write(
+        key: 'cached_email',
+        value: firebaseUser.email!,
+      );
+
       // Try to find local user by email
-      final localUser = await DatabaseService.loginUser(
+      final localUser = await DatabaseService.getUserByEmail(
         firebaseUser.email!,
-        '',
       );
 
       if (localUser != null) {
         return localUser;
       }
 
-      // If not found, optionally create one with dummy password
+      // Create user with Firebase UID as identifier for offline verification
       final newUser = await DatabaseService.createUser(
         firebaseUser.email!,
-        '', // blank password for online user
+        firebaseUser.uid, // Use Firebase UID instead of empty password
         isOnlineUser: true,
       );
 
@@ -184,7 +190,21 @@ Future<UserModel?> trySilentFirebaseLogin() async {
 }
 
 Future<UserModel?> tryOfflineLogin() async {
-  return await AuthService.getCurrentUser();
+  // First try the current AuthService method
+  final user = await AuthService.getCurrentUser();
+  if (user != null) return user;
+
+  // Then try cached Firebase credentials
+  final cachedEmail = await _secureStorage.read(key: 'cached_email');
+  final firebaseUid = await _secureStorage.read(key: 'firebase_uid');
+
+  if (cachedEmail != null && firebaseUid != null) {
+    // Verify cached user exists in local database
+    final localUser = await DatabaseService.loginUser(cachedEmail, firebaseUid);
+    return localUser;
+  }
+
+  return null;
 }
 
 Future<void> main() async {
@@ -604,25 +624,32 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
       AuthResult result;
       if (isLogin) {
         result = await AuthService.login(email, password);
-      } else {
-        result = await AuthService.register(email, password);
-      }
 
-      if (result.isSuccess) {
-        if (mounted) {
-          Navigator.of(context).pop();
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => HomePage()),
-          );
-          final methodText = result.method == AuthMethod.online
-              ? 'Online'
-              : 'Offline';
-          final actionText = isLogin ? 'Login' : 'Registration';
-          _showSnackBar('$actionText successful ($methodText mode)');
+        // If online login successful, cache the credentials
+        if (result.isSuccess && result.method == AuthMethod.online) {
+          final firebaseUser = FirebaseAuth.instance.currentUser;
+          if (firebaseUser != null) {
+            await _secureStorage.write(key: 'cached_email', value: email);
+            await _secureStorage.write(
+              key: 'firebase_uid',
+              value: firebaseUser.uid,
+            );
+          }
         }
       } else {
-        _showSnackBar(result.errorMessage ?? 'Authentication failed');
+        result = await AuthService.register(email, password);
+
+        // Cache registration credentials too
+        if (result.isSuccess && result.method == AuthMethod.online) {
+          final firebaseUser = FirebaseAuth.instance.currentUser;
+          if (firebaseUser != null) {
+            await _secureStorage.write(key: 'cached_email', value: email);
+            await _secureStorage.write(
+              key: 'firebase_uid',
+              value: firebaseUser.uid,
+            );
+          }
+        }
       }
     } catch (e) {
       _showSnackBar('An error occurred: ${e.toString()}');

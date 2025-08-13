@@ -1,0 +1,22 @@
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// Set the build directory for the root project
+rootProject.buildDir = "../build"
+
+subprojects {
+    // Set build directory for each subproject
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register('clean', Delete) {
+    delete getLayout().getBuildDirectory()
+}
