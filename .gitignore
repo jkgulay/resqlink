@@ -43,3 +43,23 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+
+# Android build folders and caches
+/android/.gradle/
+/android/build/
+/android/.idea/
+/android/.tmp/
+/android/caches/
+/android/daemon/
+/android/kotlin-profile/
+/android/native/
+/android/wrapper/
+/android/android/
+/android/build/reports/
+
+# gradle wrapper
+/android/gradle/wrapper/
+
+# local.properties (sdk paths etc, do not commit)
+/android/local.properties
