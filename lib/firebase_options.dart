@@ -45,40 +45,39 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions web = FirebaseOptions(
     apiKey: 'AIzaSyChIntQ7ZsE7MVBWzwUrz7qa538QGaV55Q',
-    appId: '1:YOUR_APP_ID:web:YOUR_WEB_APP_ID',
-    messagingSenderId: 'YOUR_SENDER_ID',
-    projectId: 'YOUR_PROJECT_ID',
-    authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
-    storageBucket: 'YOUR_PROJECT_ID.appspot.com',
+    appId: '1:1056797390668:web:your_web_app_id_here',
+    messagingSenderId: '1056797390668',
+    projectId: 'resqlink-2e060',
+    authDomain: 'resqlink-2e060.firebaseapp.com',
+    storageBucket: 'resqlink-2e060.appspot.com',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyChIntQ7ZsE7MVBWzwUrz7qa538QGaV55Q',
-    appId:
-        '1:1056797390668:android:74c09cc7186b11c0aa81e9', // Replace with your actual app ID
-    messagingSenderId: '1056797390668', // Replace with your actual sender ID
-    projectId: 'resqlink-2e060', // Replace with your actual project ID
-    authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
-    storageBucket: 'YOUR_PROJECT_ID.appspot.com',
+    appId: '1:1056797390668:android:74c09cc7186b11c0aa81e9',
+    messagingSenderId: '1056797390668',
+    projectId: 'resqlink-2e060',
+    authDomain: 'resqlink-2e060.firebaseapp.com',
+    storageBucket: 'resqlink-2e060.appspot.com',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyChIntQ7ZsE7MVBWzwUrz7qa538QGaV55Q',
-    appId: '1:YOUR_APP_ID:ios:YOUR_IOS_APP_ID',
-    messagingSenderId: 'YOUR_SENDER_ID',
-    projectId: 'YOUR_PROJECT_ID',
-    authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
-    storageBucket: 'YOUR_PROJECT_ID.appspot.com',
-    iosBundleId: 'com.example.yourapp',
+    appId: '1:1056797390668:ios:your_ios_app_id_here',
+    messagingSenderId: '1056797390668',
+    projectId: 'resqlink-2e060',
+    authDomain: 'resqlink-2e060.firebaseapp.com',
+    storageBucket: 'resqlink-2e060.appspot.com',
+    iosBundleId: 'com.example.resqlink',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyChIntQ7ZsE7MVBWzwUrz7qa538QGaV55Q',
-    appId: '1:YOUR_APP_ID:ios:YOUR_IOS_APP_ID',
-    messagingSenderId: 'YOUR_SENDER_ID',
-    projectId: 'YOUR_PROJECT_ID',
-    authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
-    storageBucket: 'YOUR_PROJECT_ID.appspot.com',
-    iosBundleId: 'com.example.yourapp',
+    appId: '1:1056797390668:ios:your_ios_app_id_here',
+    messagingSenderId: '1056797390668',
+    projectId: 'resqlink-2e060',
+    authDomain: 'resqlink-2e060.firebaseapp.com',
+    storageBucket: 'resqlink-2e060.appspot.com',
+    iosBundleId: 'com.example.resqlink',
   );
 }

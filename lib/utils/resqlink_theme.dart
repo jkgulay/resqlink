@@ -11,6 +11,5 @@ class ResQLinkTheme {
   static const Color surfaceDark = Color(0xFF1E1E1E);
   static const Color cardDark = Color(0xFF2C2C2C);
   static const Color locationBlue = Color(0xFF2196F3);
-
+  static const Color orange = Color.fromARGB(255, 255, 128, 0);
 }
-

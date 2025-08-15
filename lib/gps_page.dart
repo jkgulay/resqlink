@@ -428,8 +428,15 @@ class _GpsPageState extends State<GpsPage>
       });
 
       // Initialize offline maps
-      await PhilippinesMapService.instance.initialize();
-      await _updateCacheInfo();
+      try {
+        await PhilippinesMapService.instance.initialize();
+        await _updateCacheInfo();
+      } catch (e) {
+        debugPrint('Map service init error: $e');
+        // Continue even if map service fails
+      }
+
+      if (!mounted) return;
 
       await _initializeServices();
       if (!mounted) return;
@@ -808,6 +815,11 @@ class _GpsPageState extends State<GpsPage>
       }
     } catch (e) {
       debugPrint('Error loading locations: $e');
+      if (mounted) {
+        setState(() {
+          savedLocations.clear(); // Just show empty list
+        });
+      }
     }
   }
 

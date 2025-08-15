@@ -26,15 +26,35 @@ class P2PConnectionService with ChangeNotifier {
 
   // Field to track discovery state
   bool _isDiscovering = false;
+  bool _isDisposed = false;
 
   // Getter for isDiscovering
   bool get isDiscovering => _isDiscovering;
 
   // Singleton instance
-  static final P2PConnectionService _instance =
-      P2PConnectionService._internal();
-  factory P2PConnectionService() => _instance;
+  static P2PConnectionService? _instance;
+
+  factory P2PConnectionService() {
+    if (_instance == null || _instance!._isDisposed) {
+      _instance = P2PConnectionService._internal();
+    }
+    return _instance!;
+  }
+
   P2PConnectionService._internal();
+
+  // Add reset method for clean recreation
+  static void reset() {
+    _instance?.dispose();
+    _instance = null;
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
+  }
 
   // Device identity and role
   String? _deviceId;
@@ -241,20 +261,30 @@ class P2PConnectionService with ChangeNotifier {
     _discoveryTimer?.cancel();
   }
 
+  // Update all timer callbacks to check disposal
   void _startAggressiveDiscovery() async {
     _discoveryTimer?.cancel();
     _discoveryTimer = Timer.periodic(Duration(seconds: 10), (timer) async {
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+
       if (!_isConnected) {
         await _performDiscoveryScan();
       }
     });
 
     // Start immediate scan
-    await _performDiscoveryScan();
+    if (!_isDisposed) {
+      await _performDiscoveryScan();
+    }
   }
 
   // Perform discovery scan using WiFi Direct
   Future<void> _performDiscoveryScan() async {
+    if (_isDisposed) return;
+
     try {
       debugPrint("Starting WiFi Direct discovery scan...");
 
@@ -714,6 +744,11 @@ class P2PConnectionService with ChangeNotifier {
 
   void _startBackgroundDiscovery() {
     Timer.periodic(Duration(minutes: 1), (timer) async {
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+
       if (!_isConnected && _knownDevices.isNotEmpty) {
         await _performDiscoveryScan();
       }
@@ -723,6 +758,7 @@ class P2PConnectionService with ChangeNotifier {
   // Auto-reconnect to known devices
   void _startReconnectTimer() {
     _reconnectTimer = Timer.periodic(const Duration(minutes: 1), (_) async {
+      if (_isDisposed) return;
       if (_isConnected) return;
 
       for (var device in _knownDevices.values) {
@@ -780,6 +816,7 @@ class P2PConnectionService with ChangeNotifier {
   // Cleanup old messages periodically
   void _startMessageCleanup() {
     _messageCleanupTimer = Timer.periodic(const Duration(hours: 1), (_) {
+      if (_isDisposed) return;
       final cutoff = DateTime.now().subtract(messageExpiry);
       _processedMessageIds.removeWhere((id) {
         final timestamp = int.tryParse(id.split('-').last) ?? 0;
@@ -923,11 +960,18 @@ class P2PConnectionService with ChangeNotifier {
   // Dispose service
   @override
   Future<void> dispose() async {
+    if (_isDisposed) return; // Prevent multiple disposal
+
+    _isDisposed = true;
+
     await stopP2P();
     _messageCleanupTimer?.cancel();
     _syncTimer?.cancel();
     _reconnectTimer?.cancel();
+    _autoConnectTimer?.cancel();
+    _discoveryTimer?.cancel();
     await _connectivitySubscription?.cancel();
+
     super.dispose();
   }
 
