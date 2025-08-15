@@ -1,340 +1,429 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/services/auth_service.dart';
+import 'package:resqlink/services/database_service.dart';
+import 'package:resqlink/services/message_sync_service.dart';
+import 'package:resqlink/services/p2p_service.dart';
+import 'package:resqlink/utils/resqlink_theme.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
+import '../main.dart';
+import 'package:provider/provider.dart';
+import 'services/settings_service.dart';
 
 class SettingsPage extends StatefulWidget {
+  final P2PConnectionService? p2pService;
+  final MessageSyncService? syncService;
+
+  const SettingsPage({super.key, this.p2pService, this.syncService});
+
   @override
   SettingsPageState createState() => SettingsPageState();
 }
 
-const MethodChannel _vibrationChannel = MethodChannel('resqlink/vibration');
-
-Future<void> triggerEmergencyFeedback() async {
-  try {
-    await _vibrationChannel.invokeMethod('vibrate');
-  } catch (e) {
-    print('Emergency feedback error: $e');
-  }
-}
-
-// Responsive utilities class
-class ResponsiveUtils {
-  static const double mobileBreakpoint = 600.0;
-  static const double tabletBreakpoint = 1024.0;
-
-  static bool isMobile(BuildContext context) {
-    return MediaQuery.of(context).size.width < mobileBreakpoint;
-  }
-
-  static bool isTablet(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    return width >= mobileBreakpoint && width < tabletBreakpoint;
-  }
-
-  static bool isDesktop(BuildContext context) {
-    return MediaQuery.of(context).size.width >= tabletBreakpoint;
-  }
-
-  static bool isLandscape(BuildContext context) {
-    return MediaQuery.of(context).orientation == Orientation.landscape;
-  }
-
-  static double getResponsiveFontSize(
-    BuildContext context,
-    double baseFontSize,
-  ) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    if (screenWidth < mobileBreakpoint) {
-      return baseFontSize * 0.9;
-    } else if (screenWidth < tabletBreakpoint) {
-      return baseFontSize * 1.1;
-    } else {
-      return baseFontSize * 1.2;
-    }
-  }
-
-  static double getResponsiveSpacing(BuildContext context, double baseSpacing) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    if (screenWidth < mobileBreakpoint) {
-      return baseSpacing * 0.8;
-    } else if (screenWidth < tabletBreakpoint) {
-      return baseSpacing * 1.0;
-    } else {
-      return baseSpacing * 1.2;
-    }
-  }
-
-  static double getResponsiveButtonWidth(
-    BuildContext context,
-    double maxWidth,
-  ) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    if (isMobile(context)) {
-      return screenWidth * 0.8;
-    } else if (isTablet(context)) {
-      return screenWidth * 0.6;
-    } else {
-      return maxWidth;
-    }
-  }
-
-  static double getResponsiveDialogWidth(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    if (isMobile(context)) {
-      return screenWidth * 0.9;
-    } else if (isTablet(context)) {
-      return screenWidth * 0.7;
-    } else {
-      return 500.0;
-    }
-  }
-
-  static EdgeInsets getResponsivePadding(BuildContext context) {
-    if (isMobile(context)) {
-      return const EdgeInsets.all(12.0);
-    } else if (isTablet(context)) {
-      return const EdgeInsets.all(16.0);
-    } else {
-      return const EdgeInsets.all(20.0);
-    }
-  }
-
-  static EdgeInsets getResponsiveMargin(BuildContext context) {
-    if (isMobile(context)) {
-      return const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0);
-    } else if (isTablet(context)) {
-      return const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0);
-    } else {
-      return const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0);
-    }
-  }
-
-  static double getResponsiveIconSize(BuildContext context, double baseSize) {
-    if (isMobile(context)) {
-      return baseSize * 0.9;
-    } else if (isTablet(context)) {
-      return baseSize * 1.1;
-    } else {
-      return baseSize * 1.2;
-    }
-  }
-
-  static double getResponsiveMarkerSize(BuildContext context) {
-    if (isMobile(context)) {
-      return 60.0;
-    } else if (isTablet(context)) {
-      return 80.0;
-    } else {
-      return 100.0;
-    }
-  }
-
-  static double getResponsiveFloatingActionButtonSize(BuildContext context) {
-    if (isMobile(context)) {
-      return 48.0;
-    } else if (isTablet(context)) {
-      return 56.0;
-    } else {
-      return 64.0;
-    }
-  }
-
-  static double getResponsiveMaxWidth(BuildContext context) {
-    if (isDesktop(context)) {
-      return 800.0;
-    } else if (isTablet(context)) {
-      return 600.0;
-    } else {
-      return double.infinity;
-    }
-  }
-}
-
 class SettingsPageState extends State<SettingsPage> {
-  bool _wifiDirectEnabled = true;
-  bool _locationServicesEnabled = true;
-  bool _emergencyNotifications = true;
-  bool _soundAlerts = true;
-  bool _vibrationAlerts = true;
-  bool _autoLocationBroadcast = false;
-  bool _batteryOptimization = true;
-  String _emergencyMessage =
-      "Emergency! I need help. This is my last known location.";
-  double _broadcastRadius = 500.0; // meters
-  int _locationUpdateInterval = 30; // seconds
+  // Statistics
+  int _totalMessages = 0;
+  int _pendingMessages = 0;
+  String _storageUsed = "0 MB";
+  bool _isLoading = false;
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Container(
-          constraints: BoxConstraints(
-            maxWidth: ResponsiveUtils.getResponsiveMaxWidth(context),
-          ),
-          child: ListView(
-            padding: ResponsiveUtils.getResponsivePadding(context),
-            children: [
-              // Emergency Settings Section
-              _buildSectionHeader('Emergency Settings'),
-              _buildEmergencyCard(),
-              SizedBox(
-                height: ResponsiveUtils.getResponsiveSpacing(context, 16),
-              ),
+  void initState() {
+    super.initState();
+    _loadStatistics();
+    setState(() => _isLoading = false);
+  }
 
-              // Connectivity Settings
-              _buildSectionHeader('Connectivity'),
-              _buildConnectivityCard(),
-              SizedBox(
-                height: ResponsiveUtils.getResponsiveSpacing(context, 16),
-              ),
+  Future<void> _loadStatistics() async {
+    try {
+      final allMessages = await DatabaseService.getAllMessages();
+      final pendingMessages = await DatabaseService.getPendingMessages();
 
-              // Location Settings
-              _buildSectionHeader('Location Services'),
-              _buildLocationCard(),
-              SizedBox(
-                height: ResponsiveUtils.getResponsiveSpacing(context, 16),
-              ),
+      setState(() {
+        _totalMessages = allMessages.length;
+        _pendingMessages = pendingMessages.length;
+        // Calculate approximate storage (rough estimate)
+        final avgMessageSize = 200; // bytes
+        final totalBytes = _totalMessages * avgMessageSize;
+        _storageUsed = "${(totalBytes / (1024 * 1024)).toStringAsFixed(2)} MB";
+      });
+    } catch (e) {
+      debugPrint('Error loading statistics: $e');
+    }
+  }
 
-              // Notification Settings
-              _buildSectionHeader('Notifications'),
-              _buildNotificationCard(),
-              SizedBox(
-                height: ResponsiveUtils.getResponsiveSpacing(context, 16),
-              ),
+  Future<void> _toggleOfflineMode(bool value) async {
+    if (!mounted) return; // Add mounted check
 
-              // App Settings
-              _buildSectionHeader('App Settings'),
-              _buildAppSettingsCard(),
-              SizedBox(
-                height: ResponsiveUtils.getResponsiveSpacing(context, 16),
-              ),
+    await context.read<SettingsService>().setOfflineMode(value);
 
-              // Profile & Account
-              _buildSectionHeader('Account'),
-              _buildProfileCard(),
-              SizedBox(
-                height: ResponsiveUtils.getResponsiveSpacing(context, 24),
-              ),
+    if (!mounted) return; // Check again after async operation
 
-              // Logout Button
-              _buildLogoutButton(),
-            ],
-          ),
-        ),
+    _showMessage(
+      value
+          ? 'Offline mode enabled - App will work purely with SQLite and P2P'
+          : 'Online mode enabled - Firebase sync restored',
+      isSuccess: true,
+    );
+  }
+
+  Future<void> _toggleLocationSharing(bool value) async {
+    if (value) {
+      // Check location permissions when enabling
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        final newPermission = await Geolocator.requestPermission();
+        if (newPermission == LocationPermission.denied ||
+            newPermission == LocationPermission.deniedForever) {
+          if (!mounted) return;
+          _showMessage(
+            'Location permission required for location sharing',
+            isDanger: true,
+          );
+          return;
+        }
+      }
+    }
+
+    if (!mounted) return;
+    await context.read<SettingsService>().setLocationSharing(value);
+
+    if (!mounted) return;
+    _showMessage(
+      value ? 'Location sharing enabled' : 'Location sharing disabled',
+      isSuccess: true,
+    );
+  }
+
+  Future<void> _toggleMultiHop(bool value) async {
+    if (!mounted) return;
+    await context.read<SettingsService>().setMultiHop(value);
+
+    // Apply to P2P service if available
+    if (widget.p2pService != null) {
+      debugPrint('Multi-hop ${value ? 'enabled' : 'disabled'}');
+    }
+
+    if (!mounted) return;
+    _showMessage(
+      value
+          ? 'Multi-hop message relaying enabled'
+          : 'Multi-hop message relaying disabled',
+      isSuccess: true,
+    );
+  }
+
+  Future<void> _clearChatHistory() async {
+    final confirm = await _showConfirmationDialog(
+      title: 'Clear Chat History',
+      content:
+          'This will permanently delete all messages from your device. This action cannot be undone.',
+      confirmText: 'Delete All',
+      isDangerous: true,
+    );
+
+    if (confirm == true) {
+      try {
+        await DatabaseService.clearAllData();
+        await _loadStatistics();
+        if (!mounted) return;
+        _showMessage('Chat history cleared successfully', isSuccess: true);
+      } catch (e) {
+        if (!mounted) return;
+        _showMessage('Failed to clear chat history: $e', isDanger: true);
+      }
+    }
+  }
+
+  Future<void> _resyncAllMessages() async {
+    if (!mounted) return;
+    final settings = context.read<SettingsService>();
+
+    if (settings.offlineMode) {
+      _showMessage('Cannot sync in offline mode', isWarning: true);
+      return;
+    }
+
+    try {
+      _showMessage('Syncing pending messages...', isSuccess: false);
+
+      if (widget.syncService != null) {
+        await widget.syncService!.syncPendingMessages();
+      }
+
+      await _loadStatistics();
+      if (!mounted) return;
+      _showMessage('All pending messages synced successfully', isSuccess: true);
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Sync failed: $e', isDanger: true);
+    }
+  }
+
+  Future<void> _testNotifications() async {
+    if (!mounted) return;
+    final settings = context.read<SettingsService>();
+
+    try {
+      // Test notification with current settings
+      HapticFeedback.mediumImpact();
+
+      if (settings.vibrationNotifications && !settings.silentMode) {
+        await HapticFeedback.heavyImpact();
+      }
+
+      if (!mounted) return;
+      _showMessage(
+        'Test notification sent with current settings',
+        isSuccess: true,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Failed to test notifications: $e', isDanger: true);
+    }
+  }
+
+  Future<bool?> _showConfirmationDialog({
+    required String title,
+    required String content,
+    required String confirmText,
+    bool isDangerous = false,
+  }) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: ResQLinkTheme.cardDark,
+          title: Text(title, style: TextStyle(color: Colors.white)),
+          content: Text(content, style: TextStyle(color: Colors.white70)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel', style: TextStyle(color: Colors.white70)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(
+                confirmText,
+                style: TextStyle(
+                  color: isDangerous
+                      ? ResQLinkTheme.primaryRed
+                      : ResQLinkTheme.orange,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showMessage(
+    String message, {
+    bool isSuccess = false,
+    bool isWarning = false,
+    bool isDanger = false,
+  }) {
+    if (!mounted) return;
+
+    final color = isDanger
+        ? ResQLinkTheme.primaryRed
+        : isWarning
+        ? ResQLinkTheme.warningYellow
+        : isSuccess
+        ? ResQLinkTheme.safeGreen
+        : Colors.blue;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 3),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
+    );
+  }
+
+  Future<void> _logout(bool clearOfflineCredentials) async {
+    final confirm = await _showConfirmationDialog(
+      title: clearOfflineCredentials ? 'Full Logout & Clear Data' : 'Logout',
+      content: clearOfflineCredentials
+          ? 'This will sign you out and remove all offline login capabilities. You will need an internet connection to sign in again.'
+          : 'This will sign you out but preserve your ability to login offline with the same credentials.',
+      confirmText: clearOfflineCredentials ? 'Clear All Data' : 'Logout',
+      isDangerous: clearOfflineCredentials,
+    );
+
+    if (confirm != true) return;
+    if (!mounted) return;
+
+    // Show loading state
+    setState(() => _isLoading = true);
+
+    try {
+      // Perform logout
+      if (clearOfflineCredentials) {
+        await AuthService.clearAllUserData();
+      } else {
+        await AuthService.logout(clearOfflineCredentials: false);
+      }
+
+      // Navigate after a microtask to ensure state updates
+      Future.microtask(() {
+        if (mounted) {
+          // Navigate to the LandingPage (now properly imported)
+          Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const LandingPage()),
+            (route) => false,
+          );
+        }
+      });
+    } catch (e) {
+      print('Logout error: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _showMessage('Logout failed: $e', isDanger: true);
+      }
+    }
+  }
+
+  // Update your build method to show loading overlay when _isLoading is true
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        // Your existing build content
+        Consumer<SettingsService>(
+          builder: (context, settings, child) {
+            return Theme(
+              data: ThemeData.dark().copyWith(
+                primaryColor: ResQLinkTheme.orange,
+                scaffoldBackgroundColor: ResQLinkTheme.backgroundDark,
+              ),
+              child: Scaffold(
+                backgroundColor: ResQLinkTheme.backgroundDark,
+                body: CustomScrollView(
+                  slivers: [
+                    SliverPadding(
+                      padding: EdgeInsets.all(16),
+                      sliver: SliverList(
+                        delegate: SliverChildListDelegate([
+                          // Your existing content...
+                          _buildStatisticsCard(),
+                          SizedBox(height: 24),
+                          _buildSectionHeader('Messaging'),
+                          _buildMessagingSection(settings),
+                          SizedBox(height: 24),
+                          _buildSectionHeader('Connectivity'),
+                          _buildConnectivitySection(settings),
+                          SizedBox(height: 24),
+                          _buildSectionHeader('Location Services'),
+                          _buildLocationSection(settings),
+                          SizedBox(height: 24),
+                          _buildSectionHeader('Notifications'),
+                          _buildNotificationSection(settings),
+                          SizedBox(height: 24),
+                          _buildSectionHeader('Data Management'),
+                          _buildDataManagementSection(settings),
+                          SizedBox(height: 24),
+                          _buildSectionHeader('Account'),
+                          _buildAccountSection(),
+                          SizedBox(height: 100),
+                        ]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+
+        // Loading overlay
+        if (_isLoading)
+          Material(
+            color: Colors.black.withAlpha(178),
+            child: Center(
+              child: Container(
+                padding: EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: ResQLinkTheme.cardDark,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: ResQLinkTheme.primaryRed),
+                    SizedBox(width: 16),
+                    Text(
+                      'Logging out...',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
   Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: EdgeInsets.only(
-        bottom: ResponsiveUtils.getResponsiveSpacing(context, 8.0),
-      ),
+      padding: EdgeInsets.only(bottom: 12),
       child: Text(
         title,
         style: TextStyle(
-          fontSize: ResponsiveUtils.getResponsiveFontSize(context, 18),
+          fontSize: 18,
           fontWeight: FontWeight.bold,
-          color: Theme.of(context).colorScheme.primary,
+          color: ResQLinkTheme.orange,
         ),
       ),
     );
   }
 
-  Widget _buildEmergencyCard() {
+  Widget _buildStatisticsCard() {
     return Card(
-      elevation: 2,
+      color: ResQLinkTheme.cardDark,
+      elevation: 4,
       child: Padding(
-        padding: ResponsiveUtils.getResponsivePadding(context),
+        padding: EdgeInsets.all(16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                Icons.emergency,
-                color: Colors.red,
-                size: ResponsiveUtils.getResponsiveIconSize(context, 28),
-              ),
-              title: Text(
-                'Emergency Message',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
+            Row(
+              children: [
+                Icon(Icons.analytics, color: ResQLinkTheme.orange),
+                SizedBox(width: 8),
+                Text(
+                  'App Statistics',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
-              ),
-              subtitle: Text(
-                _emergencyMessage,
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-                ),
-              ),
-              trailing: IconButton(
-                icon: Icon(
-                  Icons.edit,
-                  size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-                ),
-                onPressed: () => _editEmergencyMessage(),
-              ),
+              ],
             ),
-            const Divider(),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                Icons.radio_button_checked,
-                color: Theme.of(context).colorScheme.primary,
-                size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-              ),
-              title: Text(
-                'Broadcast Radius',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
+            SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildStatItem(
+                  'Total Messages',
+                  '$_totalMessages',
+                  Icons.message,
                 ),
-              ),
-              subtitle: Text(
-                '${_broadcastRadius.toInt()} meters',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
+                _buildStatItem(
+                  'Pending Sync',
+                  '$_pendingMessages',
+                  Icons.sync_problem,
                 ),
-              ),
-              trailing: SizedBox(
-                width: ResponsiveUtils.isMobile(context) ? 80 : 120,
-                child: Slider(
-                  value: _broadcastRadius,
-                  min: 100,
-                  max: 2000,
-                  divisions: 19,
-                  onChanged: (value) {
-                    setState(() {
-                      _broadcastRadius = value;
-                    });
-                  },
-                ),
-              ),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              secondary: Icon(
-                Icons.location_on,
-                color: Theme.of(context).colorScheme.primary,
-                size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-              ),
-              title: Text(
-                'Auto Location Broadcast',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-                ),
-              ),
-              subtitle: Text(
-                'Automatically broadcast location in emergency',
-                style: TextStyle(
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-                ),
-              ),
-              value: _autoLocationBroadcast,
-              onChanged: (value) {
-                setState(() {
-                  _autoLocationBroadcast = value;
-                });
-              },
+                _buildStatItem('Storage Used', _storageUsed, Icons.storage),
+              ],
             ),
           ],
         ),
@@ -342,923 +431,483 @@ class SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildConnectivityCard() {
+  Widget _buildStatItem(String label, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: ResQLinkTheme.orange, size: 24),
+        SizedBox(height: 4),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: Colors.white70),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMessagingSection(SettingsService settings) {
     return Card(
+      color: ResQLinkTheme.cardDark,
       elevation: 2,
       child: Column(
         children: [
           SwitchListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
+            title: Text('Offline Mode', style: TextStyle(color: Colors.white)),
+            subtitle: Text(
+              'Force app to work purely with SQLite and P2P',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: settings.offlineMode,
+            onChanged: _toggleOfflineMode,
             secondary: Icon(
-              Icons.wifi,
-              color: _wifiDirectEnabled ? Colors.green : Colors.grey,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+              settings.offlineMode ? Icons.cloud_off : Icons.cloud_done,
+              color: settings.offlineMode
+                  ? ResQLinkTheme.warningYellow
+                  : ResQLinkTheme.safeGreen,
             ),
-            title: Text(
-              'Wi-Fi Direct',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-            subtitle: Text(
-              'Enable offline device communication',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-            value: _wifiDirectEnabled,
-            onChanged: (value) {
-              setState(() {
-                _wifiDirectEnabled = value;
-              });
-            },
+            activeColor: ResQLinkTheme.orange,
           ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: Icon(
-              Icons.devices,
-              color: Theme.of(context).colorScheme.primary,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            title: Text(
-              'Nearby Devices',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
+          Divider(color: Colors.white24, height: 1),
+          SwitchListTile(
+            title: Text('Auto Sync', style: TextStyle(color: Colors.white)),
             subtitle: Text(
-              'Scan and manage connected devices',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
+              'Automatically sync messages when online',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+            value: settings.autoSync && !settings.offlineMode,
+            onChanged: settings.offlineMode
+                ? null
+                : (value) async {
+                    await settings.setAutoSync(value);
+                  },
+            secondary: Icon(
+              Icons.sync,
+              color: (settings.autoSync && !settings.offlineMode)
+                  ? ResQLinkTheme.safeGreen
+                  : Colors.grey,
             ),
-            onTap: () => _showNearbyDevices(),
+            activeColor: ResQLinkTheme.orange,
           ),
-          const Divider(height: 1),
+          Divider(color: Colors.white24, height: 1),
           ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: Icon(
-              Icons.network_check,
-              color: Theme.of(context).colorScheme.primary,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
             title: Text(
-              'Connection Status',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
+              'Re-sync All Messages',
+              style: TextStyle(color: Colors.white),
             ),
             subtitle: Text(
-              'Check network connectivity',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
+              'Force sync all pending messages to Firebase',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+            leading: Icon(
+              Icons.cloud_upload,
+              color: settings.offlineMode ? Colors.grey : ResQLinkTheme.orange,
             ),
-            onTap: () => _showConnectionStatus(),
+            trailing: Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: settings.offlineMode ? null : _resyncAllMessages,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildLocationCard() {
+  Widget _buildConnectivitySection(SettingsService settings) {
     return Card(
+      color: ResQLinkTheme.cardDark,
       elevation: 2,
       child: Column(
         children: [
           SwitchListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
+            title: Text(
+              'Multi-hop Relaying',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              'Allow messages to relay through other devices',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: settings.multiHopEnabled,
+            onChanged: _toggleMultiHop,
             secondary: Icon(
-              Icons.gps_fixed,
-              color: _locationServicesEnabled ? Colors.green : Colors.grey,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+              Icons.device_hub,
+              color: settings.multiHopEnabled
+                  ? ResQLinkTheme.safeGreen
+                  : Colors.grey,
             ),
+            activeColor: ResQLinkTheme.orange,
+          ),
+          Divider(color: Colors.white24, height: 1),
+          ListTile(
             title: Text(
-              'Location Services',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
+              'P2P Network Status',
+              style: TextStyle(color: Colors.white),
             ),
             subtitle: Text(
-              'Enable GPS for emergency location sharing',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
+              widget.p2pService?.isConnected == true
+                  ? 'Connected to ${widget.p2pService?.connectedDevices.length ?? 0} devices'
+                  : 'Not connected',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
-            value: _locationServicesEnabled,
-            onChanged: (value) {
-              setState(() {
-                _locationServicesEnabled = value;
-              });
+            leading: Icon(
+              Icons.wifi_tethering,
+              color: widget.p2pService?.isConnected == true
+                  ? ResQLinkTheme.safeGreen
+                  : Colors.grey,
+            ),
+            trailing: Icon(Icons.info_outline, color: Colors.white54),
+            onTap: () {
+              final info = widget.p2pService?.getConnectionInfo() ?? {};
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: ResQLinkTheme.cardDark,
+                  title: Text(
+                    'P2P Status',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Role: ${info['role'] ?? 'None'}',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                      Text(
+                        'Connected Devices: ${info['connectedDevices'] ?? 0}',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                      Text(
+                        'Known Devices: ${info['knownDevices'] ?? 0}',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                      Text(
+                        'Emergency Mode: ${widget.p2pService?.emergencyMode == true ? 'On' : 'Off'}',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(
+                        'OK',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                  ],
+                ),
+              );
             },
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: Icon(
-              Icons.timer,
-              color: Theme.of(context).colorScheme.primary,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            title: Text(
-              'Location Update Interval',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-            subtitle: Text(
-              '$_locationUpdateInterval seconds',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-            trailing: SizedBox(
-              width: ResponsiveUtils.isMobile(context) ? 80 : 120,
-              child: Slider(
-                value: _locationUpdateInterval.toDouble(),
-                min: 10,
-                max: 300,
-                divisions: 29,
-                onChanged: (value) {
-                  setState(() {
-                    _locationUpdateInterval = value.toInt();
-                  });
-                },
-              ),
-            ),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: Icon(
-              Icons.my_location,
-              color: Theme.of(context).colorScheme.primary,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            title: Text(
-              'Current Location',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-            subtitle: Text(
-              'View and test location accuracy',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            onTap: () => _showCurrentLocation(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildNotificationCard() {
+  Widget _buildLocationSection(SettingsService settings) {
     return Card(
+      color: ResQLinkTheme.cardDark,
       elevation: 2,
       child: Column(
         children: [
           SwitchListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            secondary: Icon(
-              Icons.notifications_active,
-              color: _emergencyNotifications ? Colors.orange : Colors.grey,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+            title: Text(
+              'Location Sharing',
+              style: TextStyle(color: Colors.white),
             ),
+            subtitle: Text(
+              'Allow app to share your location in messages',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: settings.locationSharingEnabled,
+            onChanged: _toggleLocationSharing,
+            secondary: Icon(
+              Icons.location_on,
+              color: settings.locationSharingEnabled
+                  ? ResQLinkTheme.safeGreen
+                  : Colors.grey,
+            ),
+            activeColor: ResQLinkTheme.orange,
+          ),
+          Divider(color: Colors.white24, height: 1),
+          ListTile(
+            title: Text(
+              'Location Permissions',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              'Manage location access for the app',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            leading: Icon(Icons.security, color: ResQLinkTheme.orange),
+            trailing: Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: () async {
+              await Geolocator.openAppSettings();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotificationSection(SettingsService settings) {
+    return Card(
+      color: ResQLinkTheme.cardDark,
+      elevation: 2,
+      child: Column(
+        children: [
+          SwitchListTile(
             title: Text(
               'Emergency Notifications',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
+              style: TextStyle(color: Colors.white),
             ),
             subtitle: Text(
-              'Receive emergency alerts from nearby users',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
+              'Receive alerts for emergency messages',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
-            value: _emergencyNotifications,
-            onChanged: (value) {
-              setState(() {
-                _emergencyNotifications = value;
-              });
+            value: settings.emergencyNotifications,
+            onChanged: (value) async {
+              await settings.setEmergencyNotifications(value);
             },
+            secondary: Icon(
+              Icons.emergency,
+              color: settings.emergencyNotifications
+                  ? ResQLinkTheme.orange
+                  : Colors.grey,
+            ),
+            activeColor: ResQLinkTheme.orange,
           ),
-          const Divider(height: 1),
+          Divider(color: Colors.white24, height: 1),
           SwitchListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
+            title: Text(
+              'Sound Notifications',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              'Play sound for new messages',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: settings.soundNotifications && !settings.silentMode,
+            onChanged: settings.silentMode
+                ? null
+                : (value) async {
+                    await settings.setSoundNotifications(value);
+                  },
             secondary: Icon(
               Icons.volume_up,
-              color: _soundAlerts
-                  ? Theme.of(context).colorScheme.primary
+              color: (settings.soundNotifications && !settings.silentMode)
+                  ? ResQLinkTheme.safeGreen
                   : Colors.grey,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
             ),
-            title: Text(
-              'Sound Alerts',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-            subtitle: Text(
-              'Play sound for emergency notifications',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-            value: _soundAlerts,
-            onChanged: (value) {
-              setState(() {
-                _soundAlerts = value;
-              });
-            },
+            activeColor: ResQLinkTheme.orange,
           ),
-          const Divider(height: 1),
+          Divider(color: Colors.white24, height: 1),
           SwitchListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
+            title: Text('Vibration', style: TextStyle(color: Colors.white)),
+            subtitle: Text(
+              'Vibrate for new messages',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: settings.vibrationNotifications && !settings.silentMode,
+            onChanged: settings.silentMode
+                ? null
+                : (value) async {
+                    await settings.setVibrationNotifications(value);
+                  },
             secondary: Icon(
               Icons.vibration,
-              color: _vibrationAlerts
-                  ? Theme.of(context).colorScheme.primary
+              color: (settings.vibrationNotifications && !settings.silentMode)
+                  ? ResQLinkTheme.safeGreen
                   : Colors.grey,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
             ),
+            activeColor: ResQLinkTheme.orange,
+          ),
+          Divider(color: Colors.white24, height: 1),
+          SwitchListTile(
+            title: Text('Silent Mode', style: TextStyle(color: Colors.white)),
+            subtitle: Text(
+              'Disable all sounds and vibrations',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: settings.silentMode,
+            onChanged: (value) async {
+              await settings.setSilentMode(value);
+            },
+            secondary: Icon(
+              Icons.notifications_off,
+              color: settings.silentMode
+                  ? ResQLinkTheme.warningYellow
+                  : Colors.grey,
+            ),
+            activeColor: ResQLinkTheme.orange,
+          ),
+          Divider(color: Colors.white24, height: 1),
+          ListTile(
             title: Text(
-              'Vibration Alerts',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
+              'Test Notifications',
+              style: TextStyle(color: Colors.white),
             ),
             subtitle: Text(
-              'Vibrate for emergency notifications',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
+              'Test current notification settings',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
-            value: _vibrationAlerts,
-            onChanged: (value) {
-              setState(() {
-                _vibrationAlerts = value;
-              });
-            },
+            leading: Icon(
+              Icons.notifications_active,
+              color: ResQLinkTheme.orange,
+            ),
+            trailing: Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: _testNotifications,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildAppSettingsCard() {
+  Widget _buildDataManagementSection(SettingsService settings) {
     return Card(
+      color: ResQLinkTheme.cardDark,
       elevation: 2,
       child: Column(
         children: [
           SwitchListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
+            title: Text(
+              'Background Sync',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              'Sync messages in the background',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: settings.backgroundSync && !settings.offlineMode,
+            onChanged: settings.offlineMode
+                ? null
+                : (value) async {
+                    await settings.setBackgroundSync(value);
+                  },
             secondary: Icon(
-              Icons.battery_charging_full,
-              color: _batteryOptimization ? Colors.green : Colors.grey,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
+              Icons.sync_outlined,
+              color: (settings.backgroundSync && !settings.offlineMode)
+                  ? ResQLinkTheme.safeGreen
+                  : Colors.grey,
             ),
+            activeColor: ResQLinkTheme.orange,
+          ),
+          Divider(color: Colors.white24, height: 1),
+          ListTile(
             title: Text(
-              'Battery Optimization',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
+              'Clear Chat History',
+              style: TextStyle(color: Colors.white),
             ),
             subtitle: Text(
-              'Optimize battery usage for background operation',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
+              'Delete all messages from device',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
-            value: _batteryOptimization,
-            onChanged: (value) {
-              setState(() {
-                _batteryOptimization = value;
-              });
+            leading: Icon(Icons.delete_forever, color: ResQLinkTheme.orange),
+            trailing: Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: _clearChatHistory,
+          ),
+          Divider(color: Colors.white24, height: 1),
+          ListTile(
+            title: Text(
+              'Export Chat Data',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              'Export messages for backup',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            leading: Icon(Icons.file_download, color: ResQLinkTheme.orange),
+            trailing: Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: () {
+              _showMessage('Export feature coming soon', isWarning: true);
             },
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: Icon(
-              Icons.storage,
-              color: Theme.of(context).colorScheme.primary,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            title: Text(
-              'Storage & Cache',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-            subtitle: Text(
-              'Manage app data and cache',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            onTap: () => _showStorageSettings(),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: Icon(
-              Icons.security,
-              color: Theme.of(context).colorScheme.primary,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            title: Text(
-              'Privacy & Security',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-            subtitle: Text(
-              'Manage privacy and security settings',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            onTap: () => _showPrivacySettings(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildProfileCard() {
+  Widget _buildAccountSection() {
     return Card(
+      color: ResQLinkTheme.cardDark,
       elevation: 2,
       child: Column(
         children: [
           ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: CircleAvatar(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              radius: ResponsiveUtils.getResponsiveIconSize(context, 20),
-              child: Icon(
-                Icons.person,
-                color: Colors.white,
-                size: ResponsiveUtils.getResponsiveIconSize(context, 20),
-              ),
-            ),
-            title: Text(
-              'Profile',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-            subtitle: Text(
-              'Manage your profile and emergency contacts',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            onTap: () => _showProfileDialog(),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: Icon(
-              Icons.contacts,
-              color: Theme.of(context).colorScheme.primary,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            title: Text(
-              'Emergency Contacts',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-            subtitle: Text(
-              'Add and manage emergency contacts',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            onTap: () => _showEmergencyContacts(),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: Icon(
-              Icons.help,
-              color: Theme.of(context).colorScheme.primary,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            title: Text(
-              'Help & Support',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-            subtitle: Text(
-              'Get help and contact support',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
-            ),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            onTap: () => _showHelpSupport(),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: ResponsiveUtils.getResponsivePadding(context),
-            leading: Icon(
-              Icons.info,
-              color: Theme.of(context).colorScheme.primary,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
             title: Text(
               'About ResQLink',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
+              style: TextStyle(color: Colors.white),
             ),
             subtitle: Text(
               'App version and information',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-              ),
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: ResponsiveUtils.getResponsiveIconSize(context, 24),
-            ),
-            onTap: () => _showAboutDialog(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLogoutButton() {
-    return SizedBox(
-      width: ResponsiveUtils.getResponsiveButtonWidth(context, 400),
-      child: ElevatedButton.icon(
-        icon: Icon(
-          Icons.logout,
-          size: ResponsiveUtils.getResponsiveIconSize(context, 20),
-        ),
-        label: Text(
-          'Logout',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-          ),
-        ),
-        style: ElevatedButton.styleFrom(
-          padding: ResponsiveUtils.getResponsivePadding(context),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
-        ),
-        onPressed: () async {
-          bool? confirmLogout = await _showLogoutConfirmationDialog(context);
-          if (confirmLogout == true) {
-            try {
-              await AuthService.logout();
-
-              if (!mounted) return;
-
-              Navigator.of(
-                context,
-              ).pushNamedAndRemoveUntil('/', (route) => false);
-            } catch (e) {
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Logout failed: ${e.toString()}')),
+            leading: Icon(Icons.info, color: ResQLinkTheme.orange),
+            trailing: Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: () {
+              showAboutDialog(
+                context: context,
+                applicationName: 'ResQLink',
+                applicationVersion: '1.0.0',
+                applicationIcon: Icon(
+                  Icons.emergency,
+                  size: 48,
+                  color: ResQLinkTheme.orange,
+                ),
+                children: [
+                  Padding(
+                    padding: EdgeInsets.only(top: 16),
+                    child: Text(
+                      'Offline emergency communication using Wi-Fi Direct and GPS.\n\n'
+                      'Stay connected even when the internet is down.',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                ],
               );
-            }
-          }
-        },
-      ),
-    );
-  }
-
-  // Function to show a responsive confirmation dialog
-  Future<bool?> _showLogoutConfirmationDialog(BuildContext context) {
-    return showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Logout',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: Text(
-          'Are you sure you want to logout?',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(
-              'Logout',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Dialog and navigation methods
-  void _editEmergencyMessage() {
-    TextEditingController controller = TextEditingController(
-      text: _emergencyMessage,
-    );
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Edit Emergency Message',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: TextField(
-          controller: controller,
-          maxLines: 3,
-          maxLength: 160,
-          decoration: InputDecoration(
-            hintText: 'Enter your emergency message...',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _emergencyMessage = controller.text;
-              });
-              Navigator.pop(context);
             },
-            child: Text(
-              'Save',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
+          ),
+          Divider(color: Colors.white24, height: 1),
+          ListTile(
+            title: Text(
+              'Logout (Keep Offline Access)',
+              style: TextStyle(color: Colors.white),
             ),
+            subtitle: Text(
+              'Sign out but allow offline login later',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            leading: Icon(Icons.logout, color: ResQLinkTheme.orange),
+            trailing: Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: () => _logout(false), // Don't clear offline credentials
+          ),
+          Divider(color: Colors.white24, height: 1),
+          ListTile(
+            title: Text(
+              'Full Logout & Clear Data',
+              style: TextStyle(color: ResQLinkTheme.primaryRed),
+            ),
+            subtitle: Text(
+              'Sign out and remove all offline access',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            leading: Icon(
+              Icons.delete_forever,
+              color: ResQLinkTheme.primaryRed,
+            ),
+            trailing: Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: () => _logout(true), // Clear everything
           ),
         ],
       ),
-    );
-  }
-
-  void _showNearbyDevices() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Nearby Devices',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: const Text(
-          'This would show a list of nearby devices available for Wi-Fi Direct connection.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'OK',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showConnectionStatus() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Connection Status',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildStatusItem('Wi-Fi Direct', _wifiDirectEnabled),
-            _buildStatusItem('Location Services', _locationServicesEnabled),
-            _buildStatusItem('Background App Refresh', _batteryOptimization),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'OK',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusItem(String title, bool status) {
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        vertical: ResponsiveUtils.getResponsiveSpacing(context, 4),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-            ),
-          ),
-          Icon(
-            status ? Icons.check_circle : Icons.cancel,
-            color: status ? Colors.green : Colors.red,
-            size: ResponsiveUtils.getResponsiveIconSize(context, 20),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showCurrentLocation() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Current Location',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: const Text(
-          'Latitude: 8.4542° N\nLongitude: 124.6319° E\nAccuracy: ±5 meters\nLast Updated: Just now',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'OK',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showStorageSettings() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Storage & Cache',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: const Text(
-          'Cache Size: 12.5 MB\nApp Data: 8.2 MB\nTotal: 20.7 MB',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Clear Cache',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'OK',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showPrivacySettings() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Privacy & Security',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: const Text(
-          'This would show privacy and security settings including data sharing preferences and security options.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'OK',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showProfileDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Profile',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: const Text(
-          'Name: John Doe\nPhone: +63 912 345 6789\nEmail: john.doe@example.com',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Edit',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'OK',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEmergencyContacts() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Emergency Contacts',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: const Text(
-          'This would show a list of emergency contacts that can be notified automatically during emergencies.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Add Contact',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'OK',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showHelpSupport() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Help & Support',
-          style: TextStyle(
-            fontSize: ResponsiveUtils.getResponsiveFontSize(context, 20),
-          ),
-        ),
-        content: const Text(
-          'For help and support:\n\nEmail: support@resqlink.com\nPhone: +63 2 1234 5678\nWebsite: www.resqlink.com',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'OK',
-              style: TextStyle(
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAboutDialog() {
-    showAboutDialog(
-      context: context,
-      applicationName: 'ResQLink',
-      applicationVersion: '1.0.0',
-      applicationIcon: const Icon(Icons.emergency, size: 48),
-      children: [
-        Padding(
-          padding: EdgeInsets.only(top: 16.0),
-          child: Text(
-            'Offline emergency support using Wi-Fi Direct and GPS.\n\nStay connected even when the internet is down.',
-            style: TextStyle(
-              fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:provider/provider.dart';
 import 'package:resqlink/gps_page.dart';
 import 'package:resqlink/services/message_sync_service.dart';
-import '../services/p2p_services.dart';
+import 'package:resqlink/services/settings_service.dart';
+import 'services/p2p_service.dart';
 import '../services/database_service.dart';
 import '../models/message_model.dart';
 import '../utils/resqlink_theme.dart';
@@ -362,6 +364,23 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
   Future<void> _showEmergencyNotification(P2PMessage message) async {
+    final settings = context.read<SettingsService>();
+
+    if (!settings.emergencyNotifications) {
+      return; // Don't show notification if disabled
+    }
+
+    // Play sound only if enabled
+    final playSound = settings.soundNotifications && !settings.silentMode;
+    final vibrate = settings.vibrationNotifications && !settings.silentMode;
+
+    await NotificationService.showEmergencyNotification(
+      title: '${message.type.name.toUpperCase()} from ${message.senderName}',
+      body: message.message,
+      playSound: playSound,
+      vibrate: vibrate,
+    );
+
     if (!mounted) return;
 
     String body = message.message;

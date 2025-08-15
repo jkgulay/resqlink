@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:resqlink/services/settings_service.dart';
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
-import '../services/p2p_services.dart';
+import 'services/p2p_service.dart';
 import '../services/database_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/map_service.dart';
@@ -22,6 +24,9 @@ class _HomePageState extends State<HomePage>
   String? _userId = "user_${DateTime.now().millisecondsSinceEpoch}";
   bool _isP2PInitialized = false;
 
+  // Store the settings service reference
+  SettingsService? _settingsService;
+
   @override
   Future<void> onAppResumed() async {
     // Refresh P2P status
@@ -35,6 +40,8 @@ class _HomePageState extends State<HomePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Don't access context.read here - do it in didChangeDependencies
     _loadCurrentLocation();
     _initializeP2P();
     _initializeMapService();
@@ -61,6 +68,17 @@ class _HomePageState extends State<HomePage>
       MessagePage(p2pService: _p2pService, currentLocation: _currentLocation),
       SettingsPage(),
     ];
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    // Safely get the settings service reference here
+    if (_settingsService == null) {
+      _settingsService = context.read<SettingsService>();
+      _settingsService!.addListener(_onSettingsChanged);
+    }
   }
 
   @override
@@ -158,6 +176,27 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  void _onSettingsChanged() {
+    // Use the stored reference instead of context.read
+    if (_settingsService == null || !mounted) return;
+
+    final settings = _settingsService!;
+
+    // Apply settings to P2P service
+    if (_isP2PInitialized) {
+      // Update P2P service based on settings
+      if (!settings.multiHopEnabled) {
+        // Disable multi-hop features
+      }
+
+      if (settings.offlineMode) {
+        // Force offline mode
+        _p2pService.emergencyMode = true;
+      }
+    }
+    setState(() {}); // Refresh UI
+  }
+
   void _showNotification(P2PMessage message) {
     if (!mounted) return;
 
@@ -249,6 +288,12 @@ class _HomePageState extends State<HomePage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+
+    // Use the stored reference instead of context.read
+    if (_settingsService != null) {
+      _settingsService!.removeListener(_onSettingsChanged);
+    }
+
     _p2pService.removeListener(_updateUI);
     _p2pService.dispose();
     super.dispose();
@@ -488,11 +533,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     _checkUnsyncedLocations();
     widget.p2pService.addListener(_updateUI);
     widget.p2pService.onDevicesDiscovered = _onDevicesDiscovered;
-
-    // Enable emergency mode by default for quick connections
-    if (widget.p2pService.connectedDevices.isEmpty) {
-      widget.p2pService.emergencyMode = true;
-    }
   }
 
   void _initializeAnimations() {
@@ -504,10 +544,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
-
-    if (widget.p2pService.emergencyMode) {
-      _pulseController.repeat(reverse: true);
-    }
   }
 
   @override

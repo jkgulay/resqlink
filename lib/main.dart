@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'services/settings_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:resqlink/firebase_auth_helper.dart';
 import 'package:resqlink/message_page.dart';
 import 'package:resqlink/services/map_service.dart';
 import 'package:resqlink/services/message_sync_service.dart';
@@ -15,6 +18,7 @@ import 'services/auth_service.dart';
 import 'services/database_service.dart';
 import 'widgets/connection_status_widget.dart';
 import 'models/user_model.dart';
+import 'services/firebase_debug.dart';
 
 final _secureStorage = FlutterSecureStorage();
 
@@ -191,24 +195,6 @@ Future<UserModel?> trySilentFirebaseLogin() async {
   return null;
 }
 
-Future<UserModel?> tryOfflineLogin() async {
-  // First try the current AuthService method
-  final user = await AuthService.getCurrentUser();
-  if (user != null) return user;
-
-  // Then try cached Firebase credentials
-  final cachedEmail = await _secureStorage.read(key: 'cached_email');
-  final firebaseUid = await _secureStorage.read(key: 'firebase_uid');
-
-  if (cachedEmail != null && firebaseUid != null) {
-    // Verify cached user exists in local database
-    final localUser = await DatabaseService.loginUser(cachedEmail, firebaseUid);
-    return localUser;
-  }
-
-  return null;
-}
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -216,6 +202,10 @@ Future<void> main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+
+    if (kDebugMode) {
+      await FirebaseDebugService.checkFirebaseSetup();
+    }
   } catch (e) {
     debugPrint('Firebase init failed (offline?): $e');
   }
@@ -224,7 +214,8 @@ Future<void> main() async {
   await PhilippinesMapService.instance.initialize();
   await NotificationService.initialize();
   MessageSyncService().initialize(); // Add this line
-  
+  await SettingsService.instance.loadSettings();
+
   if (kDebugMode) {
     await DatabaseService.deleteDatabaseFile();
   }
@@ -237,13 +228,21 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => MyAppState(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => MyAppState()),
+        ChangeNotifierProvider.value(value: SettingsService.instance),
+      ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'ResQLink',
         theme: _darkTheme,
-        home: const AuthWrapper(),
+        initialRoute: '/',
+        routes: {
+          '/': (context) => const AuthWrapper(),
+          '/home': (context) => HomePage(),
+          '/landing': (context) => const LandingPage(),
+        },
       ),
     );
   }
@@ -293,47 +292,95 @@ class AuthWrapper extends StatefulWidget {
 class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   UserModel? _currentUser;
   bool _loading = true;
+  StreamSubscription<User?>? _authSubscription;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this); // Add this
+    WidgetsBinding.instance.addObserver(this);
+    _listenToAuthChanges();
     _bootstrap();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(
-      this,
-    ); // Remove 'as WidgetsBindingObserver'
-    super.dispose();
   }
 
   // Add this required method
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Handle app lifecycle changes
+    if (state == AppLifecycleState.resumed) {
+      print('App resumed, checking auth state...');
+      _bootstrap();
+    }
+  }
+
+  void _listenToAuthChanges() {
+    _authSubscription = FirebaseAuthHelper.authStateChanges.listen((
+      User? user,
+    ) {
+      print('Firebase auth state changed: ${user?.email}');
+      if (user == null && _currentUser != null) {
+        // User logged out from Firebase, clear local state too
+        print('Firebase user logged out, clearing local state');
+        setState(() {
+          _currentUser = null;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _authSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _bootstrap() async {
-    if (await isOnline()) {
+    print('Bootstrapping authentication...');
+
+    // Check connectivity
+    final connected = await AuthService.isConnected;
+    print('Connected: $connected');
+
+    if (connected) {
       try {
-        _currentUser = await trySilentFirebaseLogin();
+        _currentUser = await AuthService.trySilentFirebaseLogin();
+        print('Silent Firebase login result: ${_currentUser?.email}');
       } catch (e) {
-        debugPrint('Silent Firebase login failed: $e');
+        print('Silent Firebase login failed: $e');
       }
     }
 
-    _currentUser ??= await tryOfflineLogin();
+    // Try offline login if Firebase didn't work
+    _currentUser ??= await AuthService.tryOfflineLogin();
+    print('Final auth result: ${_currentUser?.email}');
 
-    setState(() => _loading = false);
+    if (mounted) {
+      setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.emergency, size: 80, color: Colors.red),
+              SizedBox(height: 16),
+              CircularProgressIndicator(color: Colors.red),
+              SizedBox(height: 16),
+              Text(
+                'Checking authentication...',
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ],
+          ),
+        ),
+      );
     }
+
     return _currentUser != null ? HomePage() : const LandingPage();
   }
 }
@@ -616,8 +663,19 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
     String password = passwordController.text;
     String confirmPassword = confirmPasswordController.text;
 
+    // Validation
     if (email.isEmpty || password.isEmpty) {
       _showSnackBar('Please enter all fields');
+      return;
+    }
+
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+      _showSnackBar('Please enter a valid email address');
+      return;
+    }
+
+    if (password.length < 6) {
+      _showSnackBar('Password must be at least 6 characters');
       return;
     }
 
@@ -629,48 +687,68 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
     setState(() => isLoading = true);
 
     try {
+      // Debug current state
+      print('=== AUTH ATTEMPT ===');
+      print('Email: $email');
+      print('Is Login: $isLogin');
+      await AuthService.debugAuthState();
+
       AuthResult result;
       if (isLogin) {
         result = await AuthService.login(email, password);
-
-        // If online login successful, cache the credentials
-        if (result.isSuccess && result.method == AuthMethod.online) {
-          final firebaseUser = FirebaseAuth.instance.currentUser;
-          if (firebaseUser != null) {
-            await _secureStorage.write(key: 'cached_email', value: email);
-            await _secureStorage.write(
-              key: 'firebase_uid',
-              value: firebaseUser.uid,
-            );
-          }
-        }
       } else {
         result = await AuthService.register(email, password);
+      }
 
-        // Cache registration credentials too
-        if (result.isSuccess && result.method == AuthMethod.online) {
-          final firebaseUser = FirebaseAuth.instance.currentUser;
-          if (firebaseUser != null) {
-            await _secureStorage.write(key: 'cached_email', value: email);
-            await _secureStorage.write(
-              key: 'firebase_uid',
-              value: firebaseUser.uid,
-            );
-          }
+      print('Auth result success: ${result.isSuccess}');
+      print('Auth method: ${result.method}');
+      if (!result.isSuccess) print('Error: ${result.errorMessage}');
+
+      if (result.isSuccess && result.user != null) {
+        // Show success message with method info
+        final methodText = result.method == AuthMethod.online
+            ? 'Online'
+            : 'Offline';
+        _showSnackBar(
+          '${isLogin ? 'Login' : 'Registration'} successful ($methodText)',
+          Colors.green,
+        );
+
+        // Small delay to show the success message
+        await Future.delayed(Duration(milliseconds: 500));
+
+        // Close dialog and navigate to home
+        if (mounted) {
+          Navigator.of(context).pop(); // Close dialog
+
+          // Navigate to home page
+          Navigator.of(
+            context,
+          ).pushReplacement(MaterialPageRoute(builder: (_) => HomePage()));
         }
+      } else {
+        _showSnackBar(result.errorMessage ?? 'Authentication failed');
       }
     } catch (e) {
+      print('Auth exception: $e');
       _showSnackBar('An error occurred: ${e.toString()}');
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
   }
 
-  void _showSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+  // Update the _showSnackBar method to accept color
+  void _showSnackBar(String message, [Color? color]) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: TextStyle(fontWeight: FontWeight.w600)),
+        backgroundColor: color ?? Colors.red,
+        duration: Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
   }
 
   @override
