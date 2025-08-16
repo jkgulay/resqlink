@@ -10,26 +10,24 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:geolocator/geolocator.dart';
 
-/// P2P Connection Service Architecture:
-/// - Dynamic Host/Client roles based on network topology
-/// - Multi-hop message forwarding with TTL
-/// - Store-and-forward for offline devices
-/// - Automatic message deduplication
-/// - Firebase sync when online
-/// - Pure WiFi Direct discovery using wifi_direct_plugin
 class P2PConnectionService with ChangeNotifier {
   static const String serviceType = "_resqlink._tcp";
   static const Duration messageExpiry = Duration(hours: 24);
-  static const String emergencyPassword = "RESQLINK911"; // Predefined password
-  static const Duration autoConnectDelay = Duration(seconds: 3);
-  static const int maxTtl = 5; // Maximum hops
+  static const String emergencyPassword = "RESQLINK911";
+  static const Duration autoConnectDelay = Duration(seconds: 5);
+  static const int maxTtl = 5;
 
-  // Field to track discovery state
+  // Connection state management
   bool _isDiscovering = false;
   bool _isDisposed = false;
+  bool _isConnecting = false;
+  DateTime? _lastDiscoveryTime;
+  String? _preferredRole; // 'host' or 'client'
 
-  // Getter for isDiscovering
-  bool get isDiscovering => _isDiscovering;
+  // Device identity and role
+  String? _deviceId;
+  String? _userName;
+  P2PRole _currentRole = P2PRole.none;
 
   // Singleton instance
   static P2PConnectionService? _instance;
@@ -56,11 +54,6 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Device identity and role
-  String? _deviceId;
-  String? _userName;
-  P2PRole _currentRole = P2PRole.none;
-
   // Network state
   final Map<String, ConnectedDevice> _connectedDevices = {};
   final Map<String, DeviceCredentials> _knownDevices = {};
@@ -69,11 +62,25 @@ class P2PConnectionService with ChangeNotifier {
   bool _isGroupOwner = false;
   String? _groupOwnerAddress;
 
-  // Emergency mode
+  // Emergency mode with better control
   bool _emergencyMode = false;
-  bool _autoConnectEnabled = true;
   Timer? _autoConnectTimer;
   Timer? _discoveryTimer;
+  Timer? _heartbeatTimer;
+
+  // Emergency mode toggle with better control
+  bool get emergencyMode => _emergencyMode;
+  set emergencyMode(bool value) {
+    if (_emergencyMode != value) {
+      _emergencyMode = value;
+      if (value) {
+        _startEmergencyMode();
+      } else {
+        _stopEmergencyMode();
+      }
+      notifyListeners();
+    }
+  }
 
   // Message handling
   final Set<String> _processedMessageIds = {};
@@ -97,28 +104,21 @@ class P2PConnectionService with ChangeNotifier {
   Function(String deviceId)? onDeviceDisconnected;
   Function(List<Map<String, dynamic>> devices)? onDevicesDiscovered;
 
-  // Emergency mode toggle
-  bool get emergencyMode => _emergencyMode;
-  set emergencyMode(bool value) {
-    _emergencyMode = value;
-    if (value) {
-      _startEmergencyMode();
-    } else {
-      _stopEmergencyMode();
-    }
-    notifyListeners();
-  }
-
-  // Initialize service
-  Future<bool> initialize(String userName) async {
+  // Initialize service with role preference
+  Future<bool> initialize(String userName, {String? preferredRole}) async {
     try {
       _userName = userName;
       _deviceId = _generateDeviceId(userName);
+      _preferredRole = preferredRole;
+
+      debugPrint(
+        "🚀 Initializing P2P Service for: $_userName (ID: $_deviceId)",
+      );
 
       // Initialize WiFi Direct
       bool success = await WifiDirectPlugin.initialize();
       if (!success) {
-        debugPrint("Failed to initialize WiFi Direct");
+        debugPrint("❌ Failed to initialize WiFi Direct");
         return false;
       }
 
@@ -127,6 +127,7 @@ class P2PConnectionService with ChangeNotifier {
 
       // Start cleanup timers
       _startMessageCleanup();
+      _startHeartbeat();
       _startReconnectTimer();
 
       // Monitor connectivity
@@ -136,39 +137,48 @@ class P2PConnectionService with ChangeNotifier {
       await _loadKnownDevices();
       await _loadPendingMessages();
 
-      // Start discovery in background
-      _startBackgroundDiscovery();
-
+      debugPrint("✅ P2P Service initialized successfully");
       return true;
     } catch (e) {
-      debugPrint("P2P initialization error: $e");
+      debugPrint("❌ P2P initialization error: $e");
       return false;
     }
   }
 
-  // Setup WiFi Direct event listeners
+  // Enhanced WiFi Direct event listeners
   void _setupWifiDirectListeners() {
     // Peers discovered
     _peersChangeSubscription = WifiDirectPlugin.peersStream.listen((peers) {
+      if (_isDisposed) return;
+
+      debugPrint("📡 Discovered ${peers.length} peers");
       _discoveredDevices.clear();
+
       for (var peer in peers) {
         final deviceData = {
           'deviceName': peer.deviceName,
           'deviceAddress': peer.deviceAddress,
           'status': peer.status,
+          'isAvailable': peer.status == 0, // 0 = Available
+          'discoveredAt': DateTime.now().millisecondsSinceEpoch,
         };
         _discoveredDevices[peer.deviceAddress] = deviceData;
+
+        debugPrint(
+          "📱 Found device: ${peer.deviceName} (${peer.deviceAddress}) - Status: ${peer.status}",
+        );
       }
 
-      debugPrint("Discovered ${peers.length} devices");
-
-      // Convert to list of maps for callback
+      // Convert to list for callback
       final deviceList = _discoveredDevices.values.toList();
       onDevicesDiscovered?.call(deviceList);
 
-      // Auto-connect in emergency mode
-      if (_emergencyMode && _autoConnectEnabled && !_isConnected) {
-        _attemptAutoConnect();
+      // Auto-connect logic only if emergency mode is on and not currently connecting
+      if (_emergencyMode &&
+          !_isConnecting &&
+          !_isConnected &&
+          deviceList.isNotEmpty) {
+        _scheduleAutoConnect();
       }
 
       notifyListeners();
@@ -178,30 +188,128 @@ class P2PConnectionService with ChangeNotifier {
     _connectionChangeSubscription = WifiDirectPlugin.connectionStream.listen((
       info,
     ) {
+      if (_isDisposed) return;
+
+      final wasConnected = _isConnected;
       _isConnected = info.isConnected;
       _isGroupOwner = info.isGroupOwner;
       _groupOwnerAddress = info.groupOwnerAddress;
 
       debugPrint(
-        "Connection changed: connected=$_isConnected, isGroupOwner=$_isGroupOwner",
+        "🔗 Connection changed: connected=$_isConnected, isGroupOwner=$_isGroupOwner",
       );
 
-      if (_isConnected) {
+      if (_isConnected && !wasConnected) {
         _handleConnectionEstablished();
-      } else {
+      } else if (!_isConnected && wasConnected) {
         _handleConnectionLost();
       }
 
+      _isConnecting = false;
       notifyListeners();
     });
 
     // Text message received
     WifiDirectPlugin.onTextReceived = (text) {
+      if (_isDisposed) return;
       _handleIncomingText(text);
     };
   }
 
-  // Generate unique device ID
+  // Smart auto-connect with role preference
+  void _scheduleAutoConnect() {
+    _autoConnectTimer?.cancel();
+    _autoConnectTimer = Timer(autoConnectDelay, () async {
+      if (_isDisposed || _isConnecting || _isConnected) return;
+
+      await _attemptSmartConnect();
+    });
+  }
+
+  Future<void> _attemptSmartConnect() async {
+    if (_discoveredDevices.isEmpty || _isConnecting) return;
+
+    debugPrint("🤖 Attempting smart auto-connect...");
+
+    // Sort devices by preference
+    final availableDevices = _discoveredDevices.values
+        .where((device) => device['isAvailable'] == true)
+        .toList();
+
+    if (availableDevices.isEmpty) {
+      debugPrint("📍 No available devices, becoming host...");
+      await _becomeHost();
+      return;
+    }
+
+    // Prefer known devices first
+    Map<String, dynamic>? targetDevice;
+
+    for (var device in availableDevices) {
+      if (_knownDevices.containsKey(device['deviceAddress'])) {
+        targetDevice = device;
+        break;
+      }
+    }
+
+    // If no known devices, use role preference
+    if (targetDevice == null) {
+      if (_preferredRole == 'host' || availableDevices.length == 1) {
+        debugPrint("📍 Preferred role is host, creating group...");
+        await _becomeHost();
+        return;
+      } else {
+        // Try to connect to first available device as client
+        targetDevice = availableDevices.first;
+      }
+    }
+
+    debugPrint("🔗 Auto-connecting to: ${targetDevice['deviceName']}");
+    try {
+      await connectToDevice(targetDevice);
+    } catch (e) {
+      debugPrint("❌ Auto-connect failed: $e, becoming host instead...");
+      await Future.delayed(Duration(seconds: 2));
+      if (!_isConnected && !_isConnecting) {
+        await _becomeHost();
+      }
+    }
+  }
+
+  // Become host with better error handling
+  Future<void> _becomeHost() async {
+    if (_isConnecting || _isConnected) return;
+
+    try {
+      _isConnecting = true;
+      _currentRole = P2PRole.host;
+
+      debugPrint("👑 Becoming WiFi Direct host...");
+
+      // Stop any ongoing discovery
+      await WifiDirectPlugin.stopDiscovery();
+      await Future.delayed(Duration(milliseconds: 500));
+
+      bool success = await WifiDirectPlugin.startAsServer(
+        "RESQLINK_$_userName",
+      );
+
+      if (success) {
+        debugPrint("✅ Successfully created host group");
+        notifyListeners();
+      } else {
+        debugPrint("❌ Failed to create host group");
+        _currentRole = P2PRole.none;
+        _isConnecting = false;
+      }
+    } catch (e) {
+      debugPrint("❌ Error becoming host: $e");
+      _currentRole = P2PRole.none;
+      _isConnecting = false;
+    }
+  }
+
+  // Cleanup and utilities
   String _generateDeviceId(String userName) {
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final hash = md5.convert(utf8.encode('$userName$timestamp')).toString();
@@ -238,46 +346,32 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  void _startEmergencyMode() async {
-    debugPrint("Starting emergency mode...");
+  // Emergency mode management
+  void _startEmergencyMode() {
+    debugPrint("🚨 Starting emergency mode...");
 
-    // Enable all services
-    await checkAndRequestPermissions();
-
-    // Start aggressive discovery
-    _startAggressiveDiscovery();
-
-    // Auto-create or join groups
-    if (!_isConnected) {
-      _autoConnectTimer = Timer(autoConnectDelay, () {
-        _attemptAutoConnect();
-      });
+    // Start discovery if not connected
+    if (!_isConnected && !_isDiscovering) {
+      discoverDevices(force: true);
     }
+
+    // Set up periodic discovery
+    _discoveryTimer?.cancel();
+    _discoveryTimer = Timer.periodic(Duration(minutes: 1), (timer) {
+      if (!_isConnected && !_isDiscovering && !_isDisposed) {
+        discoverDevices(force: true);
+      }
+    });
   }
 
   void _stopEmergencyMode() {
-    debugPrint("Stopping emergency mode...");
+    debugPrint("✋ Stopping emergency mode...");
+
     _autoConnectTimer?.cancel();
     _discoveryTimer?.cancel();
-  }
 
-  // Update all timer callbacks to check disposal
-  void _startAggressiveDiscovery() async {
-    _discoveryTimer?.cancel();
-    _discoveryTimer = Timer.periodic(Duration(seconds: 10), (timer) async {
-      if (_isDisposed) {
-        timer.cancel();
-        return;
-      }
-
-      if (!_isConnected) {
-        await _performDiscoveryScan();
-      }
-    });
-
-    // Start immediate scan
-    if (!_isDisposed) {
-      await _performDiscoveryScan();
+    if (_isDiscovering) {
+      _stopDiscovery();
     }
   }
 
@@ -301,43 +395,6 @@ class P2PConnectionService with ChangeNotifier {
       }
     } catch (e) {
       debugPrint("Discovery scan error: $e");
-    }
-  }
-
-  Future<void> _attemptAutoConnect() async {
-    if (_discoveredDevices.isEmpty) {
-      // No devices found, create own group
-      debugPrint("No devices found, creating emergency group...");
-      await createEmergencyGroup();
-      return;
-    }
-
-    // Find best device to connect to
-    Map<String, dynamic>? bestDevice;
-
-    for (var device in _discoveredDevices.values) {
-      // Prioritize known devices
-      if (_knownDevices.containsKey(device['deviceAddress'])) {
-        bestDevice = device;
-        break;
-      }
-
-      // Otherwise, choose devices with RESQLINK in name or any available device
-      if (device['deviceName'].toString().contains("RESQLINK") ||
-          bestDevice == null) {
-        bestDevice = device;
-      }
-    }
-
-    if (bestDevice != null) {
-      debugPrint("Auto-connecting to ${bestDevice['deviceName']}...");
-      try {
-        await connectToDevice(bestDevice);
-      } catch (e) {
-        debugPrint("Auto-connect failed: $e");
-        // Fallback: create own group
-        await createEmergencyGroup();
-      }
     }
   }
 
@@ -371,107 +428,207 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Connect to discovered device
+  // Enhanced device connection with better error handling
   Future<void> connectToDevice(Map<String, dynamic> deviceData) async {
+    if (_isConnecting || _isConnected) {
+      debugPrint("⚠️ Already connecting or connected");
+      return;
+    }
+
     try {
-      debugPrint("Connecting to device: ${deviceData['deviceName']}");
+      _isConnecting = true;
+      notifyListeners();
 
-      final deviceAddress = deviceData['deviceAddress'];
+      final deviceAddress = deviceData['deviceAddress'] as String;
+      final deviceName = deviceData['deviceName'] as String;
+
+      debugPrint("🔗 Connecting to device: $deviceName ($deviceAddress)");
+
+      // Stop discovery before connecting
+      await WifiDirectPlugin.stopDiscovery();
+      await Future.delayed(Duration(milliseconds: 500));
+
       bool success = await WifiDirectPlugin.connect(deviceAddress);
-      if (!success) {
-        throw Exception("Failed to connect to device");
+
+      if (success) {
+        debugPrint("✅ Connection initiated successfully");
+        _currentRole = P2PRole.client;
+
+        // Save device credentials for future reconnection
+        await _saveDeviceCredentials(
+          deviceAddress,
+          DeviceCredentials(
+            deviceId: deviceAddress,
+            ssid: deviceName,
+            psk: emergencyPassword,
+            isHost: false,
+            lastSeen: DateTime.now(),
+          ),
+        );
+      } else {
+        debugPrint("❌ Failed to initiate connection");
+        _isConnecting = false;
+        throw Exception('Failed to connect to device');
       }
-
-      // Save device credentials for future reconnection
-      _saveDeviceCredentials(
-        deviceAddress,
-        DeviceCredentials(
-          deviceId: deviceAddress,
-          ssid: deviceData['deviceName'],
-          psk: emergencyPassword,
-          isHost: false,
-          lastSeen: DateTime.now(),
-        ),
-      );
-
-      _currentRole = P2PRole.client;
-      debugPrint("Connected to device successfully");
     } catch (e) {
-      debugPrint('Failed to connect to device: $e');
-      throw Exception('Failed to connect to device: $e');
+      _isConnecting = false;
+      notifyListeners();
+      debugPrint("❌ Connection error: $e");
+      rethrow;
     }
   }
 
-  // Handle connection established
-  void _handleConnectionEstablished() async {
-    debugPrint("P2P connection established, isGroupOwner: $_isGroupOwner");
+  // Enhanced connection handling
+  void _handleConnectionEstablished() {
+    debugPrint(
+      "🎉 P2P connection established! Role: ${_isGroupOwner ? 'Host' : 'Client'}",
+    );
 
-    // Setup emergency authentication and messaging
-    _setupEmergencyMessaging();
+    _isConnecting = false;
+    _currentRole = _isGroupOwner ? P2PRole.host : P2PRole.client;
+
+    // Start heartbeat to maintain connection
+    _startHeartbeat();
+
+    // Send initial handshake
+    _sendHandshake();
+
+    notifyListeners();
   }
 
-  // Handle connection lost
   void _handleConnectionLost() {
-    debugPrint("P2P connection lost");
+    debugPrint("💔 P2P connection lost");
 
     _connectedDevices.clear();
     _currentRole = P2PRole.none;
+    _isConnecting = false;
+    _stopHeartbeat();
 
-    // In emergency mode, try to reconnect or create new group
-    if (_emergencyMode) {
-      Timer(Duration(seconds: 5), () {
-        _attemptAutoConnect();
+    // In emergency mode, try to reconnect
+    if (_emergencyMode && !_isDisposed) {
+      Timer(Duration(seconds: 3), () {
+        if (!_isConnected && !_isConnecting) {
+          discoverDevices(force: true);
+        }
       });
     }
 
     notifyListeners();
   }
 
-  // Setup emergency messaging
-  void _setupEmergencyMessaging() {
-    // Send device info to establish identity
-    final deviceInfo = {
-      'type': 'device_info',
-      'deviceId': _deviceId,
-      'userName': _userName,
-      'emergency': _emergencyMode,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-
-    _sendMessage(jsonEncode(deviceInfo));
-
-    // Start periodic heartbeat
-    Timer.periodic(Duration(seconds: 30), (timer) {
-      if (!_isConnected) {
+  // Heartbeat to maintain connection
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(Duration(seconds: 30), (timer) {
+      if (_isConnected && !_isDisposed) {
+        _sendHeartbeat();
+      } else {
         timer.cancel();
-        return;
       }
-
-      final heartbeat = {
-        'type': 'heartbeat',
-        'deviceId': _deviceId,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      };
-
-      _sendMessage(jsonEncode(heartbeat));
     });
   }
 
-  // Send message through WiFi Direct
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
+  void _sendHandshake() {
+    final handshake = {
+      'type': 'handshake',
+      'deviceId': _deviceId,
+      'userName': _userName,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'role': _currentRole.name,
+    };
+
+    _sendMessage(jsonEncode(handshake));
+  }
+
+  void _sendHeartbeat() {
+    final heartbeat = {
+      'type': 'heartbeat',
+      'deviceId': _deviceId,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _sendMessage(jsonEncode(heartbeat));
+  }
+
   Future<void> _sendMessage(String message) async {
     try {
       await WifiDirectPlugin.sendText(message);
     } catch (e) {
-      debugPrint("Error sending message: $e");
+      debugPrint("❌ Error sending message: $e");
+      rethrow;
     }
   }
 
-  // Discover devices
-  Future<void> discoverDevices() async {
-    await _performDiscoveryScan();
+  // Enhanced discovery with cooldown
+  Future<void> discoverDevices({bool force = false}) async {
+    final now = DateTime.now();
+
+    // Cooldown period to prevent spam
+    if (!force &&
+        _lastDiscoveryTime != null &&
+        now.difference(_lastDiscoveryTime!) < Duration(seconds: 5)) {
+      debugPrint("⏳ Discovery cooldown active");
+      return;
+    }
+
+    if (_isDiscovering) {
+      debugPrint("⚠️ Discovery already in progress");
+      return;
+    }
+
+    try {
+      _isDiscovering = true;
+      _lastDiscoveryTime = now;
+      notifyListeners();
+
+      debugPrint("🔍 Starting device discovery...");
+
+      // Clear old discoveries
+      _discoveredDevices.clear();
+
+      bool success = await WifiDirectPlugin.startDiscovery();
+
+      if (success) {
+        debugPrint("✅ Discovery started successfully");
+
+        // Auto-stop discovery after 30 seconds
+        Timer(Duration(seconds: 30), () {
+          if (_isDiscovering) {
+            _stopDiscovery();
+          }
+        });
+      } else {
+        debugPrint("❌ Failed to start discovery");
+        _isDiscovering = false;
+      }
+    } catch (e) {
+      debugPrint("❌ Discovery error: $e");
+      _isDiscovering = false;
+    }
+
+    notifyListeners();
   }
 
-  // Send message with multi-hop support
+  Future<void> _stopDiscovery() async {
+    if (!_isDiscovering) return;
+
+    try {
+      await WifiDirectPlugin.stopDiscovery();
+      _isDiscovering = false;
+      debugPrint("🛑 Discovery stopped");
+    } catch (e) {
+      debugPrint("❌ Error stopping discovery: $e");
+    }
+
+    notifyListeners();
+  }
+
+  // Enhanced message sending
   Future<void> sendMessage({
     required String message,
     required MessageType type,
@@ -479,8 +636,13 @@ class P2PConnectionService with ChangeNotifier {
     double? latitude,
     double? longitude,
   }) async {
-    // Add emergency indicator to message if in emergency mode
-    final enhancedMessage = _emergencyMode ? "🚨 $message" : message;
+    if (!_isConnected) {
+      throw Exception('Not connected to any device');
+    }
+
+    final enhancedMessage = _emergencyMode && type != MessageType.text
+        ? "🚨 $message"
+        : message;
 
     final p2pMessage = P2PMessage(
       id: _generateMessageId(),
@@ -504,10 +666,11 @@ class P2PConnectionService with ChangeNotifier {
     _messageHistory.add(p2pMessage);
 
     // Send to network
-    await _broadcastMessage(p2pMessage);
+    final messageJson = jsonEncode({'type': 'message', ...p2pMessage.toJson()});
 
-    // Notify UI
-    onMessageReceived?.call(p2pMessage);
+    await _sendMessage(messageJson);
+
+    debugPrint("📤 Sent message: $enhancedMessage");
   }
 
   // Send emergency message templates
@@ -578,67 +741,41 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Handle incoming text messages
+  // Enhanced message handling
   void _handleIncomingText(String text) {
     try {
       final json = jsonDecode(text);
+      final messageType = json['type'] as String?;
 
-      // Handle special message types
-      if (json['type'] == 'device_info') {
-        _handleDeviceInfo(json);
-        return;
-      } else if (json['type'] == 'heartbeat') {
-        _handleHeartbeat(json);
-        return;
-      }
-
-      final message = P2PMessage.fromJson(json);
-
-      // Check if already processed (avoid loops)
-      if (_processedMessageIds.contains(message.id)) {
-        debugPrint("Duplicate message ignored: ${message.id}");
-        return;
-      }
-
-      // Check if device is in route path (avoid loops)
-      if (message.routePath.contains(_deviceId)) {
-        debugPrint("Message already routed through this device: ${message.id}");
-        return;
-      }
-
-      // Mark as processed
-      _processedMessageIds.add(message.id);
-      _messageHistory.add(message);
-
-      // Save to database
-      _saveMessage(message, false);
-
-      // Check if message is for this device
-      if (message.targetDeviceId == null ||
-          message.targetDeviceId == _deviceId) {
-        // Message is for us
-        onMessageReceived?.call(message);
-      }
-
-      // Forward if TTL > 0 (multi-hop relay)
-      if (message.ttl > 0) {
-        _broadcastMessage(message);
+      switch (messageType) {
+        case 'handshake':
+          _handleHandshake(json);
+        case 'heartbeat':
+          _handleHeartbeat(json);
+        case 'message':
+          _handleChatMessage(json);
+        default:
+          debugPrint("🤷 Unknown message type: $messageType");
       }
     } catch (e) {
-      debugPrint("Error handling message: $e");
+      debugPrint("❌ Error handling incoming text: $e");
     }
   }
 
-  // Handle device info messages
-  void _handleDeviceInfo(Map<String, dynamic> json) {
+  void _handleHandshake(Map<String, dynamic> json) {
     final deviceId = json['deviceId'] as String?;
     final userName = json['userName'] as String?;
+    final role = json['role'] as String?;
 
     if (deviceId != null && userName != null) {
+      debugPrint(
+        "🤝 Received handshake from: $userName ($deviceId) - Role: $role",
+      );
+
       _connectedDevices[deviceId] = ConnectedDevice(
         id: deviceId,
         name: userName,
-        isHost: false,
+        isHost: role == 'host',
         connectedAt: DateTime.now(),
       );
 
@@ -647,12 +784,38 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Handle heartbeat messages
   void _handleHeartbeat(Map<String, dynamic> json) {
     final deviceId = json['deviceId'] as String?;
     if (deviceId != null && _connectedDevices.containsKey(deviceId)) {
       // Update last seen time
-      debugPrint("Heartbeat received from $deviceId");
+      debugPrint("💓 Heartbeat from: $deviceId");
+    }
+  }
+
+  void _handleChatMessage(Map<String, dynamic> json) {
+    try {
+      final message = P2PMessage.fromJson(json);
+
+      // Avoid processing our own messages
+      if (message.senderId == _deviceId) return;
+
+      // Check for duplicates
+      if (_processedMessageIds.contains(message.id)) return;
+
+      _processedMessageIds.add(message.id);
+      _messageHistory.add(message);
+
+      // Save to database
+      _saveMessage(message, false);
+
+      // Notify UI
+      onMessageReceived?.call(message);
+
+      debugPrint(
+        "📨 Received message from ${message.senderName}: ${message.message}",
+      );
+    } catch (e) {
+      debugPrint("❌ Error handling chat message: $e");
     }
   }
 
@@ -742,19 +905,6 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  void _startBackgroundDiscovery() {
-    Timer.periodic(Duration(minutes: 1), (timer) async {
-      if (_isDisposed) {
-        timer.cancel();
-        return;
-      }
-
-      if (!_isConnected && _knownDevices.isNotEmpty) {
-        await _performDiscoveryScan();
-      }
-    });
-  }
-
   // Auto-reconnect to known devices
   void _startReconnectTimer() {
     _reconnectTimer = Timer.periodic(const Duration(minutes: 1), (_) async {
@@ -833,7 +983,9 @@ class P2PConnectionService with ChangeNotifier {
   Future<void> _saveMessage(P2PMessage message, bool isMe) async {
     try {
       final dbMessage = MessageModel(
-        endpointId: message.senderId,
+        endpointId: isMe
+            ? message.targetDeviceId ?? 'broadcast'
+            : message.senderId,
         fromUser: message.senderName,
         message: message.message,
         isMe: isMe,
@@ -844,14 +996,13 @@ class P2PConnectionService with ChangeNotifier {
         type: message.type.name,
         latitude: message.latitude,
         longitude: message.longitude,
-        messageId:
-            message.id, // Fix: use message.id instead of undefined getter
-        status: MessageStatus.delivered, // Add the required status field
+        messageId: message.id,
+        status: MessageStatus.delivered,
       );
 
       await DatabaseService.insertMessage(dbMessage);
     } catch (e) {
-      debugPrint('Error saving message to database: $e');
+      debugPrint('❌ Error saving message to database: $e');
     }
   }
 
@@ -887,7 +1038,7 @@ class P2PConnectionService with ChangeNotifier {
     return hoursSinceLastSeen < 24;
   }
 
-  // Get connection info
+  // Connection info for UI
   Map<String, dynamic> getConnectionInfo() {
     return {
       'deviceId': _deviceId,
@@ -899,11 +1050,9 @@ class P2PConnectionService with ChangeNotifier {
       'connectedDevices': _connectedDevices.length,
       'knownDevices': _knownDevices.length,
       'discoveredDevices': _discoveredDevices.length,
-      'pendingMessages': _pendingMessages.values
-          .expand((messages) => messages)
-          .length,
-      'processedMessages': _processedMessageIds.length,
-      'groupOwnerAddress': _groupOwnerAddress,
+      'isDiscovering': _isDiscovering,
+      'isConnecting': _isConnecting,
+      'emergencyMode': _emergencyMode,
     };
   }
 
@@ -957,25 +1106,42 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Dispose service
+  // Cleanup
   @override
   Future<void> dispose() async {
-    if (_isDisposed) return; // Prevent multiple disposal
+    if (_isDisposed) return;
 
     _isDisposed = true;
+    debugPrint("🗑️ Disposing P2P service...");
 
-    await stopP2P();
+    // Cancel all timers
+    _autoConnectTimer?.cancel();
+    _discoveryTimer?.cancel();
+    _heartbeatTimer?.cancel();
     _messageCleanupTimer?.cancel();
     _syncTimer?.cancel();
     _reconnectTimer?.cancel();
-    _autoConnectTimer?.cancel();
-    _discoveryTimer?.cancel();
+
+    // Cancel subscriptions
+    await _peersChangeSubscription?.cancel();
+    await _connectionChangeSubscription?.cancel();
     await _connectivitySubscription?.cancel();
 
+    // Stop WiFi Direct
+    try {
+      await WifiDirectPlugin.disconnect();
+      WifiDirectPlugin.onTextReceived = null;
+    } catch (e) {
+      debugPrint("❌ Error during WiFi Direct cleanup: $e");
+    }
+
+    debugPrint("✅ P2P service disposed");
     super.dispose();
   }
 
   // Getters
+  bool get isDiscovering => _isDiscovering;
+  bool get isConnecting => _isConnecting;
   Map<String, ConnectedDevice> get connectedDevices =>
       Map.from(_connectedDevices);
   Map<String, DeviceCredentials> get knownDevices => Map.from(_knownDevices);
@@ -991,11 +1157,9 @@ class P2PConnectionService with ChangeNotifier {
   String? get groupOwnerAddress => _groupOwnerAddress;
 }
 
-// Enums and Models
+// Keep all your existing enums and classes...
 enum P2PRole { none, host, client }
-
 enum MessageType { text, emergency, location, sos, system, file }
-
 enum EmergencyTemplate { sos, trapped, medical, safe, evacuating }
 
 class P2PMessage {
