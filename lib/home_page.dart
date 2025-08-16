@@ -101,15 +101,20 @@ class _HomePageState extends State<HomePage>
   Future<void> _initializeP2P() async {
     final userName =
         "User_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
-    final success = await _p2pService.initialize(userName);
+
+    // Determine preferred role based on some criteria (e.g., battery level, device type)
+    final preferredRole = DateTime.now().millisecondsSinceEpoch % 2 == 0
+        ? 'host'
+        : 'client';
+
+    final success = await _p2pService.initialize(
+      userName,
+      preferredRole: preferredRole,
+    );
 
     if (success) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          setState(() {
-            _isP2PInitialized = true;
-          });
-        }
+      setState(() {
+        _isP2PInitialized = true;
       });
 
       _p2pService.onMessageReceived = (message) {
@@ -117,13 +122,12 @@ class _HomePageState extends State<HomePage>
       };
 
       _p2pService.onDeviceConnected = (deviceId, userName) {
-        _p2pService.syncPendingMessagesFor(deviceId);
+        debugPrint("✅ Device connected: $userName ($deviceId)");
 
-        final device = _p2pService.connectedDevices[deviceId];
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Connected to ${device?.name ?? userName}'),
+              content: Text('Connected to $userName'),
               backgroundColor: Colors.green,
               duration: Duration(seconds: 2),
             ),
@@ -132,6 +136,8 @@ class _HomePageState extends State<HomePage>
       };
 
       _p2pService.onDeviceDisconnected = (deviceId) {
+        debugPrint("❌ Device disconnected: $deviceId");
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -144,7 +150,11 @@ class _HomePageState extends State<HomePage>
       };
 
       _p2pService.addListener(_updateUI);
+
+      // Enable emergency mode by default
       _p2pService.emergencyMode = true;
+    } else {
+      debugPrint("❌ Failed to initialize P2P service");
     }
   }
 
@@ -718,6 +728,10 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
 
             // Enhanced Device List
             _buildEnhancedDeviceList(),
+
+            const SizedBox(height: 16),
+
+            _buildConnectionTestCard(),
           ],
         ),
       ),
@@ -1345,6 +1359,55 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildConnectionTestCard() {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Connection Test',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () async {
+                try {
+                  await widget.p2pService.sendMessage(
+                    message: 'Test message from ${widget.p2pService.userName}',
+                    type: MessageType.text,
+                  );
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Test message sent!')),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to send: $e')),
+                    );
+                  }
+                }
+              },
+              child: Text('Send Test Message'),
+            ),
+            SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () async {
+                await widget.p2pService.discoverDevices(force: true);
+              },
+              child: Text('Force Discovery'),
+            ),
+          ],
+        ),
       ),
     );
   }
