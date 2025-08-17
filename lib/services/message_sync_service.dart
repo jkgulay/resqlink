@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -21,7 +22,7 @@ class MessageSyncService {
   StreamSubscription? _connectivitySubscription;
   bool _isOnline = false;
   bool _isSyncing = false;
-  
+
   // Device identifier for unique message IDs
   late String _deviceId;
 
@@ -31,11 +32,13 @@ class MessageSyncService {
     _monitorConnectivity();
     _startPeriodicSync();
     _startRetryTimer();
-    
+
     // Check initial connectivity
     final connectivityResult = await Connectivity().checkConnectivity();
-    _isOnline = connectivityResult.any((result) => result != ConnectivityResult.none);
-    
+    _isOnline = connectivityResult.any(
+      (result) => result != ConnectivityResult.none,
+    );
+
     if (_isOnline) {
       unawaited(syncPendingMessages());
     }
@@ -66,9 +69,9 @@ class MessageSyncService {
     ) async {
       final wasOnline = _isOnline;
       _isOnline = results.any((result) => result != ConnectivityResult.none);
-      
+
       debugPrint('📶 Connectivity changed: online=$_isOnline');
-      
+
       if (!wasOnline && _isOnline) {
         // Just came online, sync immediately
         debugPrint('📶 Connection restored, syncing messages...');
@@ -100,12 +103,12 @@ class MessageSyncService {
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final microsecond = DateTime.now().microsecond;
     final random = Random().nextInt(999999);
-    
+
     // Create unique string and hash it
     final uniqueString = '$_deviceId-$timestamp-$microsecond-$random';
     final bytes = utf8.encode(uniqueString);
     final digest = sha256.convert(bytes);
-    
+
     return digest.toString().substring(0, 20); // Use first 20 chars
   }
 
@@ -135,19 +138,23 @@ class MessageSyncService {
     String messageId = _generateUniqueMessageId();
     int attempts = 0;
     const maxAttempts = 5;
-    
+
     while (await _messageExists(messageId) && attempts < maxAttempts) {
       attempts++;
       messageId = _generateUniqueMessageId();
-      debugPrint('🔄 Message ID collision, generating new ID (attempt $attempts)');
+      debugPrint(
+        '🔄 Message ID collision, generating new ID (attempt $attempts)',
+      );
     }
-    
+
     if (attempts >= maxAttempts) {
-      throw Exception('Failed to generate unique message ID after $maxAttempts attempts');
+      throw Exception(
+        'Failed to generate unique message ID after $maxAttempts attempts',
+      );
     }
-    
+
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    
+
     final messageModel = MessageModel(
       endpointId: endpointId,
       fromUser: fromUser,
@@ -173,18 +180,30 @@ class MessageSyncService {
       if (_isOnline) {
         final success = await _sendToFirebase(messageModel);
         if (success) {
-          await DatabaseService.updateMessageStatus(messageId, MessageStatus.sent);
+          await DatabaseService.updateMessageStatus(
+            messageId,
+            MessageStatus.sent,
+          );
           await DatabaseService.markMessageSynced(messageId);
         } else {
-          await DatabaseService.updateMessageStatus(messageId, MessageStatus.failed);
+          await DatabaseService.updateMessageStatus(
+            messageId,
+            MessageStatus.failed,
+          );
         }
       } else if (p2pService != null && p2pService.isConnected) {
         // Try P2P if offline but P2P is available
         final success = await _sendViaP2P(messageModel, p2pService);
         if (success) {
-          await DatabaseService.updateMessageStatus(messageId, MessageStatus.sent);
+          await DatabaseService.updateMessageStatus(
+            messageId,
+            MessageStatus.sent,
+          );
         } else {
-          await DatabaseService.updateMessageStatus(messageId, MessageStatus.failed);
+          await DatabaseService.updateMessageStatus(
+            messageId,
+            MessageStatus.failed,
+          );
         }
       } else {
         // No connectivity, keep as pending
@@ -192,7 +211,10 @@ class MessageSyncService {
       }
     } catch (e) {
       debugPrint('❌ Error in sendMessage: $e');
-      await DatabaseService.updateMessageStatus(messageId, MessageStatus.failed);
+      await DatabaseService.updateMessageStatus(
+        messageId,
+        MessageStatus.failed,
+      );
     }
 
     return messageId;
@@ -200,15 +222,22 @@ class MessageSyncService {
 
   // Send to Firebase with better error handling
   Future<bool> _sendToFirebase(MessageModel message) async {
+    if (!_isUserAuthenticated()) {
+      debugPrint('📄 Skipping Firebase send - user not authenticated');
+      return false;
+    }
+
     try {
       // Check if message already exists in Firebase
       final doc = await _firestore
           .collection('messages')
           .doc(message.messageId)
           .get();
-          
+
       if (doc.exists) {
-        debugPrint('📄 Message already exists in Firebase: ${message.messageId}');
+        debugPrint(
+          '📄 Message already exists in Firebase: ${message.messageId}',
+        );
         return true;
       }
 
@@ -216,20 +245,27 @@ class MessageSyncService {
           .collection('messages')
           .doc(message.messageId)
           .set(message.toFirebaseJson());
-      
+
       debugPrint('🔥 Message sent to Firebase: ${message.messageId}');
       return true;
     } catch (e) {
-      debugPrint('❌ Firebase send failed: $e');
       if (e.toString().contains('permission-denied')) {
-        debugPrint('⚠️ Firebase permission denied - check Firestore rules');
+        debugPrint(
+          '⚠️ Firebase permission denied - user may need to log in again',
+        );
+        _stopPeriodicSync(); // Stop sync attempts
+      } else {
+        debugPrint('❌ Firebase send failed: $e');
       }
       return false;
     }
   }
 
   // Send via P2P multi-hop
-  Future<bool> _sendViaP2P(MessageModel message, P2PConnectionService p2pService) async {
+  Future<bool> _sendViaP2P(
+    MessageModel message,
+    P2PConnectionService p2pService,
+  ) async {
     try {
       await p2pService.sendMessage(
         message: message.message,
@@ -255,7 +291,13 @@ class MessageSyncService {
       debugPrint('⏸️ Sync skipped: syncing=$_isSyncing, online=$_isOnline');
       return;
     }
-    
+
+    // Check authentication before proceeding
+    if (!_isUserAuthenticated()) {
+      debugPrint('⏸️ Sync skipped: user not authenticated');
+      return;
+    }
+
     _isSyncing = true;
     try {
       final pendingMessages = await DatabaseService.getPendingMessages();
@@ -266,7 +308,10 @@ class MessageSyncService {
         if (message.messageId != null) {
           final success = await _sendToFirebase(message);
           if (success) {
-            await DatabaseService.updateMessageStatus(message.messageId!, MessageStatus.synced);
+            await DatabaseService.updateMessageStatus(
+              message.messageId!,
+              MessageStatus.synced,
+            );
             await DatabaseService.markMessageSynced(message.messageId!);
             successCount++;
             debugPrint('✅ Message ${message.messageId} synced');
@@ -277,11 +322,14 @@ class MessageSyncService {
         }
       }
 
-      debugPrint('📊 Sync complete: $successCount/${pendingMessages.length} messages synced');
+      debugPrint(
+        '📊 Sync complete: $successCount/${pendingMessages.length} messages synced',
+      );
 
-      // Pull new messages from Firebase
-      await _pullMessagesFromFirebase();
-      
+      // Only pull if we have authentication
+      if (_isUserAuthenticated()) {
+        await _pullMessagesFromFirebase();
+      }
     } catch (e) {
       debugPrint('❌ Sync failed: $e');
     } finally {
@@ -289,48 +337,61 @@ class MessageSyncService {
     }
   }
 
+  void _stopPeriodicSync() {
+    _syncTimer?.cancel();
+    _syncTimer = null;
+    debugPrint('🛑 Stopped periodic Firebase sync');
+  }
+
   // Pull new messages from Firebase with duplicate prevention
   Future<void> _pullMessagesFromFirebase() async {
+    // Check if user is authenticated before attempting Firebase operations
+    if (!_isUserAuthenticated()) {
+      debugPrint('📥 Skipping Firebase pull - user not authenticated');
+      return;
+    }
+
     try {
       final lastSyncTime = await _getLastSyncTime();
       debugPrint('📥 Pulling messages newer than: $lastSyncTime');
-      
+
       final query = _firestore
           .collection('messages')
           .where('timestamp', isGreaterThan: lastSyncTime)
           .orderBy('timestamp')
-          .limit(100); // Limit to prevent large downloads
+          .limit(100);
 
       final snapshot = await query.get();
-      
+
       int newMessagesCount = 0;
       for (final doc in snapshot.docs) {
         try {
           final data = doc.data();
           final messageId = data['messageId'] ?? doc.id;
-          
-          // Check if we already have this message
+
           if (await _messageExists(messageId)) {
             continue;
           }
-          
-          final message = MessageModel(
-            endpointId: data['endpointId'] ?? '',
-            fromUser: data['fromUser'] ?? '',
+
+          // Create MessageModel from Firebase data
+          final messageModel = MessageModel(
+            endpointId: data['endpointId'] ?? 'unknown',
+            fromUser: data['fromUser'] ?? 'Unknown User',
             message: data['message'] ?? '',
-            isMe: data['fromUser'] == _deviceId, // Check if it's our message
+            isMe: false, // Messages from Firebase are from other users
             isEmergency: data['isEmergency'] ?? false,
-            timestamp: data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
+            timestamp:
+                data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
+            type: data['type'] ?? 'message',
             latitude: data['latitude']?.toDouble(),
             longitude: data['longitude']?.toDouble(),
             messageId: messageId,
-            type: data['type'] ?? 'text',
             status: MessageStatus.delivered,
             synced: true,
             syncedToFirebase: true,
           );
 
-          await DatabaseService.insertMessage(message);
+          await DatabaseService.insertMessage(messageModel);
           newMessagesCount++;
         } catch (e) {
           debugPrint('❌ Error processing message ${doc.id}: $e');
@@ -343,9 +404,24 @@ class MessageSyncService {
       } else {
         debugPrint('📥 No new messages to pull');
       }
-      
     } catch (e) {
-      debugPrint('❌ Pull failed: $e');
+      if (e.toString().contains('permission-denied')) {
+        debugPrint('❌ Firebase permission denied - stopping sync attempts');
+        _stopPeriodicSync(); // Stop the sync timer
+      } else {
+        debugPrint('❌ Pull failed: $e');
+      }
+    }
+  }
+
+  // Add authentication check method
+  bool _isUserAuthenticated() {
+    try {
+      // Check if Firebase user is authenticated
+      final user = FirebaseAuth.instance.currentUser;
+      return user != null && user.uid.isNotEmpty;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -360,23 +436,35 @@ class MessageSyncService {
       for (final message in failedMessages) {
         if (message.messageId != null) {
           // Get retry count from database
-          final retryCount = await DatabaseService.getRetryCount(message.messageId!);
-          
+          final retryCount = await DatabaseService.getRetryCount(
+            message.messageId!,
+          );
+
           // Exponential backoff: 1, 2, 4, 8, 16, 32, 60 minutes max
           final backoffMinutes = (1 << retryCount).clamp(1, 60);
-          final lastRetry = await DatabaseService.getLastRetryTime(message.messageId!);
-          
+          final lastRetry = await DatabaseService.getLastRetryTime(
+            message.messageId!,
+          );
+
           if (now - lastRetry > backoffMinutes * 60 * 1000) {
-            debugPrint('🔄 Retrying failed message: ${message.messageId} (attempt ${retryCount + 1})');
-            
+            debugPrint(
+              '🔄 Retrying failed message: ${message.messageId} (attempt ${retryCount + 1})',
+            );
+
             final success = await _sendToFirebase(message);
             if (success) {
-              await DatabaseService.updateMessageStatus(message.messageId!, MessageStatus.synced);
+              await DatabaseService.updateMessageStatus(
+                message.messageId!,
+                MessageStatus.synced,
+              );
               await DatabaseService.markMessageSynced(message.messageId!);
               debugPrint('✅ Retry successful: ${message.messageId}');
             } else {
               await DatabaseService.incrementRetryCount(message.messageId!);
-              await DatabaseService.updateLastRetryTime(message.messageId!, now);
+              await DatabaseService.updateLastRetryTime(
+                message.messageId!,
+                now,
+              );
               debugPrint('❌ Retry failed: ${message.messageId}');
             }
           }
@@ -402,7 +490,10 @@ class MessageSyncService {
   Future<void> _updateLastSyncTime() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('last_sync_time', DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt(
+        'last_sync_time',
+        DateTime.now().millisecondsSinceEpoch,
+      );
     } catch (e) {
       debugPrint('Error updating last sync time: $e');
     }
@@ -411,13 +502,13 @@ class MessageSyncService {
   // Get sync status
   bool get isOnline => _isOnline;
   bool get isSyncing => _isSyncing;
-  
+
   // Force sync (for manual sync from UI)
   Future<void> forcSync() async {
     if (!_isOnline) {
       throw Exception('Cannot sync while offline');
     }
-    
+
     await syncPendingMessages();
   }
 }
