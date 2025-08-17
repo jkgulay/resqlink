@@ -49,7 +49,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/1.png
-    - assets/maps/philippines_base.mbtiles
   fonts:
     - family: Ubuntu
       fonts:
