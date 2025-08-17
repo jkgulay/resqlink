@@ -1,13 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 import 'dart:math' as math;
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart' as fmtc;
 
@@ -60,40 +56,53 @@ class PhilippinesMapService {
     if (_isInitialized) return;
 
     try {
-      debugPrint('Starting PhilippinesMapService initialization...');
+      debugPrint('🚀 Starting PhilippinesMapService initialization...');
 
-      // Initialize FMTC with ObjectBox backend
       await FMTCObjectBoxBackend().initialise();
-      debugPrint('FMTC ObjectBox backend initialized');
+      debugPrint('✅ FMTC ObjectBox backend initialized');
 
-      // Setup tile stores
       await _setupTileStores();
-      debugPrint('Tile stores setup completed');
+      debugPrint('✅ Tile stores setup completed');
 
-      // Load bundled Philippines tiles
+      // Check connectivity first
+      final connectivityResults = await Connectivity().checkConnectivity();
+      _isOnline = connectivityResults.any(
+        (result) =>
+            result == ConnectivityResult.mobile ||
+            result == ConnectivityResult.wifi ||
+            result == ConnectivityResult.ethernet,
+      );
+      debugPrint(
+        '🌐 Initial connectivity: ${_isOnline ? "online" : "offline"}',
+      );
+
       await _loadBundledTiles();
-      debugPrint('Bundled tiles loading completed');
+      debugPrint('✅ Bundled tiles loading completed');
 
-      // Setup tile layers
       _setupTileLayers();
-      debugPrint('Tile layers setup completed');
+      debugPrint('✅ Tile layers setup completed');
 
-      // Monitor connectivity
+      // Add comprehensive debugging
+      await debugCacheStatus();
+      final offlineReady = await testOfflineCapability();
+      debugPrint(
+        '🔍 Offline capability: ${offlineReady ? "✅ READY" : "❌ NOT READY"}',
+      );
+
       _startConnectivityMonitoring();
-      debugPrint('Connectivity monitoring started');
+      debugPrint('✅ Connectivity monitoring started');
 
       _isInitialized = true;
-      debugPrint('PhilippinesMapService initialized successfully');
+      debugPrint('🎉 PhilippinesMapService initialized successfully');
     } catch (e) {
-      debugPrint('Failed to initialize PhilippinesMapService: $e');
+      debugPrint('💥 Failed to initialize PhilippinesMapService: $e');
       _isInitialized = false;
 
-      // Try to continue with fallback mode
       try {
         _setupFallbackMode();
-        debugPrint('Fallback mode activated');
+        debugPrint('🔄 Fallback mode activated');
       } catch (fallbackError) {
-        debugPrint('Fallback mode also failed: $fallbackError');
+        debugPrint('💥 Fallback mode also failed: $fallbackError');
         rethrow;
       }
     }
@@ -137,79 +146,21 @@ class PhilippinesMapService {
       final store = FMTCStore(_philippinesStore);
       final stats = await store.stats.all;
 
-      // Only load if store is empty
+      // Only download if store is empty
       if (stats.length == 0) {
-        debugPrint('Loading bundled Philippines tiles...');
+        debugPrint('Loading Philippines base tiles...');
 
-        // Check if bundled tiles exist
-        final bundledTilesPath = await _getBundledTilesPath();
-        if (bundledTilesPath != null && await File(bundledTilesPath).exists()) {
-          await _importMBTiles(bundledTilesPath, _philippinesStore);
-          debugPrint('Bundled Philippines tiles loaded successfully');
+        // Download base tiles if online
+        if (_isOnline) {
+          await _downloadPhilippinesBaseTiles();
         } else {
-          debugPrint('No bundled tiles found, will use online-only mode');
+          debugPrint('Offline - cannot download base tiles');
         }
       } else {
         debugPrint('Philippines tiles already loaded (${stats.length} tiles)');
       }
     } catch (e) {
       debugPrint('Error loading bundled tiles: $e');
-    }
-  }
-
-  /// Get path to bundled .mbtiles file
-  Future<String?> _getBundledTilesPath() async {
-    try {
-      final appDocDir = await getApplicationDocumentsDirectory();
-      final bundledPath = path.join(appDocDir.path, 'philippines_base.mbtiles');
-
-      // Copy from assets if doesn't exist
-      if (!await File(bundledPath).exists()) {
-        try {
-          final bundledData = await rootBundle.load(
-            'assets/maps/philippines_base.mbtiles',
-          );
-          await File(
-            bundledPath,
-          ).writeAsBytes(bundledData.buffer.asUint8List());
-          debugPrint('Copied bundled tiles to: $bundledPath');
-        } catch (e) {
-          debugPrint('No bundled tiles in assets: $e');
-          return null;
-        }
-      }
-
-      return bundledPath;
-    } catch (e) {
-      debugPrint('Error getting bundled tiles path: $e');
-      return null;
-    }
-  }
-
-  // Simplified approach - just verify the MBTiles file exists
-  Future<void> _importMBTiles(String mbtilesPath, String storeName) async {
-    try {
-      debugPrint('MBTiles file available at: $mbtilesPath');
-
-      // Verify the file exists and is readable
-      final file = File(mbtilesPath);
-      if (await file.exists()) {
-        final size = await file.length();
-        debugPrint(
-          'MBTiles file size: ${(size / (1024 * 1024)).toStringAsFixed(1)}MB',
-        );
-
-        // In FMTC v10+, we rely on the download functionality
-        // rather than manually importing individual tiles
-        // The MBTiles file serves as a backup reference
-
-        debugPrint('MBTiles verification completed for $storeName');
-      } else {
-        debugPrint('MBTiles file not found: $mbtilesPath');
-      }
-    } catch (e) {
-      debugPrint('Error verifying MBTiles: $e');
-      rethrow;
     }
   }
 
@@ -228,14 +179,15 @@ class PhilippinesMapService {
       ),
     );
 
-    // Offline base layer (Philippines bundled tiles)
+    // Offline base layer (Philippines bundled tiles) - FIXED
     _offlineTileLayer = TileLayer(
       urlTemplate: urlTemplate,
       userAgentPackageName: 'com.resqlink.app',
       maxZoom: 12,
       tileProvider: fmtc.FMTCTileProvider(
         stores: {_philippinesStore: fmtc.BrowseStoreStrategy.read},
-        loadingStrategy: fmtc.BrowseLoadingStrategy.onlineFirst,
+        loadingStrategy:
+            fmtc.BrowseLoadingStrategy.cacheOnly, // Changed from onlineFirst
       ),
     );
 
@@ -249,6 +201,193 @@ class PhilippinesMapService {
         loadingStrategy: fmtc.BrowseLoadingStrategy.cacheOnly,
       ),
     );
+  }
+
+  Future<void> debugCacheStatus() async {
+    try {
+      debugPrint('=== CACHE DEBUG INFO ===');
+
+      final stores = [_philippinesStore, _userCacheStore, _emergencyStore];
+
+      for (final storeName in stores) {
+        final store = FMTCStore(storeName);
+        if (await store.manage.ready) {
+          final stats = await store.stats.all;
+          final size = await store.stats.size;
+          debugPrint('Store: $storeName');
+          debugPrint('  Tiles: ${stats.length}');
+          debugPrint('  Size: ${(size / (1024 * 1024)).toStringAsFixed(2)} MB');
+
+          // Check specific tile existence - fix the toList() error
+          if (stats.length > 0) {
+            debugPrint('  Sample tiles:');
+            // Convert stats to a list properly
+            final statsIterable = stats as Iterable;
+            final tilesList = List.from(statsIterable);
+            for (int i = 0; i < math.min(5, tilesList.length); i++) {
+              final tile = tilesList[i];
+              debugPrint('    Z${tile.z}/X${tile.x}/Y${tile.y}');
+            }
+          }
+        } else {
+          debugPrint('Store $storeName not ready');
+        }
+      }
+
+      debugPrint('========================');
+    } catch (e) {
+      debugPrint('Debug cache error: $e');
+    }
+  }
+
+  Future<void> _downloadPhilippinesBaseTiles() async {
+    if (!_isOnline) {
+      debugPrint('Cannot download base tiles - offline');
+      return;
+    }
+
+    try {
+      final store = FMTCStore(_philippinesStore);
+      final stats = await store.stats.all;
+
+      // Only download if store is empty
+      if (stats.length == 0) {
+        debugPrint('Downloading Philippines base tiles...');
+
+        // Define Philippines bounds
+        final bounds = LatLngBounds(
+          const LatLng(4.2158064, 114.0952145), // Southwest
+          const LatLng(21.3210946, 127.6050855), // Northeast
+        );
+
+        final region = fmtc.RectangleRegion(bounds);
+        final downloadable = region.toDownloadable(
+          minZoom: 0,
+          maxZoom: 8, // Lower zoom for base coverage
+          options: TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.resqlink.app',
+          ),
+        );
+
+        final download = store.download.startForeground(
+          region: downloadable,
+          parallelThreads: 2,
+          maxBufferLength: 50,
+          skipExistingTiles: true,
+          skipSeaTiles: true,
+        );
+
+        // Create a completer to properly handle async completion
+        final completer = Completer<void>();
+        StreamSubscription? subscription;
+
+        // Listen to progress with proper error handling
+        subscription = download.downloadProgress.listen(
+          (progress) {
+            debugPrint(
+              'Philippines base download: ${progress.percentageProgress.toStringAsFixed(1)}%',
+            );
+          },
+          onDone: () {
+            debugPrint('Philippines base tiles downloaded successfully');
+            subscription?.cancel();
+            if (!completer.isCompleted) {
+              completer.complete();
+            }
+          },
+          onError: (error) {
+            debugPrint('Error downloading Philippines base tiles: $error');
+            subscription?.cancel();
+            if (!completer.isCompleted) {
+              completer.completeError(error);
+            }
+          },
+        );
+
+        // Add timeout to prevent hanging
+        Timer(Duration(minutes: 10), () {
+          if (!completer.isCompleted) {
+            subscription?.cancel();
+            completer.completeError(
+              TimeoutException('Download timeout', Duration(minutes: 10)),
+            );
+          }
+        });
+
+        // Wait for download to complete
+        await completer.future;
+      } else {
+        debugPrint(
+          'Philippines base tiles already available (${stats.length} tiles)',
+        );
+      }
+    } catch (e) {
+      debugPrint('Error downloading Philippines base tiles: $e');
+      // Don't rethrow - allow app to continue with online-only mode
+    }
+  }
+
+  Future<bool> testOfflineCapability() async {
+    try {
+      debugPrint('🧪 Testing offline capability...');
+
+      // Check if Philippines store has tiles
+      final store = FMTCStore(_philippinesStore);
+      if (!await store.manage.ready) {
+        debugPrint('❌ Philippines store not ready');
+        return false;
+      }
+
+      final stats = await store.stats.all;
+      final size = await store.stats.size;
+
+      debugPrint('📊 Store stats:');
+      debugPrint('  - Tiles: ${stats.length}');
+      debugPrint('  - Size: ${(size / (1024 * 1024)).toStringAsFixed(2)} MB');
+
+      if (stats.length == 0) {
+        debugPrint('❌ No tiles in Philippines store');
+
+        if (_isOnline) {
+          debugPrint('🔄 Attempting to download base tiles...');
+          await _downloadPhilippinesBaseTiles();
+
+          // Check again after download attempt
+          final newStats = await store.stats.all;
+          if (newStats.length == 0) {
+            debugPrint('❌ Download attempt failed');
+            return false;
+          } else {
+            debugPrint('✅ Base tiles downloaded successfully');
+            return true;
+          }
+        } else {
+          return false;
+        }
+      }
+
+      // Test tile layer creation without storing unused variable
+      try {
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          tileProvider: fmtc.FMTCTileProvider(
+            stores: {_philippinesStore: fmtc.BrowseStoreStrategy.read},
+            loadingStrategy: fmtc.BrowseLoadingStrategy.cacheOnly,
+          ),
+        );
+        debugPrint('✅ Test tile layer created successfully');
+      } catch (e) {
+        debugPrint('❌ Failed to create test tile layer: $e');
+        return false;
+      }
+
+      debugPrint('✅ Offline test passed - ${stats.length} tiles available');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Offline test failed: $e');
+      return false;
+    }
   }
 
   /// Get appropriate tile layer based on connectivity and zoom
@@ -321,7 +460,7 @@ class PhilippinesMapService {
     final storeName = isEmergencyCache ? _emergencyStore : _userCacheStore;
     final store = FMTCStore(storeName);
 
-    final region = RectangleRegion(bounds);
+    final region = fmtc.RectangleRegion(bounds);
     final downloadable = region.toDownloadable(
       minZoom: minZoom,
       maxZoom: maxZoom,

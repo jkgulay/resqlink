@@ -210,16 +210,24 @@ Future<void> main() async {
     debugPrint('Firebase init failed (offline?): $e');
   }
 
-  // Initialize services
-  await PhilippinesMapService.instance.initialize();
+  // Initialize map service early
+  try {
+    await PhilippinesMapService.instance.initialize();
+    debugPrint('✅ Map service initialized in main');
+  } catch (e) {
+    debugPrint('❌ Map service init failed in main: $e');
+  }
+
+  // Initialize other services
   await NotificationService.initialize();
-  MessageSyncService().initialize(); // Add this line
+
   await SettingsService.instance.loadSettings();
 
   if (kDebugMode) {
     await DatabaseService.deleteDatabaseFile();
   }
   await DatabaseService.database;
+
   runApp(const MyApp());
 }
 
@@ -300,6 +308,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _listenToAuthChanges();
     _bootstrap();
+    _initializeMapService();
   }
 
   // Add this required method
@@ -331,6 +340,15 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _authSubscription?.cancel();
     super.dispose();
+  }
+
+  Future<void> _initializeMapService() async {
+    try {
+      await PhilippinesMapService.instance.initialize();
+      debugPrint('✅ Map service initialized successfully');
+    } catch (e) {
+      debugPrint('❌ Map service initialization failed: $e');
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -687,12 +705,6 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
     setState(() => isLoading = true);
 
     try {
-      // Debug current state
-      print('=== AUTH ATTEMPT ===');
-      print('Email: $email');
-      print('Is Login: $isLogin');
-      await AuthService.debugAuthState();
-
       AuthResult result;
       if (isLogin) {
         result = await AuthService.login(email, password);
@@ -700,12 +712,17 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
         result = await AuthService.register(email, password);
       }
 
-      print('Auth result success: ${result.isSuccess}');
-      print('Auth method: ${result.method}');
-      if (!result.isSuccess) print('Error: ${result.errorMessage}');
-
       if (result.isSuccess && result.user != null) {
-        // Show success message with method info
+        // Initialize MessageSyncService only after successful authentication
+        if (result.method == AuthMethod.online) {
+          try {
+            MessageSyncService().initialize();
+            debugPrint('✅ MessageSyncService initialized after login');
+          } catch (e) {
+            debugPrint('⚠️ MessageSyncService initialization failed: $e');
+          }
+        }
+
         final methodText = result.method == AuthMethod.online
             ? 'Online'
             : 'Offline';
@@ -714,14 +731,10 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
           Colors.green,
         );
 
-        // Small delay to show the success message
         await Future.delayed(Duration(milliseconds: 500));
 
-        // Close dialog and navigate to home
         if (mounted) {
-          Navigator.of(context).pop(); // Close dialog
-
-          // Navigate to home page
+          Navigator.of(context).pop();
           Navigator.of(
             context,
           ).pushReplacement(MaterialPageRoute(builder: (_) => HomePage()));

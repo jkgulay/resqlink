@@ -309,6 +309,207 @@ class _HomePageState extends State<HomePage>
     super.dispose();
   }
 
+  PreferredSizeWidget _buildResponsiveAppBar(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isNarrowScreen = screenWidth < 600;
+
+    return AppBar(
+      elevation: 2,
+      shadowColor: Colors.black26,
+      backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+      toolbarHeight: isNarrowScreen ? 56 : 64,
+      flexibleSpace: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0B192C), Color(0xFF1E3A5F)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+      ),
+      title: _buildAppBarTitle(isNarrowScreen),
+      actions: _buildAppBarActions(isNarrowScreen),
+    );
+  }
+
+  Widget _buildAppBarTitle(bool isNarrowScreen) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Logo with size adjustment
+        Image.asset(
+          'assets/1.png',
+          height: isNarrowScreen ? 24 : 30,
+          errorBuilder: (context, error, stackTrace) => Icon(
+            Icons.emergency,
+            size: isNarrowScreen ? 24 : 30,
+            color: Colors.white,
+          ),
+        ),
+        SizedBox(width: isNarrowScreen ? 6 : 8),
+        // App title with responsive sizing - Remove nested Flexible
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: 150), // Set a max width instead
+          child: Text(
+            "ResQLink",
+            style: TextStyle(
+              fontFamily: 'Ubuntu',
+              fontWeight: FontWeight.bold,
+              fontSize: isNarrowScreen ? 16 : 20,
+              color: Colors.white,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildAppBarActions(bool isNarrowScreen) {
+    final actions = <Widget>[];
+
+    // Emergency Mode Indicator - Responsive
+    if (_p2pService.emergencyMode) {
+      actions.add(
+        Container(
+          margin: EdgeInsets.only(right: isNarrowScreen ? 4 : 8),
+          padding: EdgeInsets.symmetric(
+            horizontal: isNarrowScreen ? 8 : 12,
+            vertical: isNarrowScreen ? 4 : 6,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.red,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.red.withValues(alpha: 0.3), // Fixed
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.emergency,
+                size: isNarrowScreen ? 10 : 12,
+                color: Colors.white,
+              ),
+              if (!isNarrowScreen ||
+                  MediaQuery.of(context).size.width > 400) ...[
+                SizedBox(width: 3),
+                Text(
+                  isNarrowScreen ? 'SOS' : 'EMERGENCY',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: isNarrowScreen ? 10 : 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    // P2P Connection Status - Responsive
+    actions.add(
+      Container(
+        margin: EdgeInsets.only(right: isNarrowScreen ? 4 : 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: isNarrowScreen ? 8 : 12,
+          vertical: isNarrowScreen ? 4 : 6,
+        ),
+        decoration: BoxDecoration(
+          color: _p2pService.currentRole != P2PRole.none
+              ? Colors.green
+              : Colors.grey,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color:
+                  (_p2pService.currentRole != P2PRole.none
+                          ? Colors.green
+                          : Colors.grey)
+                      .withValues(alpha: 0.3), // Fixed
+              blurRadius: 4,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.wifi_tethering,
+              size: isNarrowScreen ? 12 : 16,
+              color: Colors.white,
+            ),
+            if (!isNarrowScreen || MediaQuery.of(context).size.width > 360) ...[
+              SizedBox(width: 3),
+              Text(
+                _p2pService.currentRole == P2PRole.host
+                    ? (isNarrowScreen ? 'H' : 'HOST')
+                    : _p2pService.currentRole == P2PRole.client
+                    ? (isNarrowScreen ? 'C' : 'CLIENT')
+                    : 'OFF',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: isNarrowScreen ? 10 : 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+            if (_p2pService.connectedDevices.isNotEmpty) ...[
+              SizedBox(width: 4),
+              Container(
+                padding: EdgeInsets.all(isNarrowScreen ? 2 : 4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '${_p2pService.connectedDevices.length}',
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontSize: isNarrowScreen ? 8 : 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+
+    // Online/Offline Status - Always visible but responsive
+    actions.add(
+      Padding(
+        padding: EdgeInsets.only(right: isNarrowScreen ? 8 : 12),
+        child: Container(
+          padding: EdgeInsets.all(isNarrowScreen ? 6 : 8),
+          decoration: BoxDecoration(
+            color: _p2pService.isOnline
+                ? Colors.green.withValues(alpha: 0.2) // Fixed
+                : Colors.grey.withValues(alpha: 0.2), // Fixed
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            _p2pService.isOnline ? Icons.cloud_done : Icons.cloud_off,
+            color: _p2pService.isOnline ? Colors.green : Colors.grey.shade300,
+            size: isNarrowScreen ? 16 : 20,
+          ),
+        ),
+      ),
+    );
+
+    return actions;
+  }
+
+  // UPDATED: Build method with responsive AppBar
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -330,109 +531,7 @@ class _HomePageState extends State<HomePage>
     );
 
     return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            Image.asset(
-              'assets/1.png',
-              height: 30,
-              errorBuilder: (context, error, stackTrace) =>
-                  Icon(Icons.emergency),
-            ),
-            const SizedBox(width: 8),
-            const Text(
-              "ResQLink",
-              style: TextStyle(
-                fontFamily: 'Ubuntu',
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          // Emergency Mode Indicator
-          if (_p2pService.emergencyMode)
-            Container(
-              margin: EdgeInsets.only(right: 8),
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.emergency, size: 12, color: Colors.white),
-                  SizedBox(width: 3),
-                  Text(
-                    'EMERGENCY',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          // P2P Connection Status
-          Container(
-            margin: EdgeInsets.only(right: 8),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: _p2pService.currentRole != P2PRole.none
-                  ? Colors.green
-                  : Colors.grey,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.wifi_tethering, size: 16, color: Colors.white),
-                SizedBox(width: 3),
-                Text(
-                  _p2pService.currentRole == P2PRole.host
-                      ? 'HOST'
-                      : _p2pService.currentRole == P2PRole.client
-                      ? 'CLIENT'
-                      : 'OFF',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (_p2pService.connectedDevices.isNotEmpty) ...[
-                  SizedBox(width: 4),
-                  Container(
-                    padding: EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Text(
-                      '${_p2pService.connectedDevices.length}',
-                      style: TextStyle(
-                        color: Colors.green,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          // Online/Offline Status
-          Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: Icon(
-              _p2pService.isOnline ? Icons.cloud_done : Icons.cloud_off,
-              color: _p2pService.isOnline ? Colors.green : Colors.grey,
-            ),
-          ),
-        ],
-      ),
+      appBar: _buildResponsiveAppBar(context),
       body: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth < 450) {
@@ -528,7 +627,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
   LocationModel? _latestLocation;
   bool _isLoadingLocation = true;
   int _unsyncedCount = 0;
-  List<Map<String, dynamic>> _discoveredDevices = []; // Updated type
+  List<Map<String, dynamic>> _discoveredDevices = [];
   bool _isScanning = false;
 
   // Animation controller for emergency pulse
@@ -569,7 +668,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
   }
 
   void _onDevicesDiscovered(List<Map<String, dynamic>> devices) {
-    // Updated signature
     if (mounted) {
       setState(() {
         _discoveredDevices = devices;
@@ -653,11 +751,8 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
 
     try {
       await widget.p2pService.checkAndRequestPermissions();
-
-      // Start WiFi Direct discovery scan
       await widget.p2pService.discoverDevices();
 
-      // Stop scan after 10 seconds
       Future.delayed(Duration(seconds: 10), () {
         if (mounted) {
           setState(() {
@@ -677,6 +772,36 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
           ),
         );
       }
+    }
+  }
+
+  Future<void> _performConnectionTest() async {
+    try {
+      await widget.p2pService.sendMessage(
+        message: 'Test message from ${widget.p2pService.userName}',
+        type: MessageType.text,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Test message sent!')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to send: $e')));
+      }
+    }
+  }
+
+  Future<void> _performForcedDiscovery() async {
+    await widget.p2pService.discoverDevices(force: true);
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Network refresh initiated')));
     }
   }
 
@@ -700,8 +825,8 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
 
             const SizedBox(height: 16),
 
-            // Connection Status Card
-            _buildConnectionStatusCard(connectionInfo, isConnected),
+            // Enhanced Connection Status Card
+            _buildEnhancedConnectionCard(connectionInfo, isConnected),
 
             const SizedBox(height: 16),
 
@@ -728,10 +853,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
 
             // Enhanced Device List
             _buildEnhancedDeviceList(),
-
-            const SizedBox(height: 16),
-
-            _buildConnectionTestCard(),
           ],
         ),
       ),
@@ -803,83 +924,376 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     );
   }
 
-  Widget _buildConnectionStatusCard(
+  // NEW: Enhanced Connection Status Card
+  Widget _buildEnhancedConnectionCard(
     Map<String, dynamic> connectionInfo,
     bool isConnected,
   ) {
     return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.wifi_tethering,
-                  color: isConnected ? Colors.green : Colors.grey,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Network Status',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                const Spacer(),
-                if (widget.p2pService.isDiscovering)
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+      elevation: 4,
+      margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [
+              Color(
+                0xFF0B192C,
+              ).withValues(alpha: 0.05), // Very subtle dark blue
+              Color(0xFF1E3A5F).withValues(alpha: 0.03), // Even lighter blue
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with status indicator - Responsive
+              Row(
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isConnected
+                          ? Colors.green.withValues(alpha: 0.15)
+                          : Colors.grey.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isConnected ? Colors.green : Colors.grey,
+                        width: 2,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.wifi_tethering,
+                      color: isConnected ? Colors.green : Colors.grey,
+                      size: 28,
+                    ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _buildStatusRow(
-              Icons.person,
-              'Device ID',
-              connectionInfo['deviceId']?.toString().substring(0, 8) ??
-                  'Not initialized',
-              valueColor: const Color.fromARGB(223, 175, 163, 163),
-            ),
-            _buildStatusRow(
-              Icons.router,
-              'Role',
-              connectionInfo['role']?.toString().toUpperCase() ?? 'NONE',
-              valueColor: widget.p2pService.currentRole != P2PRole.none
-                  ? Colors.green
-                  : Colors.grey,
-            ),
-            _buildStatusRow(
-              Icons.devices,
-              'Connected',
-              '${connectionInfo['connectedDevices'] ?? 0} devices',
-              valueColor: const Color.fromARGB(223, 175, 163, 163),
-            ),
-            if (isConnected) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.chat),
-                  label: const Text('Open Chat'),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MessagePage(
-                          p2pService: widget.p2pService,
-                          currentLocation: _latestLocation,
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Network Status',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            color: Color.fromARGB(
+                              255,
+                              252,
+                              254,
+                              255,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: isConnected
+                                    ? Colors.green
+                                    : Colors.orange,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                isConnected
+                                    ? 'Connected & Ready'
+                                    : 'Searching for devices...',
+                                style: TextStyle(
+                                  color: isConnected
+                                      ? Colors.green
+                                      : Colors.orange,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (widget.p2pService.isDiscovering)
+                    Container(
+                      padding: EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.blue,
+                          ),
                         ),
                       ),
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // Connection details with better styling
+              Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Color.fromARGB(
+                    255,
+                    105,
+                    107,
+                    109,
+                  ).withValues(alpha: 0.08), // Subtle dark blue background
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Color(
+                      0xFF1E3A5F,
+                    ).withValues(alpha: 0.2), // Dark blue border
+                    width: 1,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    _buildEnhancedStatusRow(
+                      Icons.person_outline,
+                      'Device ID',
+                      connectionInfo['deviceId']?.toString().substring(0, 8) ??
+                          'Not initialized',
+                      valueColor: Color.fromARGB(
+                        255,
+                        116,
+                        117,
+                        119,
+                      ), // Dark blue text
+                    ),
+                    const SizedBox(height: 12),
+                    _buildEnhancedStatusRow(
+                      Icons.router_outlined,
+                      'Network Role',
+                      connectionInfo['role']?.toString().toUpperCase() ??
+                          'NONE',
+                      valueColor: widget.p2pService.currentRole != P2PRole.none
+                          ? Colors.green
+                          : Color(0xFF666666),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildEnhancedStatusRow(
+                      Icons.devices_outlined,
+                      'Connected Devices',
+                      '${connectionInfo['connectedDevices'] ?? 0}',
+                      valueColor: Color.fromARGB(255, 116, 117, 119),
+                    ),
+                    if (isConnected) ...[
+                      const SizedBox(height: 12),
+                      _buildEnhancedStatusRow(
+                        Icons.network_check,
+                        'Network Quality',
+                        'Excellent',
+                        valueColor: Colors.green,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // Action buttons with improved responsive design
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isNarrow = constraints.maxWidth < 400;
+
+                  if (isNarrow) {
+                    // Stack buttons vertically on narrow screens
+                    return Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            icon: Icon(Icons.science, size: 18),
+                            label: Text('Test Connection'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Color(0xFF0B192C), // Dark blue
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 2,
+                            ),
+                            onPressed: isConnected
+                                ? () => _performConnectionTest()
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            icon: Icon(Icons.refresh, size: 18),
+                            label: Text('Refresh Network'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Color(
+                                0xFFFF6500,
+                              ), // Orange accent
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 2,
+                            ),
+                            onPressed: () => _performForcedDiscovery(),
+                          ),
+                        ),
+                      ],
                     );
-                  },
+                  } else {
+                    // Row layout for wider screens
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: Icon(Icons.science, size: 18),
+                            label: Text('Test Connection'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Color(0xFF0B192C), // Dark blue
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 2,
+                            ),
+                            onPressed: isConnected
+                                ? () => _performConnectionTest()
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: Icon(Icons.refresh, size: 18),
+                            label: Text('Refresh Network'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Color(
+                                0xFFFF6500,
+                              ), // Orange accent
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 2,
+                            ),
+                            onPressed: () => _performForcedDiscovery(),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                },
+              ),
+
+              if (isConnected) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    label: const Text('Open Chat'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 2,
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => MessagePage(
+                            p2pService: widget.p2pService,
+                            currentLocation: _latestLocation,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // NEW: Enhanced status row method
+  Widget _buildEnhancedStatusRow(
+    IconData icon,
+    String label,
+    String value, {
+    Color? valueColor,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Color(
+              0xFF1E3A5F,
+            ).withValues(alpha: 0.1), // Subtle blue background
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            icon,
+            size: 16,
+            color: Color(0xFF1E3A5F), // Dark blue icon
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF666666), // Medium grey for labels
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  color: valueColor ?? Color(0xFF0B192C), // Dark blue default
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
                 ),
               ),
             ],
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -1060,11 +1474,9 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
   }
 
   Future<void> _connectToDevice(Map<String, dynamic> device) async {
-    // Updated parameter
     try {
       await widget.p2pService.connectToDevice(device);
 
-      // Check if widget is still mounted before using context
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1074,7 +1486,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
         ),
       );
     } catch (e) {
-      // Check if widget is still mounted before using context
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1161,9 +1572,8 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                   onPressed: () async {
                     await _loadLatestLocation();
                     await _checkUnsyncedLocations();
-                    // Check if the widget is still mounted before using context
                     if (mounted) {
-                      setState(() {}); // Update the UI if needed
+                      setState(() {});
                     }
                   },
                 ),
@@ -1179,7 +1589,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                         latitude: _latestLocation!.latitude,
                         longitude: _latestLocation!.longitude,
                       );
-                      // Check if the widget is still mounted before using context
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -1199,7 +1608,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     );
   }
 
-  // Usage in home page:
   Widget _buildEnhancedDeviceList() {
     return ListView.builder(
       shrinkWrap: true,
@@ -1212,7 +1620,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
         );
 
         // Simulate signal strength based on device name/address
-        // In real implementation, this would come from the WiFi Direct scan
         final signalStrength = -50 - (index * 10); // Mock data
 
         return DeviceSignalWidget(
@@ -1291,42 +1698,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     );
   }
 
-  Widget _buildStatusRow(
-    IconData icon,
-    String label,
-    String value, {
-    Color? valueColor,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: Colors.grey),
-          const SizedBox(width: 8),
-          Text(
-            '$label: ',
-            style: TextStyle(
-              fontWeight: FontWeight.w500,
-              color: Colors.grey[700],
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                color: valueColor ?? Colors.black87,
-                fontWeight: valueColor != null
-                    ? FontWeight.bold
-                    : FontWeight.normal,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildLocationRow(
     IconData icon,
     String label,
@@ -1363,55 +1734,6 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     );
   }
 
-  Widget _buildConnectionTestCard() {
-    return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Connection Test',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () async {
-                try {
-                  await widget.p2pService.sendMessage(
-                    message: 'Test message from ${widget.p2pService.userName}',
-                    type: MessageType.text,
-                  );
-
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Test message sent!')),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to send: $e')),
-                    );
-                  }
-                }
-              },
-              child: Text('Send Test Message'),
-            ),
-            SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: () async {
-                await widget.p2pService.discoverDevices(force: true);
-              },
-              child: Text('Force Discovery'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   String _formatDateTime(DateTime dateTime) {
     final now = DateTime.now();
     final difference = now.difference(dateTime);
@@ -1438,16 +1760,13 @@ class BatteryWarningManager {
   static Future<bool> shouldShowWarning(int batteryLevel) async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Check if user dismissed the warning
     final dismissed = prefs.getBool(_dismissedWarningKey) ?? false;
     if (dismissed && batteryLevel > 15) {
-      // Reset dismissal if battery improved
       await prefs.setBool(_dismissedWarningKey, false);
     } else if (dismissed) {
       return false;
     }
 
-    // Check cooldown period
     final lastWarningTimestamp = prefs.getInt(_lastWarningKey) ?? 0;
     final lastWarning = DateTime.fromMillisecondsSinceEpoch(
       lastWarningTimestamp,
@@ -1458,7 +1777,6 @@ class BatteryWarningManager {
       return false;
     }
 
-    // Show warning for critical battery levels
     if (batteryLevel <= 10) {
       await prefs.setInt(_lastWarningKey, now.millisecondsSinceEpoch);
       return true;
@@ -1504,7 +1822,7 @@ class BatteryWarningManager {
 class DeviceSignalWidget extends StatelessWidget {
   final String deviceName;
   final String deviceAddress;
-  final int signalStrength; // -100 to 0 dBm
+  final int signalStrength;
   final bool isConnected;
   final bool isKnown;
   final VoidCallback onConnect;
@@ -1533,7 +1851,9 @@ class DeviceSignalWidget extends StatelessWidget {
             CircleAvatar(
               backgroundColor: isConnected
                   ? Colors.green
-                  : signalColor.withAlpha(51),
+                  : signalColor.withValues(
+                      alpha: 0.2,
+                    ), // Fixed from withAlpha(51)
               radius: 24,
               child: Icon(
                 isKnown ? Icons.star : Icons.devices,
@@ -1615,12 +1935,12 @@ class DeviceSignalWidget extends StatelessWidget {
   }
 
   int _getSignalLevel(int dbm) {
-    if (dbm >= -50) return 5; // Excellent
-    if (dbm >= -60) return 4; // Good
-    if (dbm >= -70) return 3; // Fair
-    if (dbm >= -80) return 2; // Weak
-    if (dbm >= -90) return 1; // Very weak
-    return 0; // No signal
+    if (dbm >= -50) return 5;
+    if (dbm >= -60) return 4;
+    if (dbm >= -70) return 3;
+    if (dbm >= -80) return 2;
+    if (dbm >= -90) return 1;
+    return 0;
   }
 
   Color _getSignalColor(int level) {
@@ -1670,7 +1990,6 @@ mixin AppLifecycleMixin<T extends StatefulWidget>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Enable state restoration
     if (mounted) {
       SystemChannels.lifecycle.setMessageHandler(_handleLifecycleMessage);
     }

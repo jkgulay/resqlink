@@ -304,6 +304,7 @@ class _GpsPageState extends State<GpsPage>
   final List<LocationModel> savedLocations = [];
   final MapController _mapController = MapController();
   final Battery _battery = Battery();
+  bool _isMapReady = false;
 
   LocationModel? _lastKnownLocation;
   LatLng? _currentLocation;
@@ -337,11 +338,6 @@ class _GpsPageState extends State<GpsPage>
   late Animation<double> _sosAnimation;
 
   final List<String> _mapTypes = ['Street', 'Satellite', 'Terrain'];
-  final List<String> _tileUrls = [
-    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
-  ];
 
   @override
   void initState() {
@@ -372,6 +368,59 @@ class _GpsPageState extends State<GpsPage>
         curve: Curves.elasticOut,
       ),
     );
+  }
+
+  void _testOfflineMaps() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Initialize map service if not done
+      if (!PhilippinesMapService.instance.isInitialized) {
+        await PhilippinesMapService.instance.initialize();
+      }
+
+      // Test offline capability
+      final isReady = await PhilippinesMapService.instance
+          .testOfflineCapability();
+
+      // Get cache statistics
+      final stats = await PhilippinesMapService.instance.getCacheStats();
+      final baseAvailable = await PhilippinesMapService.instance
+          .isPhilippinesBaseAvailable();
+
+      if (isReady && baseAvailable) {
+        // Force offline mode temporarily for testing
+        setState(() {
+          _isConnected = false;
+          _offlineMode = true;
+        });
+
+        // Show success message with stats
+        final philippinesStats = stats['philippines_base'];
+        final message = philippinesStats != null
+            ? '✅ Offline maps working!\n${philippinesStats.tileCount} tiles (${philippinesStats.sizeFormatted})'
+            : '✅ Offline maps working!';
+
+        _showMessage(message, isSuccess: true);
+
+        // Debug output
+        await PhilippinesMapService.instance.debugCacheStatus();
+      } else {
+        _showMessage(
+          '❌ Offline maps not ready!\nCheck console for details',
+          isDanger: true,
+        );
+      }
+    } catch (e) {
+      _showMessage('❌ Test failed: $e', isDanger: true);
+      debugPrint('Offline test error: $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -793,7 +842,6 @@ class _GpsPageState extends State<GpsPage>
             lastLocation.longitude,
           );
         });
-        _mapController.move(_currentLocation!, 15.0);
       } else if (!mounted) {
         print('⚠️ Skipping last location update - widget not mounted');
       }
@@ -1301,10 +1349,12 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _centerOnCurrentLocation() {
-    if (_currentLocation != null) {
+    if (_currentLocation != null && _isMapReady) {
       _mapController.move(_currentLocation!, 16.0);
-    } else {
+    } else if (_currentLocation == null) {
       _showMessage('No location available', isWarning: true);
+    } else {
+      _showMessage('Map not ready yet', isWarning: true);
     }
   }
 
@@ -1438,28 +1488,26 @@ class _GpsPageState extends State<GpsPage>
       mapController: _mapController,
       options: MapOptions(
         initialCenter: _currentLocation ?? const LatLng(14.5995, 120.9842),
-        initialZoom: 13.0,
+        initialZoom: _currentLocation != null ? 15.0 : 13.0,
         maxZoom: 18.0,
         minZoom: 5.0,
         onLongPress: (tapPos, latLng) => _showLocationTypeDialog(),
         onMapReady: () {
+          // Set the flag when map is ready
+          _isMapReady = true;
+
+          // Now safely use MapController
           if (_currentLocation != null) {
             _mapController.move(_currentLocation!, 15.0);
           }
         },
       ),
       children: [
-        TileLayer(
-          urlTemplate: _tileUrls[_selectedMapType],
-          subdomains: const ['a', 'b', 'c'],
-          userAgentPackageName: 'com.resqlink.app',
-          tileProvider: _offlineMode
-              ? PhilippinesMapService.instance
-                    .getTileLayer(zoom: _mapController.camera.zoom.toInt())
-                    .tileProvider
-              : NetworkTileProvider(),
-          fallbackUrl: _offlineMode ? null : _tileUrls[_selectedMapType],
+        // Don't access MapController.camera before map is ready - use default zoom
+        PhilippinesMapService.instance.getTileLayer(
+          zoom: 13, // Use a default zoom level instead of accessing camera
         ),
+
         if (savedLocations.length > 1)
           PolylineLayer(
             polylines: [
@@ -1582,7 +1630,7 @@ class _GpsPageState extends State<GpsPage>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Enhanced status panel with PhilippinesMapService info
+            // Enhanced status panel
             IntrinsicWidth(
               child: Container(
                 padding: const EdgeInsets.all(12),
@@ -1598,84 +1646,63 @@ class _GpsPageState extends State<GpsPage>
                   ],
                 ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Connection status
                     Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
                           _isConnected ? Icons.cloud_done : Icons.cloud_off,
                           color: _isConnected
                               ? ResQLinkTheme.safeGreen
-                              : ResQLinkTheme.emergencyOrange,
-                          size: 20,
+                              : ResQLinkTheme.offlineGray,
+                          size: 16,
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 4),
                         Text(
-                          _isConnected ? 'ONLINE' : 'OFFLINE',
+                          _isConnected ? 'Online' : 'Offline',
                           style: TextStyle(
-                            color: _isConnected
-                                ? ResQLinkTheme.safeGreen
-                                : ResQLinkTheme.emergencyOrange,
-                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
                             fontSize: 12,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
-                    // Offline maps status (enhanced with Philippines info)
                     Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.map,
-                          color: _cacheInfo['cachedTiles'] > 0
-                              ? ResQLinkTheme.safeGreen
-                              : Colors.grey,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
+                        Icon(Icons.map, color: Colors.white70, size: 14),
+                        const SizedBox(width: 4),
                         Text(
-                          _cacheInfo['cachedTiles'] > 0
-                              ? '${_cacheInfo['storageSizeMB']} MB + PH Base'
-                              : 'PH Base Ready',
+                          'Maps: ${_cacheInfo['cachedTiles'] ?? 0} tiles',
                           style: const TextStyle(
                             color: Colors.white70,
-                            fontSize: 12,
+                            fontSize: 10,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    // Battery status
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.battery_full,
-                          color: _batteryLevel > 20
-                              ? ResQLinkTheme.safeGreen
-                              : ResQLinkTheme.primaryRed,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '$_batteryLevel%',
-                          style: TextStyle(
-                            color: _batteryLevel > 20
-                                ? Colors.white70
-                                : ResQLinkTheme.primaryRed,
-                            fontSize: 12,
-                            fontWeight: _batteryLevel <= 20
-                                ? FontWeight.bold
-                                : FontWeight.normal,
+                    if (_batteryLevel < 20) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.battery_alert,
+                            color: ResQLinkTheme.emergencyOrange,
+                            size: 14,
                           ),
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Low Battery',
+                            style: TextStyle(
+                              color: ResQLinkTheme.emergencyOrange,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1685,22 +1712,8 @@ class _GpsPageState extends State<GpsPage>
               mainAxisSize: MainAxisSize.min,
               children: [
                 _buildControlButton(
-                  icon: Icons.layers,
-                  onPressed: () {
-                    setState(() {
-                      _showMapTypeSelector = !_showMapTypeSelector;
-                    });
-                  },
-                ),
-                const SizedBox(height: 8),
-                _buildControlButton(
                   icon: Icons.my_location,
                   onPressed: _centerOnCurrentLocation,
-                ),
-                const SizedBox(height: 8),
-                _buildControlButton(
-                  icon: Icons.save_alt,
-                  onPressed: () => _saveCurrentLocation(),
                 ),
                 const SizedBox(height: 8),
                 _buildControlButton(
@@ -1710,18 +1723,13 @@ class _GpsPageState extends State<GpsPage>
                 ),
                 const SizedBox(height: 8),
                 _buildControlButton(
-                  icon: _offlineMode ? Icons.cloud_off : Icons.cloud,
-                  onPressed: () {
-                    setState(() {
-                      _offlineMode = !_offlineMode;
-                    });
-                    _showMessage(
-                      _offlineMode
-                          ? 'Offline mode enabled'
-                          : 'Online mode enabled',
-                      isSuccess: true,
-                    );
-                  },
+                  icon: Icons.info_outline,
+                  onPressed: _showOfflineMapInfo,
+                ),
+                const SizedBox(height: 8),
+                _buildControlButton(
+                  icon: Icons.bug_report,
+                  onPressed: _testOfflineMaps,
                 ),
               ],
             ),
@@ -2135,10 +2143,15 @@ class _GpsPageState extends State<GpsPage>
                   TextButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
-                      _mapController.move(
-                        LatLng(location.latitude, location.longitude),
-                        16.0,
-                      );
+                      // Check if map is ready before using MapController
+                      if (_isMapReady) {
+                        _mapController.move(
+                          LatLng(location.latitude, location.longitude),
+                          16.0,
+                        );
+                      } else {
+                        _showMessage('Map not ready yet', isWarning: true);
+                      }
                     },
                     icon: const Icon(Icons.map, color: Colors.white70),
                     label: const Text(
