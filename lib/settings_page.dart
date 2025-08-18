@@ -518,97 +518,211 @@ class SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildConnectivitySection(SettingsService settings) {
+  Widget _buildRoleSelectionSection(SettingsService settings) {
     return Card(
       color: ResQLinkTheme.cardDark,
       elevation: 2,
       child: Column(
         children: [
-          SwitchListTile(
-            title: Text(
-              'Multi-hop Relaying',
-              style: TextStyle(color: Colors.white),
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.device_hub, color: ResQLinkTheme.orange),
+                SizedBox(width: 8),
+                Text(
+                  'Network Role Preference',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
             ),
-            subtitle: Text(
-              'Allow messages to relay through other devices',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            value: settings.multiHopEnabled,
-            onChanged: _toggleMultiHop,
-            secondary: Icon(
-              Icons.device_hub,
-              color: settings.multiHopEnabled
-                  ? ResQLinkTheme.safeGreen
-                  : Colors.grey,
-            ),
-            activeColor: ResQLinkTheme.orange,
           ),
-          Divider(color: Colors.white24, height: 1),
-          ListTile(
-            title: Text(
-              'P2P Network Status',
-              style: TextStyle(color: Colors.white),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Choose how this device should behave in the P2P network:',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
             ),
-            subtitle: Text(
-              widget.p2pService?.isConnected == true
-                  ? 'Connected to ${widget.p2pService?.connectedDevices.length ?? 0} devices'
-                  : 'Not connected',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            leading: Icon(
-              Icons.wifi_tethering,
-              color: widget.p2pService?.isConnected == true
-                  ? ResQLinkTheme.safeGreen
-                  : Colors.grey,
-            ),
-            trailing: Icon(Icons.info_outline, color: Colors.white54),
-            onTap: () {
-              final info = widget.p2pService?.getConnectionInfo() ?? {};
-              showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  backgroundColor: ResQLinkTheme.cardDark,
-                  title: Text(
-                    'P2P Status',
-                    style: TextStyle(color: Colors.white),
+          ),
+          SizedBox(height: 8),
+          _buildRoleOption(
+            'Auto',
+            null,
+            'Let the app decide automatically (Recommended)',
+          ),
+          _buildRoleOption('Host', 'host', 'Create a group for others to join'),
+          _buildRoleOption('Client', 'client', 'Connect to existing groups'),
+          SizedBox(height: 16),
+          if (widget.p2pService != null)
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: ResQLinkTheme.cardDark.withAlpha(128),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: ResQLinkTheme.orange.withAlpha(128),
                   ),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Role: ${info['role'] ?? 'None'}',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                      Text(
-                        'Connected Devices: ${info['connectedDevices'] ?? 0}',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                      Text(
-                        'Known Devices: ${info['knownDevices'] ?? 0}',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                      Text(
-                        'Emergency Mode: ${widget.p2pService?.emergencyMode == true ? 'On' : 'Off'}',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: ResQLinkTheme.orange,
+                      size: 16,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
                       child: Text(
-                        'OK',
-                        style: TextStyle(color: Colors.white70),
+                        'Current role: ${widget.p2pService!.currentRole.name.toUpperCase()}',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
                       ),
                     ),
                   ],
                 ),
-              );
-            },
-          ),
+              ),
+            ),
+          SizedBox(height: 16),
         ],
       ),
+    );
+  }
+
+  Widget _buildRoleOption(String title, String? value, String description) {
+    final isSelected =
+        widget.p2pService?.getConnectionInfo()['preferredRole'] == value;
+
+    return Card(
+      elevation: isSelected ? 2 : 0,
+      color: isSelected ? ResQLinkTheme.orange.withAlpha(51) : null,
+      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: ListTile(
+        title: Text(title, style: TextStyle(color: Colors.white)),
+        subtitle: Text(
+          description,
+          style: TextStyle(fontSize: 12, color: Colors.white70),
+        ),
+        leading: Radio<String?>(
+          value: value,
+          groupValue: widget.p2pService?.getConnectionInfo()['preferredRole'],
+          onChanged: (newValue) {
+            widget.p2pService?.setRolePreference(newValue);
+            setState(() {});
+          },
+          activeColor: ResQLinkTheme.orange,
+        ),
+        onTap: () {
+          widget.p2pService?.setRolePreference(value);
+          setState(() {});
+        },
+      ),
+    );
+  }
+
+  Widget _buildConnectivitySection(SettingsService settings) {
+    return Column(
+      children: [
+        // Existing connectivity card
+        Card(
+          color: ResQLinkTheme.cardDark,
+          elevation: 2,
+          child: Column(
+            children: [
+              SwitchListTile(
+                title: Text(
+                  'Multi-hop Relaying',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: Text(
+                  'Allow messages to relay through other devices',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                value: settings.multiHopEnabled,
+                onChanged: _toggleMultiHop,
+                secondary: Icon(
+                  Icons.device_hub,
+                  color: settings.multiHopEnabled
+                      ? ResQLinkTheme.safeGreen
+                      : Colors.grey,
+                ),
+                activeColor: ResQLinkTheme.orange,
+              ),
+              Divider(color: Colors.white24, height: 1),
+              ListTile(
+                title: Text(
+                  'P2P Network Status',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: Text(
+                  widget.p2pService?.isConnected == true
+                      ? 'Connected to ${widget.p2pService?.connectedDevices.length ?? 0} devices'
+                      : 'Not connected',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                leading: Icon(
+                  Icons.wifi_tethering,
+                  color: widget.p2pService?.isConnected == true
+                      ? ResQLinkTheme.safeGreen
+                      : Colors.grey,
+                ),
+                trailing: Icon(Icons.info_outline, color: Colors.white54),
+                onTap: () {
+                  final info = widget.p2pService?.getConnectionInfo() ?? {};
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      backgroundColor: ResQLinkTheme.cardDark,
+                      title: Text(
+                        'P2P Status',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Role: ${info['role'] ?? 'None'}',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          Text(
+                            'Connected Devices: ${info['connectedDevices'] ?? 0}',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          Text(
+                            'Known Devices: ${info['knownDevices'] ?? 0}',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          Text(
+                            'Emergency Mode: ${widget.p2pService?.emergencyMode == true ? 'On' : 'Off'}',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text(
+                            'OK',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: 16),
+        // Add the role selection section here
+        _buildRoleSelectionSection(settings),
+      ],
     );
   }
 

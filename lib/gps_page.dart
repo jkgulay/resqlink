@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:resqlink/services/p2p_service.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -292,9 +293,14 @@ class FirebaseLocationService {
 class GpsPage extends StatefulWidget {
   final String? userId;
   final Function(LocationModel)? onLocationShare;
+  final P2PConnectionService p2pService;
 
-  const GpsPage({super.key, this.userId, this.onLocationShare});
-
+  const GpsPage({
+    super.key,
+    this.userId,
+    this.onLocationShare,
+    required this.p2pService, // Add this parameter
+  });
   @override
   State<GpsPage> createState() => _GpsPageState();
 }
@@ -1382,6 +1388,15 @@ class _GpsPageState extends State<GpsPage>
             _buildEmergencyButton(),
             if (_showMapTypeSelector) _buildMapTypeSelector(),
             _buildBottomInfo(),
+
+            // Add stats section positioned at the left side
+            Positioned(
+              left: 0,
+              top:
+                  MediaQuery.of(context).size.height *
+                  0.3, // Position it in the middle-left
+              child: _buildStatsAndControls(),
+            ),
           ],
         ),
       ),
@@ -1949,6 +1964,247 @@ class _GpsPageState extends State<GpsPage>
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildConnectionStatusCard() {
+    return Card(
+      color: ResQLinkTheme.cardDark,
+      elevation: 2,
+      margin: EdgeInsets.all(8),
+      child: Padding(
+        padding: EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.wifi_tethering,
+                  color: widget.p2pService.isConnected == true
+                      ? ResQLinkTheme.safeGreen
+                      : ResQLinkTheme.warningYellow,
+                  size: 20,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'P2P Network',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                Spacer(),
+                if (widget.p2pService.isDiscovering == true)
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: ResQLinkTheme
+                          .emergencyOrange, // Use existing theme color
+                    ),
+                  ),
+              ],
+            ),
+            SizedBox(height: 8),
+            Row(
+              children: [
+                _buildStatusIndicator(
+                  'Role',
+                  widget.p2pService.currentRole.name.toUpperCase(),
+                  widget.p2pService.isConnected == true
+                      ? ResQLinkTheme.safeGreen
+                      : Colors.grey,
+                ),
+                SizedBox(width: 16),
+                _buildStatusIndicator(
+                  'Devices',
+                  '${widget.p2pService.connectedDevices.length}',
+                  ResQLinkTheme.emergencyOrange, // Use existing theme color
+                ),
+              ],
+            ),
+            if (widget.p2pService.isConnected != true) ...[
+              SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: Icon(Icons.search, size: 16),
+                  label: Text('Find Devices'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: ResQLinkTheme.primaryRed,
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                  ),
+                  onPressed: widget.p2pService.isDiscovering == true
+                      ? null
+                      : () async {
+                          try {
+                            await widget.p2pService.discoverDevices(
+                              force: true,
+                            );
+                            if (mounted) {
+                              _showMessage(
+                                'Scanning for devices...',
+                                isSuccess: true,
+                              );
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              _showMessage(
+                                'Failed to scan: $e',
+                                isDanger: true,
+                              );
+                            }
+                          }
+                        },
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusIndicator(String label, String value, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        SizedBox(width: 4),
+        Text('$label: ', style: TextStyle(color: Colors.white70, fontSize: 12)),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Add a new method for stats and controls section
+  Widget _buildStatsAndControls() {
+    return Column(
+      children: [
+        // Add P2P connection status if service is available
+        _buildConnectionStatusCard(),
+
+        // Existing battery and location stats
+        Card(
+          color: ResQLinkTheme.cardDark,
+          elevation: 2,
+          margin: EdgeInsets.all(8),
+          child: Padding(
+            padding: EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Battery status
+                Row(
+                  children: [
+                    Icon(
+                      _batteryLevel < 20
+                          ? Icons.battery_alert
+                          : Icons.battery_std,
+                      color: _batteryLevel < 20
+                          ? ResQLinkTheme.emergencyOrange
+                          : ResQLinkTheme.safeGreen,
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Battery: $_batteryLevel%',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 8),
+
+                // Location status
+                Row(
+                  children: [
+                    Icon(
+                      _isLocationServiceEnabled
+                          ? Icons.location_on
+                          : Icons.location_off,
+                      color: _isLocationServiceEnabled
+                          ? ResQLinkTheme.safeGreen
+                          : ResQLinkTheme.primaryRed,
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'GPS: ${_isLocationServiceEnabled ? "Active" : "Disabled"}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 8),
+
+                // Saved locations count
+                Row(
+                  children: [
+                    Icon(Icons.place, color: Colors.white70, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Saved Locations: ${savedLocations.length}',
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                  ],
+                ),
+
+                // Add emergency mode toggle if P2P service is available
+                ...[
+                  SizedBox(height: 12),
+                  SwitchListTile(
+                    title: Text(
+                      'Emergency Mode',
+                      style: TextStyle(color: Colors.white, fontSize: 14),
+                    ),
+                    subtitle: Text(
+                      'Auto-connect and broadcast location',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    value: widget.p2pService.emergencyMode,
+                    onChanged: (value) {
+                      widget.p2pService.emergencyMode = value;
+                      if (mounted) {
+                        setState(() {});
+                        _showMessage(
+                          value
+                              ? 'Emergency mode activated'
+                              : 'Emergency mode deactivated',
+                          isSuccess: value,
+                          isDanger: !value,
+                        );
+                      }
+                    },
+                    activeColor: ResQLinkTheme.primaryRed,
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 

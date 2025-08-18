@@ -364,6 +364,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
   Future<void> _showEmergencyNotification(P2PMessage message) async {
+    // Get settings BEFORE any async operations
+    if (!mounted) return;
     final settings = context.read<SettingsService>();
 
     if (!settings.emergencyNotifications) {
@@ -389,6 +391,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           '\nLocation: ${message.latitude!.toStringAsFixed(6)}, ${message.longitude!.toStringAsFixed(6)}';
     }
 
+    // Use mounted check before accessing context
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -612,6 +615,32 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             if (_isChatView) _buildInputArea(isConnected),
           ],
         ),
+        // Add floating action button for quick connection
+        floatingActionButton: !_isChatView && !isConnected
+            ? FloatingActionButton(
+                backgroundColor: ResQLinkTheme.primaryRed,
+                onPressed: widget.p2pService.isDiscovering
+                    ? null
+                    : () async {
+                        await widget.p2pService.discoverDevices(force: true);
+                        // Show snackbar with instructions
+                        if (mounted && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Scanning for nearby devices...'),
+                              backgroundColor: ResQLinkTheme.primaryRed,
+                            ),
+                          );
+                        }
+                      },
+                child: Icon(
+                  widget.p2pService.isDiscovering
+                      ? Icons.hourglass_empty
+                      : Icons.wifi_tethering,
+                  color: Colors.white,
+                ),
+              )
+            : null,
       ),
     );
   }
@@ -626,7 +655,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           Text(
             isConnected
                 ? 'Connected to $connectedCount device${connectedCount > 1 ? 's' : ''}'
-                : 'No internet connection',
+                : 'No connection',
             style: TextStyle(
               fontSize: 12,
               color: isConnected
@@ -651,12 +680,63 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             )
           : null,
       actions: [
+        // Connection status icon
         Icon(
           widget.p2pService.isOnline ? Icons.cloud_done : Icons.cloud_off,
           color: widget.p2pService.isOnline
               ? ResQLinkTheme.safeGreen
               : ResQLinkTheme.offlineGray,
         ),
+        SizedBox(width: 8),
+        // Quick connect button when not in chat view
+        if (!_isChatView && !isConnected)
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert),
+            onSelected: (value) async {
+              switch (value) {
+                case 'scan':
+                  await widget.p2pService.discoverDevices(force: true);
+                case 'create_group':
+                  try {
+                    await widget.p2pService.createEmergencyGroup();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Emergency group created')),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to create group: $e')),
+                      );
+                    }
+                  }
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'scan',
+                child: Row(
+                  children: [
+                    Icon(Icons.search, color: Colors.white70),
+                    SizedBox(width: 8),
+                    Text('Scan for Devices'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'create_group',
+                child: Row(
+                  children: [
+                    Icon(Icons.wifi_tethering, color: Colors.white70),
+                    SizedBox(width: 8),
+                    Text('Create Group'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        SizedBox(width: 8),
       ],
     );
   }
@@ -682,40 +762,162 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   Widget _buildConversationList() {
     if (_conversations.isEmpty) {
-      return Center(
+      return SingleChildScrollView(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 64,
-              color: ResQLinkTheme.offlineGray,
-            ),
-            SizedBox(height: 16),
-            Text(
-              'No messages yet',
-              style: TextStyle(fontSize: 18, color: Colors.white),
-            ),
-            SizedBox(height: 8),
-            Text(
-              widget.p2pService.connectedDevices.isEmpty
-                  ? 'Connect to a device to start messaging'
-                  : 'Select a device to start messaging',
-              style: TextStyle(fontSize: 14, color: Colors.white),
-              textAlign: TextAlign.center,
+            _buildConnectionControls(), // This line is already in your code
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.chat_bubble_outline,
+                    size: 64,
+                    color: ResQLinkTheme.offlineGray,
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'No messages yet',
+                    style: TextStyle(fontSize: 18, color: Colors.white),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    widget.p2pService.connectedDevices.isEmpty
+                        ? 'Connect to a device to start messaging'
+                        : 'Select a device to start messaging',
+                    style: TextStyle(fontSize: 14, color: Colors.white),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       );
     }
 
-    return ListView.builder(
-      padding: EdgeInsets.all(16),
-      itemCount: _conversations.length,
-      itemBuilder: (context, index) {
-        final conversation = _conversations[index];
-        return _buildConversationItem(conversation);
-      },
+    // When there ARE conversations, show the connection status at the top
+    return Column(
+      children: [
+        // Add connection status card at the top when there are conversations
+        SizedBox(
+          height: 120, // Fixed height to prevent scrolling issues
+          child: SingleChildScrollView(child: _buildConnectionStatusSummary()),
+        ),
+        // Then show the conversations list
+        Expanded(
+          child: ListView.builder(
+            padding: EdgeInsets.all(16),
+            itemCount: _conversations.length,
+            itemBuilder: (context, index) {
+              final conversation = _conversations[index];
+              return _buildConversationItem(conversation);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Add this new method for a compact connection status when conversations exist
+  Widget _buildConnectionStatusSummary() {
+    final connectionInfo = widget.p2pService.getConnectionInfo();
+    final isConnected = widget.p2pService.isConnected;
+    final discoveredDevices = widget.p2pService.discoveredDevices;
+
+    return Card(
+      color: ResQLinkTheme.cardDark,
+      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Padding(
+        padding: EdgeInsets.all(12),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.wifi_tethering,
+                  color: isConnected
+                      ? ResQLinkTheme.safeGreen
+                      : ResQLinkTheme.warningYellow,
+                  size: 20,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Network Status',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                Spacer(),
+                // Quick action button
+                if (!isConnected && discoveredDevices.isNotEmpty)
+                  ElevatedButton(
+                    onPressed: () async {
+                      await widget.p2pService.discoverDevices(force: true);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: ResQLinkTheme.primaryRed,
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    ),
+                    child: Text('Scan', style: TextStyle(fontSize: 12)),
+                  ),
+              ],
+            ),
+            SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildQuickStatusItem(
+                  'Status',
+                  isConnected ? 'Connected' : 'Disconnected',
+                  isConnected
+                      ? ResQLinkTheme.safeGreen
+                      : ResQLinkTheme.warningYellow,
+                ),
+                _buildQuickStatusItem(
+                  'Role',
+                  connectionInfo['role']?.toString().toUpperCase() ?? 'NONE',
+                  isConnected ? ResQLinkTheme.safeGreen : Colors.grey,
+                ),
+                _buildQuickStatusItem(
+                  'Devices',
+                  '${connectionInfo['connectedDevices'] ?? 0}',
+                  Colors.blue,
+                ),
+                _buildQuickStatusItem(
+                  'Available',
+                  '${discoveredDevices.length}',
+                  Colors.orange,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickStatusItem(String label, String value, Color color) {
+    return Column(
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        Text(label, style: TextStyle(color: Colors.white70, fontSize: 10)),
+      ],
     );
   }
 
@@ -809,6 +1011,218 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         return Icon(Icons.cloud_done, size: 16, color: Colors.green);
       // Remove the default case since all enum values are covered
     }
+  }
+
+  Widget _buildConnectionControls() {
+    final connectionInfo = widget.p2pService.getConnectionInfo();
+    final isConnected = widget.p2pService.isConnected;
+    final discoveredDevices = widget.p2pService.discoveredDevices;
+
+    return Card(
+      color: ResQLinkTheme.cardDark,
+      margin: EdgeInsets.all(16),
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.wifi_tethering,
+                  color: isConnected
+                      ? ResQLinkTheme.safeGreen
+                      : ResQLinkTheme.warningYellow,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Network Status',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 12),
+
+            // Connection Status
+            _buildStatusRow(
+              'Status',
+              isConnected ? 'Connected' : 'Disconnected',
+              isConnected
+                  ? ResQLinkTheme.safeGreen
+                  : ResQLinkTheme.warningYellow,
+            ),
+
+            _buildStatusRow(
+              'Role',
+              connectionInfo['role']?.toString().toUpperCase() ?? 'NONE',
+              isConnected ? ResQLinkTheme.safeGreen : Colors.grey,
+            ),
+
+            _buildStatusRow(
+              'Connected Devices',
+              '${connectionInfo['connectedDevices'] ?? 0}',
+              Colors.blue,
+            ),
+
+            _buildStatusRow(
+              'Available Devices',
+              '${discoveredDevices.length}',
+              Colors.orange,
+            ),
+
+            SizedBox(height: 16),
+
+            // Connection Actions
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: Icon(Icons.search),
+                    label: Text('Scan'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: ResQLinkTheme.primaryRed,
+                    ),
+                    onPressed: widget.p2pService.isDiscovering
+                        ? null
+                        : () async {
+                            await widget.p2pService.discoverDevices(
+                              force: true,
+                            );
+                          },
+                  ),
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: Icon(
+                      isConnected ? Icons.group_add : Icons.wifi_tethering,
+                    ),
+                    label: Text(isConnected ? 'Host Group' : 'Create Group'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: ResQLinkTheme.safeGreen,
+                    ),
+                    onPressed: () async {
+                      try {
+                        await widget.p2pService.createEmergencyGroup();
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Emergency group created')),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to create group: $e'),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+
+            // Available devices list
+            if (discoveredDevices.isNotEmpty) ...[
+              SizedBox(height: 16),
+              Text(
+                'Available Devices:',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              SizedBox(height: 8),
+              ...discoveredDevices.entries.map(
+                (entry) => _buildDeviceItem(entry.value),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusRow(String label, String value, Color color) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          SizedBox(width: 8),
+          Text('$label: ', style: TextStyle(color: Colors.white70)),
+          Text(
+            value,
+            style: TextStyle(color: color, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeviceItem(Map<String, dynamic> device) {
+    return Card(
+      color: ResQLinkTheme.surfaceDark,
+      margin: EdgeInsets.symmetric(vertical: 2),
+      child: ListTile(
+        dense: true,
+        leading: CircleAvatar(
+          radius: 16,
+          backgroundColor: device['isAvailable']
+              ? ResQLinkTheme.safeGreen
+              : Colors.grey,
+          child: Icon(Icons.devices, size: 16, color: Colors.white),
+        ),
+        title: Text(
+          device['deviceName'] ?? 'Unknown Device',
+          style: TextStyle(color: Colors.white, fontSize: 14),
+        ),
+        subtitle: Text(
+          device['deviceAddress'] ?? '',
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+        trailing: device['isAvailable']
+            ? ElevatedButton(
+                onPressed: () async {
+                  try {
+                    await widget.p2pService.connectToDevice(device);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Connected to ${device['deviceName']}'),
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Connection failed: $e')),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ResQLinkTheme.primaryRed,
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                ),
+                child: Text('Connect', style: TextStyle(fontSize: 12)),
+              )
+            : Text(
+                'Unavailable',
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+      ),
+    );
   }
 
   Widget _buildChatView() {
