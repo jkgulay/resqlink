@@ -57,6 +57,8 @@ class _HomePageState extends State<HomePage>
       ),
       GpsPage(
         userId: _userId,
+        p2pService: _p2pService, 
+
         onLocationShare: (location) {
           setState(() {
             _currentLocation = location;
@@ -983,12 +985,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 18,
-                            color: Color.fromARGB(
-                              255,
-                              252,
-                              254,
-                              255,
-                            ),
+                            color: Color.fromARGB(255, 252, 254, 255),
                           ),
                         ),
                         const SizedBox(height: 4),

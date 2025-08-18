@@ -29,6 +29,9 @@ class P2PConnectionService with ChangeNotifier {
   String? _userName;
   P2PRole _currentRole = P2PRole.none;
 
+  bool _allowRoleSwitching = true;
+  Timer? _roleDecisionTimer;
+
   // Singleton instance
   static P2PConnectionService? _instance;
 
@@ -129,6 +132,7 @@ class P2PConnectionService with ChangeNotifier {
       _startMessageCleanup();
       _startHeartbeat();
       _startReconnectTimer();
+      _startConnectionHealthMonitoring();
 
       // Monitor connectivity
       _monitorConnectivity();
@@ -136,6 +140,7 @@ class P2PConnectionService with ChangeNotifier {
       // Load known devices and pending messages
       await _loadKnownDevices();
       await _loadPendingMessages();
+      Timer(Duration(seconds: 2), () => _ensureConnection());
 
       debugPrint("✅ P2P Service initialized successfully");
       return true;
@@ -226,6 +231,141 @@ class P2PConnectionService with ChangeNotifier {
     });
   }
 
+  Future<void> _makeRoleDecision() async {
+    debugPrint("🤔 Making role decision for WiFi Direct group...");
+
+    // Cancel any existing role decision timer
+    _roleDecisionTimer?.cancel();
+
+    // Wait to see what devices are available
+    await Future.delayed(Duration(seconds: 3));
+
+    final availableDevices = _discoveredDevices.values
+        .where((device) => device['isAvailable'] == true)
+        .toList();
+
+    debugPrint(
+      "📊 Found ${availableDevices.length} available WiFi Direct devices",
+    );
+
+    if (availableDevices.isEmpty) {
+      // No devices found, become Group Owner (host)
+      debugPrint("👑 No devices found, becoming WiFi Direct Group Owner");
+      await _becomeHost();
+    } else {
+      // Devices found, decide role
+      final shouldBecomeHost = _shouldBecomeHost(availableDevices.length);
+
+      if (shouldBecomeHost) {
+        debugPrint("👑 Deciding to become WiFi Direct Group Owner");
+        await _becomeHost();
+      } else {
+        debugPrint("🔗 Deciding to connect as WiFi Direct client");
+        await _connectToAvailableDevice(availableDevices);
+      }
+    }
+  }
+
+  Future<void> _becomeHost() async {
+    if (_isConnecting || _isConnected) return;
+
+    try {
+      _isConnecting = true;
+      _currentRole = P2PRole.host;
+
+      debugPrint("👑 Creating WiFi Direct group (becoming Group Owner)...");
+
+      // Stop any ongoing discovery
+      await WifiDirectPlugin.stopDiscovery();
+      await Future.delayed(Duration(milliseconds: 500));
+
+      // Create WiFi Direct group - this establishes us as Group Owner
+      // and sets up the TCP server socket for incoming connections
+      bool success = await WifiDirectPlugin.startAsServer(
+        "RESQLINK_$_userName",
+      );
+
+      if (success) {
+        debugPrint("✅ WiFi Direct group created successfully");
+        debugPrint("📡 TCP server socket listening for connections...");
+        notifyListeners();
+      } else {
+        debugPrint("❌ Failed to create WiFi Direct group");
+        _currentRole = P2PRole.none;
+        _isConnecting = false;
+      }
+    } catch (e) {
+      debugPrint("❌ Error creating WiFi Direct group: $e");
+      _currentRole = P2PRole.none;
+      _isConnecting = false;
+    }
+  }
+
+  bool _shouldBecomeHost(int availableDevicesCount) {
+    // User preference takes priority
+    if (_preferredRole == 'host') return true;
+    if (_preferredRole == 'client') return false;
+
+    // Auto mode: Random factor for load balancing
+    final random = DateTime.now().millisecond % 100;
+
+    if (availableDevicesCount > 3) {
+      return random < 25; // 25% chance
+    } else if (availableDevicesCount > 1) {
+      return random < 50; // 50% chance
+    } else {
+      return random < 75; // 75% chance with few devices
+    }
+  }
+
+  Future<void> _connectToAvailableDevice(
+    List<Map<String, dynamic>> devices,
+  ) async {
+    // Sort devices by preference (known devices first, then by signal strength, etc.)
+    devices.sort((a, b) {
+      // Prefer known devices
+      final aKnown = _knownDevices.containsKey(a['deviceAddress']) ? 1 : 0;
+      final bKnown = _knownDevices.containsKey(b['deviceAddress']) ? 1 : 0;
+
+      if (aKnown != bKnown) return bKnown.compareTo(aKnown);
+
+      // Then by discovery time (more recent first)
+      final aTime = a['discoveredAt'] ?? 0;
+      final bTime = b['discoveredAt'] ?? 0;
+      return bTime.compareTo(aTime);
+    });
+
+    // Try to connect to the best device
+    for (final device in devices) {
+      try {
+        await connectToDevice(device);
+        return; // Success
+      } catch (e) {
+        debugPrint("❌ Failed to connect to ${device['deviceName']}: $e");
+        continue; // Try next device
+      }
+    }
+
+    // If all connections failed, become host
+    debugPrint("❌ Failed to connect to any device, becoming host");
+    await _becomeHost();
+  }
+
+  void setRolePreference(String? preference) {
+    _preferredRole = preference;
+    debugPrint("📝 Role preference set to: $preference");
+
+    // If emergency mode is on, apply the change immediately
+    if (_emergencyMode && !_isConnected && !_isConnecting) {
+      _scheduleRoleDecision();
+    }
+  }
+
+  void _scheduleRoleDecision() {
+    _roleDecisionTimer?.cancel();
+    _roleDecisionTimer = Timer(Duration(seconds: 2), _makeRoleDecision);
+  }
+
   Future<void> _attemptSmartConnect() async {
     if (_discoveredDevices.isEmpty || _isConnecting) return;
 
@@ -276,36 +416,101 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Become host with better error handling
-  Future<void> _becomeHost() async {
-    if (_isConnecting || _isConnected) return;
+  Future<void> _ensureConnection() async {
+    if (_isConnected || _isConnecting || _isDisposed) return;
 
-    try {
-      _isConnecting = true;
-      _currentRole = P2PRole.host;
+    debugPrint("🔄 Ensuring P2P connection...");
 
-      debugPrint("👑 Becoming WiFi Direct host...");
+    // Try discovery first
+    if (!_isDiscovering) {
+      await discoverDevices(force: true);
+    }
 
-      // Stop any ongoing discovery
-      await WifiDirectPlugin.stopDiscovery();
-      await Future.delayed(Duration(milliseconds: 500));
+    // Wait for discovery to find devices
+    await Future.delayed(Duration(seconds: 3));
 
-      bool success = await WifiDirectPlugin.startAsServer(
-        "RESQLINK_$_userName",
-      );
+    // If emergency mode is on and we still don't have connection, be more aggressive
+    if (_emergencyMode && !_isConnected && !_isConnecting) {
+      await _aggressiveConnectionAttempt();
+    }
+  }
 
-      if (success) {
-        debugPrint("✅ Successfully created host group");
-        notifyListeners();
-      } else {
-        debugPrint("❌ Failed to create host group");
-        _currentRole = P2PRole.none;
-        _isConnecting = false;
+  Future<void> _aggressiveConnectionAttempt() async {
+    debugPrint("🚨 Aggressive connection attempt in emergency mode");
+
+    final availableDevices = _discoveredDevices.values
+        .where((device) => device['isAvailable'] == true)
+        .toList();
+
+    if (availableDevices.isEmpty) {
+      // No devices found, become host immediately
+      debugPrint("👑 No devices found, creating emergency group");
+      await createEmergencyGroup();
+      return;
+    }
+
+    // Try connecting to all available devices simultaneously (first one wins)
+    final connectionFutures = availableDevices.map((device) async {
+      try {
+        await connectToDevice(device);
+        return true;
+      } catch (e) {
+        debugPrint("Failed to connect to ${device['deviceName']}: $e");
+        return false;
       }
-    } catch (e) {
-      debugPrint("❌ Error becoming host: $e");
-      _currentRole = P2PRole.none;
-      _isConnecting = false;
+    });
+
+    final results = await Future.wait(connectionFutures, eagerError: false);
+
+    // If none connected, create our own group
+    if (!results.any((success) => success) && !_isConnected) {
+      debugPrint(
+        "🆘 All connections failed, creating emergency group as last resort",
+      );
+      await createEmergencyGroup();
+    }
+  }
+
+  // Add periodic connection health check
+  Timer? _connectionHealthTimer;
+
+  void _startConnectionHealthMonitoring() {
+    _connectionHealthTimer?.cancel();
+    _connectionHealthTimer = Timer.periodic(Duration(seconds: 30), (timer) {
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+
+      if (_emergencyMode && !_isConnected && !_isConnecting) {
+        debugPrint(
+          "⚠️ Emergency mode active but not connected, attempting reconnection",
+        );
+        _ensureConnection();
+      }
+
+      // Also check if we should switch roles for better connectivity
+      if (_allowRoleSwitching && _connectedDevices.length < 2) {
+        _evaluateRoleSwitch();
+      }
+    });
+  }
+
+  void _evaluateRoleSwitch() {
+    final now = DateTime.now();
+    final timeSinceLastConnection = _lastPongTime != null
+        ? now.difference(_lastPongTime!)
+        : Duration(minutes: 10);
+
+    // If we've been without good connections for too long, try switching roles
+    if (timeSinceLastConnection > Duration(minutes: 2)) {
+      if (_currentRole == P2PRole.client) {
+        debugPrint("🔄 Poor connectivity as client, trying to become host");
+        _gracefulDisconnect().then((_) => _becomeHost());
+      } else if (_currentRole == P2PRole.host && _connectedDevices.isEmpty) {
+        debugPrint("🔄 No clients connecting to host, trying client mode");
+        _gracefulDisconnect().then((_) => discoverDevices(force: true));
+      }
     }
   }
 
@@ -346,22 +551,47 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
+  
+
   // Emergency mode management
   void _startEmergencyMode() {
     debugPrint("🚨 Starting emergency mode...");
 
-    // Start discovery if not connected
-    if (!_isConnected && !_isDiscovering) {
+    // Reset current connections if needed
+    if (_allowRoleSwitching && _isConnected) {
+      _gracefulDisconnect();
+    }
+
+    // Start discovery
+    if (!_isDiscovering) {
       discoverDevices(force: true);
     }
 
-    // Set up periodic discovery
+    // Schedule role decision
+    _scheduleRoleDecision();
+
+    // Set up periodic rediscovery
     _discoveryTimer?.cancel();
-    _discoveryTimer = Timer.periodic(Duration(minutes: 1), (timer) {
+    _discoveryTimer = Timer.periodic(Duration(seconds: 30), (timer) {
       if (!_isConnected && !_isDiscovering && !_isDisposed) {
+        debugPrint("🔄 Periodic rediscovery in emergency mode");
         discoverDevices(force: true);
+        _scheduleRoleDecision();
       }
     });
+  }
+
+  Future<void> _gracefulDisconnect() async {
+    try {
+      debugPrint("🔄 Gracefully disconnecting for role switch");
+      await WifiDirectPlugin.disconnect();
+      _isConnected = false;
+      _currentRole = P2PRole.none;
+      _connectedDevices.clear();
+      notifyListeners();
+    } catch (e) {
+      debugPrint("❌ Error during graceful disconnect: $e");
+    }
   }
 
   void _stopEmergencyMode() {
@@ -442,31 +672,40 @@ class P2PConnectionService with ChangeNotifier {
       final deviceAddress = deviceData['deviceAddress'] as String;
       final deviceName = deviceData['deviceName'] as String;
 
-      debugPrint("🔗 Connecting to device: $deviceName ($deviceAddress)");
+      debugPrint(
+        "🔗 Initiating WiFi Direct connection to: $deviceName ($deviceAddress)",
+      );
 
-      // Stop discovery before connecting
+      // Stop discovery to avoid conflicts
       await WifiDirectPlugin.stopDiscovery();
       await Future.delayed(Duration(milliseconds: 500));
 
+      // Initiate WiFi Direct connection
+      // This will establish the WiFi Direct group and TCP socket layer
       bool success = await WifiDirectPlugin.connect(deviceAddress);
 
       if (success) {
-        debugPrint("✅ Connection initiated successfully");
+        debugPrint("✅ WiFi Direct connection initiated successfully");
         _currentRole = P2PRole.client;
 
-        // Save device credentials for future reconnection
+        // Wait for both WiFi Direct group formation AND TCP socket establishment
+        await _waitForFullConnectionEstablishment();
+
+        // Save device for future automatic reconnection
         await _saveDeviceCredentials(
           deviceAddress,
           DeviceCredentials(
             deviceId: deviceAddress,
-            ssid: deviceName,
-            psk: emergencyPassword,
+            ssid: "DIRECT-$deviceName",
+            psk: "", // WiFi Direct handles authentication differently
             isHost: false,
             lastSeen: DateTime.now(),
           ),
         );
+
+        debugPrint("🎉 Full TCP connection established with $deviceName");
       } else {
-        debugPrint("❌ Failed to initiate connection");
+        debugPrint("❌ Failed to initiate WiFi Direct connection");
         _isConnecting = false;
         throw Exception('Failed to connect to device');
       }
@@ -475,6 +714,55 @@ class P2PConnectionService with ChangeNotifier {
       notifyListeners();
       debugPrint("❌ Connection error: $e");
       rethrow;
+    }
+  }
+
+  Future<void> _waitForFullConnectionEstablishment() async {
+    int attempts = 0;
+    const maxAttempts = 30; // 15 seconds timeout
+
+    debugPrint(
+      "⏳ Waiting for WiFi Direct group formation and TCP socket establishment...",
+    );
+
+    while (!_isConnected && attempts < maxAttempts) {
+      await Future.delayed(Duration(milliseconds: 500));
+      attempts++;
+
+      // Log progress
+      if (attempts % 6 == 0) {
+        // Every 3 seconds
+        debugPrint("⏳ Still waiting for connection... (${attempts * 0.5}s)");
+      }
+    }
+
+    if (!_isConnected) {
+      throw Exception(
+        'Connection timeout - WiFi Direct group or TCP socket failed to establish',
+      );
+    }
+
+    debugPrint(
+      "✅ WiFi Direct connection fully established (${attempts * 0.5}s)",
+    );
+  }
+
+  Future<bool> testTcpConnection() async {
+    if (!_isConnected) return false;
+
+    try {
+      final testMessage = jsonEncode({
+        'type': 'connection_test',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'testData': 'Hello TCP!',
+      });
+
+      await _sendMessage(testMessage);
+      debugPrint("✅ TCP connection test successful");
+      return true;
+    } catch (e) {
+      debugPrint("❌ TCP connection test failed: $e");
+      return false;
     }
   }
 
@@ -516,12 +804,84 @@ class P2PConnectionService with ChangeNotifier {
     notifyListeners();
   }
 
+  Map<String, dynamic> getNetworkInfo() {
+    return {
+      'isConnected': _isConnected,
+      'isGroupOwner': _isGroupOwner,
+      'groupOwnerAddress': _groupOwnerAddress,
+      'role': _currentRole.name,
+      'networkType': 'WiFi Direct over TCP',
+    };
+  }
+
+  Future<void> _checkConnectionHealth() async {
+    try {
+      // Send a ping message - this goes over TCP socket
+      final ping = {
+        'type': 'ping',
+        'deviceId': _deviceId,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'sequenceNumber':
+            DateTime.now().millisecond, // Add sequence for tracking
+      };
+
+      await _sendMessage(jsonEncode(ping));
+
+      // Monitor for TCP connection issues
+      Timer(Duration(seconds: 5), () {
+        if (_lastPongTime == null ||
+            DateTime.now().difference(_lastPongTime!) > Duration(seconds: 10)) {
+          debugPrint("💔 TCP connection appears dead (ping timeout)");
+          _handleTcpConnectionLoss();
+        }
+      });
+
+      debugPrint("💓 Ping sent over TCP socket");
+    } catch (e) {
+      debugPrint("❌ TCP ping failed: $e");
+      _handleTcpConnectionLoss();
+    }
+  }
+
+  DateTime? _lastPongTime;
+
+  void _handleTcpConnectionLoss() {
+    debugPrint("💔 Handling TCP connection loss");
+
+    // TCP connection lost - this could be due to:
+    // - Physical distance
+    // - WiFi interference
+    // - Device going to sleep
+    // - App being backgrounded
+
+    _isConnected = false;
+    _currentRole = P2PRole.none;
+    _connectedDevices.clear();
+    notifyListeners();
+
+    // In emergency mode, try to re-establish WiFi Direct group
+    if (_emergencyMode && !_isDisposed) {
+      Timer(Duration(seconds: 2), () {
+        if (!_isConnected && !_isConnecting) {
+          debugPrint("🔄 Attempting to re-establish WiFi Direct connection");
+          discoverDevices(force: true);
+          _scheduleRoleDecision();
+        }
+      });
+    }
+  }
+
+  void _handlePong(Map<String, dynamic> json) {
+    _lastPongTime = DateTime.now();
+    debugPrint("🏓 Pong received");
+  }
+
   // Heartbeat to maintain connection
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(Duration(seconds: 30), (timer) {
+    _heartbeatTimer = Timer.periodic(Duration(seconds: 15), (timer) {
       if (_isConnected && !_isDisposed) {
-        _sendHeartbeat();
+        _checkConnectionHealth();
       } else {
         timer.cancel();
       }
@@ -545,21 +905,25 @@ class P2PConnectionService with ChangeNotifier {
     _sendMessage(jsonEncode(handshake));
   }
 
-  void _sendHeartbeat() {
-    final heartbeat = {
-      'type': 'heartbeat',
-      'deviceId': _deviceId,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-
-    _sendMessage(jsonEncode(heartbeat));
-  }
-
   Future<void> _sendMessage(String message) async {
     try {
+      // This sends data over the established TCP socket
       await WifiDirectPlugin.sendText(message);
+
+      // Log for debugging TCP issues
+      debugPrint("📤 Sent ${message.length} bytes over TCP");
     } catch (e) {
-      debugPrint("❌ Error sending message: $e");
+      // TCP send failed - could indicate connection issues
+      debugPrint("❌ TCP send error (${message.length} bytes): $e");
+
+      // Check if it's a socket-level error
+      if (e.toString().contains('socket') ||
+          e.toString().contains('connection') ||
+          e.toString().contains('network')) {
+        debugPrint("🔍 Detected TCP socket error, checking connection health");
+        _handleTcpConnectionLoss();
+      }
+
       rethrow;
     }
   }
@@ -752,6 +1116,10 @@ class P2PConnectionService with ChangeNotifier {
           _handleHandshake(json);
         case 'heartbeat':
           _handleHeartbeat(json);
+        case 'ping':
+          _handlePing(json);
+        case 'pong':
+          _handlePong(json);
         case 'message':
           _handleChatMessage(json);
         default:
@@ -760,6 +1128,18 @@ class P2PConnectionService with ChangeNotifier {
     } catch (e) {
       debugPrint("❌ Error handling incoming text: $e");
     }
+  }
+
+  void _handlePing(Map<String, dynamic> json) {
+    // Respond with pong
+    final pong = {
+      'type': 'pong',
+      'deviceId': _deviceId,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'originalTimestamp': json['timestamp'],
+    };
+
+    _sendMessage(jsonEncode(pong));
   }
 
   void _handleHandshake(Map<String, dynamic> json) {
@@ -1159,7 +1539,9 @@ class P2PConnectionService with ChangeNotifier {
 
 // Keep all your existing enums and classes...
 enum P2PRole { none, host, client }
+
 enum MessageType { text, emergency, location, sos, system, file }
+
 enum EmergencyTemplate { sos, trapped, medical, safe, evacuating }
 
 class P2PMessage {
