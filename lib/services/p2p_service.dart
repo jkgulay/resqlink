@@ -551,8 +551,6 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  
-
   // Emergency mode management
   void _startEmergencyMode() {
     debugPrint("🚨 Starting emergency mode...");
@@ -1081,6 +1079,21 @@ class P2PConnectionService with ChangeNotifier {
     );
   }
 
+  final Map<String, Socket> _deviceSockets = {};
+
+  Future<void> _sendToDevice(String deviceId, String message) async {
+    final socket = _deviceSockets[deviceId];
+    if (socket != null) {
+      try {
+        socket.write(message);
+        await socket.flush();
+      } catch (e) {
+        debugPrint("Failed to send to $deviceId: $e");
+        _deviceSockets.remove(deviceId);
+      }
+    }
+  }
+
   // Broadcast message to all connected devices
   Future<void> _broadcastMessage(P2PMessage message) async {
     // Decrease TTL
@@ -1097,7 +1110,7 @@ class P2PConnectionService with ChangeNotifier {
     final messageJson = jsonEncode(updatedMessage.toJson());
 
     try {
-      await _sendMessage(messageJson);
+      await _sendToDevice(deviceId!, messageJson);
     } catch (e) {
       debugPrint("Error broadcasting message: $e");
       // Queue for retry
@@ -1172,6 +1185,41 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
+  Future<void> _forwardMessage(P2PMessage message) async {
+    // Don't forward our own messages or messages we've already seen
+    if (message.senderId == _deviceId ||
+        _processedMessageIds.contains(message.id)) {
+      return;
+    }
+
+    // Decrease TTL
+    final forwardedMessage = message.copyWith(
+      ttl: message.ttl - 1,
+      routePath: [...message.routePath, _deviceId!],
+    );
+
+    if (forwardedMessage.ttl <= 0) {
+      debugPrint("Message TTL expired, not forwarding: ${message.id}");
+      return;
+    }
+
+    // Forward to ALL connected devices except the sender
+    for (var deviceId in _connectedDevices.keys) {
+      if (deviceId != message.senderId) {
+        try {
+          final messageJson = jsonEncode({
+            'type': 'message',
+            ...forwardedMessage.toJson(),
+          });
+          await _sendMessage(messageJson);
+          debugPrint("📡 Forwarded message ${message.id} to $deviceId");
+        } catch (e) {
+          debugPrint("❌ Failed to forward to $deviceId: $e");
+        }
+      }
+    }
+  }
+
   void _handleChatMessage(Map<String, dynamic> json) {
     try {
       final message = P2PMessage.fromJson(json);
@@ -1191,8 +1239,11 @@ class P2PConnectionService with ChangeNotifier {
       // Notify UI
       onMessageReceived?.call(message);
 
+      // 🔥 ADD THIS: Forward to other devices for multi-hop
+      _forwardMessage(message);
+
       debugPrint(
-        "📨 Received message from ${message.senderName}: ${message.message}",
+        "📨 Received and forwarded message from ${message.senderName}",
       );
     } catch (e) {
       debugPrint("❌ Error handling chat message: $e");
@@ -1424,7 +1475,7 @@ class P2PConnectionService with ChangeNotifier {
       'deviceId': _deviceId,
       'userName': _userName,
       'role': _currentRole.name,
-      'isOnline': _isOnline,
+      'preferredRole': _preferredRole,
       'isConnected': _isConnected,
       'isGroupOwner': _isGroupOwner,
       'connectedDevices': _connectedDevices.length,
