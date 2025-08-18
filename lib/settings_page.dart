@@ -594,8 +594,10 @@ class SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildRoleOption(String title, String? value, String description) {
-    final isSelected =
-        widget.p2pService?.getConnectionInfo()['preferredRole'] == value;
+    // Fix the getter to access the actual preferred role
+    final currentPreferredRole = widget.p2pService
+        ?.getConnectionInfo()['preferredRole'];
+    final isSelected = currentPreferredRole == value;
 
     return Card(
       elevation: isSelected ? 2 : 0,
@@ -609,16 +611,16 @@ class SettingsPageState extends State<SettingsPage> {
         ),
         leading: Radio<String?>(
           value: value,
-          groupValue: widget.p2pService?.getConnectionInfo()['preferredRole'],
+          groupValue: currentPreferredRole, // ✅ FIX THIS
           onChanged: (newValue) {
             widget.p2pService?.setRolePreference(newValue);
-            setState(() {});
+            setState(() {}); // Refresh UI
           },
           activeColor: ResQLinkTheme.orange,
         ),
         onTap: () {
           widget.p2pService?.setRolePreference(value);
-          setState(() {});
+          setState(() {}); // Refresh UI
         },
       ),
     );
