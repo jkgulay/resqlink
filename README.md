@@ -39,15 +39,23 @@ lib/
 ├── main.dart
 │   ├── gps_page.dart
 │   ├── messages_page.dart
+|   ├── home_page.dart
+|   ├── database_helper.dart
+|   ├── firebase_auth_helper.dart
+|   ├── firebase_options.dart
 │   └── settings_page.dart
 ├── services/
-│   ├── wifi_direct_service.dart
-│   ├── gps_service.dart
-│   ├── firebase_sync.dart
-│   └── storage_service.dart
+│   ├── auth_service.dart
+│   ├── database_service.dart
+│   ├── firebase_debug.dart
+│   ├── map_service.dart
+|   ├── message_sync_service.dart
+|   ├── p2p_service.dart
+|   └── settings_service.dart
 └── models/
-    ├── message.dart
-    └── location.dart
+    ├── message_model.dart
+    ├── user_model.dart
+    └── device_model.dart
 ```
 
 ---
