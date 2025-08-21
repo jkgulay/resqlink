@@ -6,6 +6,7 @@ import 'package:resqlink/services/p2p_service.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import 'package:provider/provider.dart';
 import 'services/settings_service.dart';
@@ -159,6 +160,120 @@ class SettingsPageState extends State<SettingsPage> {
       if (!mounted) return;
       _showMessage('Sync failed: $e', isDanger: true);
     }
+  }
+
+  Future<void> _forceRole(P2PRole role) async {
+    if (widget.p2pService == null) return;
+
+    try {
+      _showMessage(
+        'Forcing role to ${role.name.toUpperCase()}...',
+        isSuccess: false,
+      );
+
+      if (role == P2PRole.host) {
+        await widget.p2pService!.forceHostRole();
+      } else if (role == P2PRole.client) {
+        await widget.p2pService!.forceClientRole();
+      }
+
+      setState(() {}); // Refresh UI
+
+      if (!mounted) return;
+      _showMessage(
+        'Role forced to ${role.name.toUpperCase()}',
+        isSuccess: true,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Failed to force role: $e', isDanger: true);
+    }
+  }
+
+  Future<void> _clearForcedRole() async {
+    if (widget.p2pService == null) return;
+
+    try {
+      await widget.p2pService!.clearForcedRole();
+      setState(() {}); // Refresh UI
+
+      if (!mounted) return;
+      _showMessage('Returned to automatic role selection', isSuccess: true);
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Failed to clear forced role: $e', isDanger: true);
+    }
+  }
+
+  void _showNetworkStatusDialog() {
+    final info = widget.p2pService?.getConnectionInfo() ?? {};
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: ResQLinkTheme.cardDark,
+        title: Text(
+          'P2P Network Status',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildInfoRow('Role', info['role'] ?? 'None'),
+            _buildInfoRow(
+              'Connection',
+              info['isConnected'] == true ? 'Connected' : 'Disconnected',
+            ),
+            _buildInfoRow(
+              'Connected Devices',
+              '${info['connectedDevices'] ?? 0}',
+            ),
+            _buildInfoRow('Known Devices', '${info['knownDevices'] ?? 0}'),
+            _buildInfoRow(
+              'Emergency Mode',
+              info['emergencyMode'] == true ? 'On' : 'Off',
+            ),
+            _buildInfoRow(
+              'Socket Health',
+              info['socketHealthy'] == true ? 'Healthy' : 'Issues',
+            ),
+            _buildInfoRow('Failures', '${info['consecutiveFailures'] ?? 0}'),
+            if (info['isRoleForced'] == true)
+              _buildInfoRow(
+                'Forced Role',
+                info['forcedRole'] ?? 'Unknown',
+                color: ResQLinkTheme.orange,
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value, {Color? color}) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: Colors.white70)),
+          Text(
+            value,
+            style: TextStyle(
+              color: color ?? Colors.white,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _testNotifications() async {
@@ -518,114 +633,6 @@ class SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildRoleSelectionSection(SettingsService settings) {
-    return Card(
-      color: ResQLinkTheme.cardDark,
-      elevation: 2,
-      child: Column(
-        children: [
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(Icons.device_hub, color: ResQLinkTheme.orange),
-                SizedBox(width: 8),
-                Text(
-                  'Network Role Preference',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Choose how this device should behave in the P2P network:',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-          ),
-          SizedBox(height: 8),
-          _buildRoleOption(
-            'Auto',
-            null,
-            'Let the app decide automatically (Recommended)',
-          ),
-          _buildRoleOption('Host', 'host', 'Create a group for others to join'),
-          _buildRoleOption('Client', 'client', 'Connect to existing groups'),
-          SizedBox(height: 16),
-          if (widget.p2pService != null)
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: ResQLinkTheme.cardDark.withAlpha(128),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: ResQLinkTheme.orange.withAlpha(128),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.info_outline,
-                      color: ResQLinkTheme.orange,
-                      size: 16,
-                    ),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Current role: ${widget.p2pService!.currentRole.name.toUpperCase()}',
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRoleOption(String title, String? value, String description) {
-    // Fix the getter to access the actual preferred role
-    final currentPreferredRole = widget.p2pService
-        ?.getConnectionInfo()['preferredRole'];
-    final isSelected = currentPreferredRole == value;
-
-    return Card(
-      elevation: isSelected ? 2 : 0,
-      color: isSelected ? ResQLinkTheme.orange.withAlpha(51) : null,
-      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: ListTile(
-        title: Text(title, style: TextStyle(color: Colors.white)),
-        subtitle: Text(
-          description,
-          style: TextStyle(fontSize: 12, color: Colors.white70),
-        ),
-        leading: Radio<String?>(
-          value: value,
-          groupValue: currentPreferredRole, // ✅ FIX THIS
-          onChanged: (newValue) {
-            widget.p2pService?.setRolePreference(newValue);
-            setState(() {}); // Refresh UI
-          },
-          activeColor: ResQLinkTheme.orange,
-        ),
-        onTap: () {
-          widget.p2pService?.setRolePreference(value);
-          setState(() {}); // Refresh UI
-        },
-      ),
-    );
-  }
-
   Widget _buildConnectivitySection(SettingsService settings) {
     return Column(
       children: [
@@ -673,59 +680,299 @@ class SettingsPageState extends State<SettingsPage> {
                       : Colors.grey,
                 ),
                 trailing: Icon(Icons.info_outline, color: Colors.white54),
-                onTap: () {
-                  final info = widget.p2pService?.getConnectionInfo() ?? {};
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      backgroundColor: ResQLinkTheme.cardDark,
-                      title: Text(
-                        'P2P Status',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Role: ${info['role'] ?? 'None'}',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                          Text(
-                            'Connected Devices: ${info['connectedDevices'] ?? 0}',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                          Text(
-                            'Known Devices: ${info['knownDevices'] ?? 0}',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                          Text(
-                            'Emergency Mode: ${widget.p2pService?.emergencyMode == true ? 'On' : 'Off'}',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        ],
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: Text(
-                            'OK',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+                onTap: _showNetworkStatusDialog,
               ),
             ],
           ),
         ),
         SizedBox(height: 16),
-        // Add the role selection section here
-        _buildRoleSelectionSection(settings),
+        // Enhanced role selection with manual force options
+        _buildEnhancedRoleSection(settings),
+        SizedBox(height: 16),
+        // ✅ ADD: Connection mode section
+        _buildConnectionModeSection(settings),
       ],
     );
+  }
+
+  Widget _buildEnhancedRoleSection(SettingsService settings) {
+    final connectionInfo = widget.p2pService?.getConnectionInfo() ?? {};
+    final isRoleForced = connectionInfo['isRoleForced'] ?? false;
+    final forcedRole = connectionInfo['forcedRole'];
+    final currentRole = connectionInfo['role'] ?? 'none';
+
+    return Card(
+      color: ResQLinkTheme.cardDark,
+      elevation: 2,
+      child: Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.device_hub, color: ResQLinkTheme.orange),
+                SizedBox(width: 8),
+                Text(
+                  'Network Role Control',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Current status
+          Container(
+            margin: EdgeInsets.symmetric(horizontal: 16),
+            padding: EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isRoleForced
+                  ? ResQLinkTheme.orange.withAlpha(51)
+                  : ResQLinkTheme.cardDark.withAlpha(128),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isRoleForced
+                    ? ResQLinkTheme.orange.withAlpha(128)
+                    : Colors.grey.withAlpha(128),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      isRoleForced ? Icons.lock : Icons.auto_mode,
+                      color: isRoleForced ? ResQLinkTheme.orange : Colors.grey,
+                      size: 16,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      isRoleForced ? 'FORCED MODE' : 'AUTO MODE',
+                      style: TextStyle(
+                        color: isRoleForced
+                            ? ResQLinkTheme.orange
+                            : Colors.grey,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Current role: ${currentRole.toUpperCase()}',
+                  style: TextStyle(color: Colors.white, fontSize: 14),
+                ),
+                if (isRoleForced)
+                  Text(
+                    'Forced as: ${forcedRole?.toString().toUpperCase() ?? 'Unknown'}',
+                    style: TextStyle(color: ResQLinkTheme.orange, fontSize: 12),
+                  ),
+              ],
+            ),
+          ),
+
+          SizedBox(height: 16),
+
+          // Manual control buttons
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _forceRole(P2PRole.host),
+                        icon: Icon(Icons.wifi_tethering, size: 18),
+                        label: Text('Force HOST'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              (isRoleForced && forcedRole == 'host')
+                              ? ResQLinkTheme.orange
+                              : ResQLinkTheme.cardDark,
+                          foregroundColor: Colors.white,
+                          side: BorderSide(color: ResQLinkTheme.orange),
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _forceRole(P2PRole.client),
+                        icon: Icon(Icons.connect_without_contact, size: 18),
+                        label: Text('Force CLIENT'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              (isRoleForced && forcedRole == 'client')
+                              ? ResQLinkTheme.orange
+                              : ResQLinkTheme.cardDark,
+                          foregroundColor: Colors.white,
+                          side: BorderSide(color: ResQLinkTheme.orange),
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: isRoleForced ? _clearForcedRole : null,
+                    icon: Icon(Icons.auto_mode, size: 18),
+                    label: Text('Return to AUTO Mode'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isRoleForced
+                          ? Colors.grey.shade700
+                          : Colors.grey.shade800,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          SizedBox(height: 16),
+
+          // Help text
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              '• HOST: Creates a group for others to join\n'
+              '• CLIENT: Connects to existing groups\n'
+              '• AUTO: Let the app decide automatically\n\n'
+              'Use manual control when experiencing connection issues.',
+              style: TextStyle(color: Colors.white60, fontSize: 11),
+            ),
+          ),
+
+          SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConnectionModeSection(SettingsService settings) {
+    final connectionInfo = widget.p2pService?.getConnectionInfo() ?? {};
+    final currentMode = connectionInfo['connectionType'] ?? 'wifi_direct';
+
+    return Card(
+      color: ResQLinkTheme.cardDark,
+      elevation: 2,
+      child: Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.settings_input_antenna, color: ResQLinkTheme.orange),
+                SizedBox(width: 8),
+                Text(
+                  'Connection Mode',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // WiFi Direct option
+          RadioListTile<String>(
+            title: Text(
+              'WiFi Direct (Recommended)',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              'Direct device-to-device connection',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: 'wifi_direct',
+            groupValue: currentMode,
+            activeColor: ResQLinkTheme.orange,
+            onChanged: (value) => _setConnectionMode(value!),
+          ),
+
+          // Hotspot Fallback option
+          RadioListTile<String>(
+            title: Text(
+              'Hotspot Fallback',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              'Use WiFi hotspots when direct connection fails',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: 'hotspot_fallback',
+            groupValue: currentMode,
+            activeColor: ResQLinkTheme.orange,
+            onChanged: (value) => _setConnectionMode(value!),
+          ),
+
+          // Hybrid mode
+          RadioListTile<String>(
+            title: Text(
+              'Hybrid Mode (Auto)',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              'Try WiFi Direct first, fallback to hotspot if needed',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            value: 'hybrid',
+            groupValue: currentMode,
+            activeColor: ResQLinkTheme.orange,
+            onChanged: (value) => _setConnectionMode(value!),
+          ),
+
+          SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _setConnectionMode(String mode) async {
+    try {
+      // Save preference
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('connection_mode', mode);
+
+      // Apply to P2P service
+      if (widget.p2pService != null) {
+        switch (mode) {
+          case 'wifi_direct':
+            // ✅ FIX: Use public setter instead of private field
+            widget.p2pService!.setHotspotFallbackEnabled(false);
+          case 'hotspot_fallback':
+            widget.p2pService!.setHotspotFallbackEnabled(true);
+          case 'hybrid':
+            widget.p2pService!.setHotspotFallbackEnabled(
+              true,
+            ); // Will try WiFi Direct first
+        }
+      }
+
+      setState(() {});
+
+      if (!mounted) return;
+      _showMessage(
+        'Connection mode changed to: ${mode.replaceAll('_', ' ').toUpperCase()}',
+        isSuccess: true,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Failed to change connection mode: $e', isDanger: true);
+    }
   }
 
   Widget _buildLocationSection(SettingsService settings) {

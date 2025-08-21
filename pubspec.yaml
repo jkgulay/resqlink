@@ -21,7 +21,6 @@ dependencies:
   firebase_database: ^11.3.7 # For Firebase authentication
   cloud_firestore: ^5.6.9 # For Firebase Firestore (if needed)
   firebase_auth: ^5.6.0
-  wifi_iot: ^0.3.19
   wifi_direct_plugin: ^0.0.4
   permission_handler: ^12.0.1
   connectivity_plus: ^6.1.4
@@ -39,6 +38,8 @@ dependencies:
   flutter_map_tile_caching: ^10.1.1
   path_provider: ^2.1.5
   http: ^1.5.0
+  wifi_scan: ^0.4.1+2
+
 
 dev_dependencies:
   flutter_test:
