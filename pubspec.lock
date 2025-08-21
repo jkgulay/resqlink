@@ -1197,14 +1197,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.0.9"
-  wifi_iot:
+  wifi_scan:
     dependency: "direct main"
     description:
-      name: wifi_iot
-      sha256: "0861aed0c0afd6031b4337811d31cdd181c594a8a2c73e94826ea21d2cb4707b"
+      name: wifi_scan
+      sha256: "78896ea3db8838769053accd47cab02a62ead6480557e235295320603f84c9c7"
       url: "https://pub.dev"
     source: hosted
-    version: "0.3.19+2"
+    version: "0.4.1+2"
   win32:
     dependency: transitive
     description:

@@ -887,23 +887,29 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     String value, {
     Color? valueColor,
   }) {
+    final connectionInfo = widget.p2pService.getConnectionInfo();
+    final connectionType = connectionInfo['connectionType'] ?? 'wifi_direct';
+
     return Row(
       children: [
         Container(
           padding: EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Color(
-              0xFF1E3A5F,
-            ).withValues(alpha: 0.1), // Subtle blue background
+            color: Color(0xFF1E3A5F).withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(
-            icon,
-            size: 16,
-            color: Color(0xFF1E3A5F), // Dark blue icon
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: Color(0xFF1E3A5F)),
+              if (connectionType == 'hotspot') ...[
+                SizedBox(width: 4),
+                Icon(Icons.wifi_tethering, size: 12, color: Colors.orange),
+              ],
+            ],
           ),
         ),
-        const SizedBox(width: 12),
+        SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -912,18 +918,40 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                 label,
                 style: TextStyle(
                   fontSize: 12,
-                  color: Color(0xFF666666), // Medium grey for labels
+                  color: Color(0xFF666666),
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: TextStyle(
-                  color: valueColor ?? Color(0xFF0B192C), // Dark blue default
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
+              SizedBox(height: 2),
+              Row(
+                children: [
+                  Text(
+                    value,
+                    style: TextStyle(
+                      color: valueColor ?? Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  if (connectionType == 'hotspot') ...[
+                    SizedBox(width: 4),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Text(
+                        'HOTSPOT',
+                        style: TextStyle(
+                          fontSize: 8,
+                          color: Colors.orange,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ],
           ),
