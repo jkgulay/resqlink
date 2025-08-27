@@ -5,7 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/services/settings_service.dart';
 import 'package:resqlink/utils/responsive_text.dart';
-import 'package:resqlink/utils/resqlink_theme.dart' hide ResponsiveText, ResponsiveSpacing;
+import 'package:resqlink/utils/resqlink_theme.dart'
+    hide ResponsiveText, ResponsiveSpacing;
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
@@ -82,6 +83,12 @@ class _HomePageState extends State<HomePage>
     // Safely get the settings service reference here
     if (_settingsService == null) {
       _settingsService = context.read<SettingsService>();
+      // Load settings and apply them
+      _settingsService!.loadSettings().then((_) {
+        if (mounted) {
+          _onSettingsChanged(); // Apply settings to P2P service
+        }
+      });
       _settingsService!.addListener(_onSettingsChanged);
     }
   }
@@ -116,6 +123,18 @@ class _HomePageState extends State<HomePage>
       userName,
       preferredRole: preferredRole,
     );
+
+    final prefs = await SharedPreferences.getInstance();
+    final connectionMode = prefs.getString('connection_mode') ?? 'hybrid';
+    switch (connectionMode) {
+      case 'wifi_direct':
+        _p2pService.setHotspotFallbackEnabled(false);
+      case 'hotspot_fallback':
+        _p2pService.setHotspotFallbackEnabled(true);
+      case 'hybrid':
+      default:
+        _p2pService.setHotspotFallbackEnabled(true);
+    }
 
     if (success) {
       setState(() {
@@ -199,17 +218,30 @@ class _HomePageState extends State<HomePage>
 
     // Apply settings to P2P service
     if (_isP2PInitialized) {
-      // Update P2P service based on settings
-      if (!settings.multiHopEnabled) {
-        // Disable multi-hop features
+      // Update connection mode
+      final connectionMode = settings.connectionMode;
+      switch (connectionMode) {
+        case 'wifi_direct':
+          _p2pService.setHotspotFallbackEnabled(false);
+        case 'hotspot_fallback':
+          _p2pService.setHotspotFallbackEnabled(true);
+        case 'hybrid':
+        default:
+          _p2pService.setHotspotFallbackEnabled(true);
       }
 
+      // Update multi-hop setting
+      if (!settings.multiHopEnabled) {
+        // Disable multi-hop features if needed
+      }
+
+      // Update offline mode
       if (settings.offlineMode) {
         // Force offline mode
         _p2pService.emergencyMode = true;
       }
     }
-    setState(() {}); // Refresh UI
+    setState(() {}); // Refresh UI to show connection mode changes
   }
 
   void _showNotification(P2PMessage message) {
@@ -411,6 +443,14 @@ class _HomePageState extends State<HomePage>
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                Text(
+                  _p2pService.hotspotFallbackEnabled ? 'HYBRID' : 'DIRECT',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: isNarrowScreen ? 8 : 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ],
             ],
           ),
@@ -437,7 +477,7 @@ class _HomePageState extends State<HomePage>
                   (_p2pService.currentRole != P2PRole.none
                           ? Colors.green
                           : Colors.grey)
-                      .withValues(alpha: 0.3), // Fixed
+                      .withValues(alpha: 0.3),
               blurRadius: 4,
               offset: Offset(0, 2),
             ),
@@ -462,6 +502,20 @@ class _HomePageState extends State<HomePage>
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: isNarrowScreen ? 10 : 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+            // Show connection mode indicator
+            if (_settingsService != null) ...[
+              SizedBox(width: 4),
+              Text(
+                _getConnectionModeAbbreviation(
+                  _settingsService!.connectionMode,
+                ),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: isNarrowScreen ? 8 : 10,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -511,6 +565,18 @@ class _HomePageState extends State<HomePage>
     );
 
     return actions;
+  }
+
+  String _getConnectionModeAbbreviation(String mode) {
+    switch (mode) {
+      case 'wifi_direct':
+        return 'DIRECT';
+      case 'hotspot_fallback':
+        return 'HOTSPOT';
+      case 'hybrid':
+      default:
+        return 'HYBRID';
+    }
   }
 
   // UPDATED: Build method with responsive AppBar

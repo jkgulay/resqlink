@@ -6,7 +6,6 @@ import 'package:resqlink/services/p2p_service.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import 'package:provider/provider.dart';
 import 'services/settings_service.dart';
@@ -867,8 +866,8 @@ class SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildConnectionModeSection(SettingsService settings) {
-    final connectionInfo = widget.p2pService?.getConnectionInfo() ?? {};
-    final currentMode = connectionInfo['connectionType'] ?? 'wifi_direct';
+    // Get current mode from settings service instead of connection info
+    final currentMode = settings.connectionMode;
 
     return Card(
       color: ResQLinkTheme.cardDark,
@@ -949,17 +948,29 @@ class SettingsPageState extends State<SettingsPage> {
 
   Future<void> _setConnectionMode(String mode) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('connection_mode', mode);
+      // Update settings service first
+      await context.read<SettingsService>().setConnectionMode(mode);
 
       if (widget.p2pService != null) {
         switch (mode) {
           case 'wifi_direct':
             widget.p2pService!.setHotspotFallbackEnabled(false);
+            // Force restart discovery with WiFi Direct only
+            if (widget.p2pService!.isConnected) {
+              await widget.p2pService!.disconnect();
+            }
+            await widget.p2pService!.discoverDevices(force: true);
+
           case 'hotspot_fallback':
             widget.p2pService!.setHotspotFallbackEnabled(true);
+            // Force hotspot mode
+            await widget.p2pService!.hotspotManager.createResQLinkHotspot();
+
           case 'hybrid':
             widget.p2pService!.setHotspotFallbackEnabled(true);
+            // Use connection fallback manager
+            await widget.p2pService!.connectionFallbackManager
+                .initiateConnection();
         }
       }
 
