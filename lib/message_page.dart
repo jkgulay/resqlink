@@ -13,6 +13,10 @@ import 'dart:async';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
+import '../widgets/connection_status_widget.dart';
+import '../services/message_ack_service.dart';
+import '../services/signal_monitoring_service.dart';
+import '../services/emergency_recovery_service.dart';
 
 // Notification Service Class
 class NotificationService {
@@ -141,6 +145,10 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   // Services
   final MessageSyncService _syncService = MessageSyncService();
+  final MessageAcknowledgmentService _ackService =
+      MessageAcknowledgmentService();
+  final SignalMonitoringService _signalService = SignalMonitoringService();
+  final EmergencyRecoveryService _recoveryService = EmergencyRecoveryService();
 
   // State Variables
   List<MessageSummary> _conversations = [];
@@ -162,14 +170,16 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void _initialize() {
     _syncService.initialize();
     _loadConversations();
+    _ackService.initialize(widget.p2pService);
+    _signalService.startMonitoring(widget.p2pService);
+    _recoveryService.initialize(widget.p2pService, _signalService);
 
-    // Setup P2P listener with proper cleanup
-    _p2pSubscription = widget.p2pService.messageHistory.isNotEmpty
-        ? Stream.periodic(
-            const Duration(seconds: 1),
-          ).listen((_) => _onP2PUpdate())
-        : null;
+    // Start emergency recovery if emergency mode is on
+    if (widget.p2pService.emergencyMode) {
+      _recoveryService.startEmergencyRecovery();
+    }
 
+    // Fix: Proper P2P listener setup
     widget.p2pService.addListener(_onP2PUpdate);
     widget.p2pService.onMessageReceived = _onMessageReceived;
 
@@ -200,8 +210,30 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     _messageController.dispose();
     _scrollController.dispose();
 
-    // Dispose services
-    _syncService.dispose();
+    // Fix: Only call dispose on services that have this method
+    try {
+      _ackService.dispose();
+    } catch (e) {
+      debugPrint('⚠️ _ackService.dispose() not available');
+    }
+
+    try {
+      _signalService.dispose();
+    } catch (e) {
+      debugPrint('⚠️ _signalService.dispose() not available');
+    }
+
+    try {
+      _recoveryService.dispose();
+    } catch (e) {
+      debugPrint('⚠️ _recoveryService.dispose() not available');
+    }
+
+    try {
+      _syncService.dispose();
+    } catch (e) {
+      debugPrint('⚠️ _syncService.dispose() not available');
+    }
 
     // Remove observer
     WidgetsBinding.instance.removeObserver(this);
@@ -428,7 +460,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  // Message Sending Methods
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty || _selectedEndpointId == null || !mounted) return;
@@ -436,18 +467,33 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     _messageController.clear();
 
     try {
-      // Remove the unused messageId variable since we don't need it here
-      await _syncService.sendMessage(
-        endpointId: _selectedEndpointId!,
+      // Use acknowledgment service for reliable delivery
+      await _ackService.sendMessageWithAck(
+        widget.p2pService,
         message: text,
-        fromUser: widget.p2pService.userName ?? 'Unknown',
-        isEmergency: false,
-        messageType: MessageType.text,
-        p2pService: widget.p2pService,
+        type: MessageType.text,
+        targetDeviceId: _selectedEndpointId!,
       );
 
       if (mounted) {
         await _loadMessagesForDevice(_selectedEndpointId!);
+
+        // Show delivery status with mounted check
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.send, color: Colors.white, size: 16),
+                  SizedBox(width: 8),
+                  Text('Message sent - awaiting delivery confirmation'),
+                ],
+              ),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
       }
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
@@ -652,6 +698,10 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(_isChatView ? 'Chat Messages' : 'Emergency Messages'),
+          ConnectionStatusWidget(
+            p2pService: widget.p2pService,
+            showDetails: true,
+          ),
           Text(
             isConnected
                 ? 'Connected to $connectedCount device${connectedCount > 1 ? 's' : ''}'
@@ -923,13 +973,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   Widget _buildConversationItem(MessageSummary conversation) {
     final message = conversation.lastMessage;
-    final isEmergency =
-        message?.isEmergency ??
-        false || message?.type == 'emergency' || message?.type == 'sos';
+    final isEmergency = message?.isEmergency ?? false;
 
     return Card(
       color: ResQLinkTheme.cardDark,
-      margin: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      margin: ResponsiveSpacing.padding(context, vertical: 8, horizontal: 4),
       elevation: 4,
       child: ListTile(
         leading: CircleAvatar(
@@ -943,9 +991,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             color: Colors.white,
           ),
         ),
-        title: Text(
+        title: ResponsiveTextWidget(
           conversation.deviceName,
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          styleBuilder: (context) => ResponsiveText.bodyLarge(
+            context,
+          ).copyWith(fontWeight: FontWeight.bold),
+          maxLines: 1,
+          textAlign: TextAlign.start,
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -954,44 +1006,50 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
+                    child: ResponsiveTextWidget(
                       message.message,
+                      styleBuilder: (context) => ResponsiveText.bodyMedium(
+                        context,
+                      ).copyWith(color: Colors.white70),
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.white70),
+                      textAlign: TextAlign.start,
                     ),
                   ),
-                  SizedBox(width: 8),
+                  SizedBox(width: ResponsiveSpacing.xs(context)),
                   _buildMessageStatusIcon(message.status),
                 ],
               ),
-              SizedBox(height: 4),
+              SizedBox(height: ResponsiveSpacing.xs(context)),
             ],
-            Text(
+            ResponsiveTextWidget(
               message != null
                   ? _formatFullDateTime(message.dateTime)
                   : 'No messages available',
-              style: TextStyle(fontSize: 12, color: Colors.white54),
+              styleBuilder: (context) => ResponsiveText.caption(
+                context,
+              ).copyWith(color: Colors.white54),
+              maxLines: 1,
+              textAlign: TextAlign.start,
             ),
           ],
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (conversation.unreadCount > 0)
-              Container(
-                padding: EdgeInsets.all(6),
+        trailing: conversation.unreadCount > 0
+            ? Container(
+                padding: ResponsiveSpacing.padding(context, all: 6),
                 decoration: BoxDecoration(
                   color: ResQLinkTheme.primaryRed,
                   shape: BoxShape.circle,
                 ),
-                child: Text(
+                child: ResponsiveTextWidget(
                   '${conversation.unreadCount}',
-                  style: TextStyle(color: Colors.white, fontSize: 12),
+                  styleBuilder: (context) => ResponsiveText.caption(
+                    context,
+                  ).copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+                  maxLines: 1,
+                  textAlign: TextAlign.center,
                 ),
-              ),
-          ],
-        ),
+              )
+            : null,
         onTap: () => _openConversation(conversation.endpointId),
       ),
     );

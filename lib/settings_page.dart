@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import 'package:provider/provider.dart';
 import 'services/settings_service.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class SettingsPage extends StatefulWidget {
   final P2PConnectionService? p2pService;
@@ -488,14 +489,20 @@ class SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: EdgeInsets.only(bottom: 12),
-      child: Text(
+      padding: ResponsiveSpacing.padding(context, bottom: 12),
+      child: ResponsiveTextWidget(
         title,
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: ResQLinkTheme.orange,
-        ),
+        styleBuilder: (context) {
+          final scale = MediaQuery.of(context).size.width < 600 ? 1.0 : 1.2;
+          return GoogleFonts.rajdhani(
+            fontSize: 18 * scale,
+            fontWeight: FontWeight.w700,
+            color: ResQLinkTheme.orange,
+            letterSpacing: 0.5,
+          );
+        },
+        maxLines: 1,
+        textAlign: TextAlign.start,
       ),
     );
   }
@@ -505,25 +512,24 @@ class SettingsPageState extends State<SettingsPage> {
       color: ResQLinkTheme.cardDark,
       elevation: 4,
       child: Padding(
-        padding: EdgeInsets.all(16),
+        padding: ResponsiveSpacing.padding(context, all: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Icon(Icons.analytics, color: ResQLinkTheme.orange),
-                SizedBox(width: 8),
-                Text(
+                SizedBox(width: ResponsiveSpacing.xs(context)),
+                // FIXED: Use ResponsiveTextWidget instead of ResponsiveText
+                ResponsiveTextWidget(
                   'App Statistics',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
+                  styleBuilder: (context) => ResponsiveText.heading3(context),
+                  maxLines: 1,
+                  textAlign: TextAlign.start,
                 ),
               ],
             ),
-            SizedBox(height: 16),
+            SizedBox(height: ResponsiveSpacing.md(context)),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
@@ -550,19 +556,19 @@ class SettingsPageState extends State<SettingsPage> {
     return Column(
       children: [
         Icon(icon, color: ResQLinkTheme.orange, size: 24),
-        SizedBox(height: 4),
-        Text(
+        SizedBox(height: ResponsiveSpacing.xs(context)),
+        ResponsiveTextWidget(
           value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-        Text(
-          label,
-          style: TextStyle(fontSize: 12, color: Colors.white70),
+          styleBuilder: (context) => ResponsiveText.heading3(context),
+          maxLines: 1,
           textAlign: TextAlign.center,
+        ),
+        ResponsiveTextWidget(
+          label,
+          styleBuilder: (context) =>
+              ResponsiveText.caption(context).copyWith(color: Colors.white70),
+          textAlign: TextAlign.center,
+          maxLines: 2,
         ),
       ],
     );
@@ -943,22 +949,17 @@ class SettingsPageState extends State<SettingsPage> {
 
   Future<void> _setConnectionMode(String mode) async {
     try {
-      // Save preference
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('connection_mode', mode);
 
-      // Apply to P2P service
       if (widget.p2pService != null) {
         switch (mode) {
           case 'wifi_direct':
-            // ✅ FIX: Use public setter instead of private field
             widget.p2pService!.setHotspotFallbackEnabled(false);
           case 'hotspot_fallback':
             widget.p2pService!.setHotspotFallbackEnabled(true);
           case 'hybrid':
-            widget.p2pService!.setHotspotFallbackEnabled(
-              true,
-            ); // Will try WiFi Direct first
+            widget.p2pService!.setHotspotFallbackEnabled(true);
         }
       }
 
