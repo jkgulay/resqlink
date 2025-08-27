@@ -13,8 +13,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 import 'package:flutter/services.dart';
+import 'queued_message.dart';
+import 'hotspot_manager.dart';
+import 'connection_fallback.dart';
+import 'emergency_connection.dart';
 
 class P2PConnectionService with ChangeNotifier {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CONSTANTS
+  // ═══════════════════════════════════════════════════════════════════════════
+
   static const String serviceType = "_resqlink._tcp";
   static const Duration messageExpiry = Duration(hours: 24);
   static const String emergencyPassword = "RESQLINK911";
@@ -22,8 +30,51 @@ class P2PConnectionService with ChangeNotifier {
   static const int maxTtl = 5;
   static const String hotspotPrefix = "ResQLink_";
   static const String hotspotPassword = "RESQLINK911";
-  String? get connectedHotspotSSID => _connectedHotspotSSID;
   static const MethodChannel _wifiChannel = MethodChannel('resqlink/wifi');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MANAGER INSTANCES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  late EnhancedMessageQueue _messageQueue;
+  late HotspotManager _hotspotManager;
+  late ConnectionFallbackManager _connectionFallbackManager;
+  late EmergencyConnectionManager _emergencyConnectionManager;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STATE VARIABLES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Singleton instance
+  static P2PConnectionService? _instance;
+
+  // Device identity and role
+  String? _deviceId;
+  String? _userName;
+  P2PRole _currentRole = P2PRole.none;
+  String? _preferredRole; // 'host' or 'client'
+
+  // Connection state management
+  bool _isDiscovering = false;
+  bool _isDisposed = false;
+  bool _isConnecting = false;
+  bool _isConnected = false;
+  bool _isGroupOwner = false;
+  bool _isOnline = false;
+  DateTime? _lastDiscoveryTime;
+  String? _groupOwnerAddress;
+
+  // Role management
+  bool _allowRoleSwitching = true;
+  bool _forceRoleMode = false;
+  P2PRole? _forcedRole;
+  Timer? _roleDecisionTimer;
+
+  // Emergency mode
+  bool _emergencyMode = false;
+  Timer? _autoConnectTimer;
+  Timer? _discoveryTimer;
+  Timer? _heartbeatTimer;
 
   // Hotspot fallback state
   bool _hotspotFallbackEnabled = false;
@@ -31,99 +82,24 @@ class P2PConnectionService with ChangeNotifier {
   List<WiFiAccessPoint> _availableHotspots = [];
   String? _connectedHotspotSSID;
 
-  bool get hotspotFallbackEnabled => _hotspotFallbackEnabled;
-
-  void setHotspotFallbackEnabled(bool enabled) {
-    _hotspotFallbackEnabled = enabled;
-    debugPrint("🔧 Hotspot fallback ${enabled ? 'enabled' : 'disabled'}");
-    notifyListeners();
-  }
-
-  // Connection state management
-  bool _isDiscovering = false;
-  bool _isDisposed = false;
-  bool _isConnecting = false;
-  DateTime? _lastDiscoveryTime;
-  String? _preferredRole; // 'host' or 'client'
-
-  // Device identity and role
-  String? _deviceId;
-  String? _userName;
-  P2PRole _currentRole = P2PRole.none;
-
-  bool _allowRoleSwitching = true;
-  Timer? _roleDecisionTimer;
-
-  // Singleton instance
-  static P2PConnectionService? _instance;
-
-  factory P2PConnectionService() {
-    if (_instance == null || _instance!._isDisposed) {
-      _instance = P2PConnectionService._internal();
-    }
-    return _instance!;
-  }
-
-  P2PConnectionService._internal();
-
-  // Add reset method for clean recreation
-  static void reset() {
-    _instance?.dispose();
-    _instance = null;
-  }
-
-  @override
-  void notifyListeners() {
-    if (!_isDisposed) {
-      super.notifyListeners();
-    }
-  }
-
-  // Socket keep-alive management
-  Timer? _keepAliveTimer;
-  Timer? _connectionWatchdog;
-  int _consecutiveFailures = 0;
-  static const int _maxFailures = 3;
-  static const Duration _keepAliveInterval = Duration(seconds: 10);
-  static const Duration _connectionTimeout = Duration(seconds: 30);
-
-  // Socket health monitoring
-  bool _socketHealthy = true;
-  DateTime? _lastSuccessfulPing;
-  int _pingSequence = 0;
-  final Map<int, DateTime> _pendingPings = {};
-
-  // Manual role forcing
-  bool _forceRoleMode = false;
-  P2PRole? _forcedRole;
-
   // Network state
   final Map<String, ConnectedDevice> _connectedDevices = {};
   final Map<String, DeviceCredentials> _knownDevices = {};
   final Map<String, Map<String, dynamic>> _discoveredDevices = {};
-  bool _isConnected = false;
-  bool _isGroupOwner = false;
-  String? _groupOwnerAddress;
 
-  // Emergency mode with better control
-  bool _emergencyMode = false;
-  Timer? _autoConnectTimer;
-  Timer? _discoveryTimer;
-  Timer? _heartbeatTimer;
-
-  // Emergency mode toggle with better control
-  bool get emergencyMode => _emergencyMode;
-  set emergencyMode(bool value) {
-    if (_emergencyMode != value) {
-      _emergencyMode = value;
-      if (value) {
-        _startEmergencyMode();
-      } else {
-        _stopEmergencyMode();
-      }
-      notifyListeners();
-    }
-  }
+  // Socket management
+  Timer? _keepAliveTimer;
+  Timer? _connectionWatchdog;
+  Timer? _connectionHealthTimer;
+  bool _socketHealthy = true;
+  DateTime? _lastSuccessfulPing;
+  DateTime? _lastPongTime;
+  int _pingSequence = 0;
+  int _consecutiveFailures = 0;
+  final Map<int, DateTime> _pendingPings = {};
+  static const int _maxFailures = 3;
+  static const Duration _keepAliveInterval = Duration(seconds: 10);
+  static const Duration _connectionTimeout = Duration(seconds: 30);
 
   // Message handling
   final Set<String> _processedMessageIds = {};
@@ -138,41 +114,166 @@ class P2PConnectionService with ChangeNotifier {
   StreamSubscription? _connectionChangeSubscription;
   StreamSubscription? _connectivitySubscription;
 
-  // Connectivity
-  bool _isOnline = false;
+  // TCP sockets
+  ServerSocket? _hotspotServer;
+  Socket? _hotspotSocket;
+  final Map<String, Socket> _deviceSockets = {};
 
-  // Callbacks
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SINGLETON PATTERN
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  factory P2PConnectionService() {
+    if (_instance == null || _instance!._isDisposed) {
+      _instance = P2PConnectionService._internal();
+    }
+    return _instance!;
+  }
+
+  P2PConnectionService._internal();
+
+  static void reset() {
+    _instance?.dispose();
+    _instance = null;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CALLBACKS
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Function(P2PMessage message)? onMessageReceived;
   Function(String deviceId, String userName)? onDeviceConnected;
   Function(String deviceId)? onDeviceDisconnected;
   Function(List<Map<String, dynamic>> devices)? onDevicesDiscovered;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GETTERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Hotspot state getters
+  bool get hotspotFallbackEnabled => _hotspotFallbackEnabled;
+  String? get connectedHotspotSSID => _connectedHotspotSSID;
+
+  // Emergency mode getter/setter
+  bool get emergencyMode => _emergencyMode;
+  set emergencyMode(bool value) {
+    if (_emergencyMode != value) {
+      _emergencyMode = value;
+      if (value) {
+        _startEmergencyMode();
+        _emergencyConnectionManager.startEmergencyMonitoring();
+      } else {
+        _stopEmergencyMode();
+        _emergencyConnectionManager.stopEmergencyMonitoring();
+      }
+      notifyListeners();
+    }
+  }
+
+  // Role management getters
+  bool get isRoleForced => _forceRoleMode;
+  P2PRole? get forcedRole => _forcedRole;
+
+  // Manager getters
+  EnhancedMessageQueue get messageQueue => _messageQueue;
+  HotspotManager get hotspotManager => _hotspotManager;
+  ConnectionFallbackManager get connectionFallbackManager =>
+      _connectionFallbackManager;
+  EmergencyConnectionManager get emergencyConnectionManager =>
+      _emergencyConnectionManager;
+
+  // State getters
+  bool get isDiscovering => _isDiscovering;
+  bool get isConnecting => _isConnecting;
+  bool get isConnected => _isConnected;
+  bool get isGroupOwner => _isGroupOwner;
+  bool get isOnline => _isOnline;
+  String? get deviceId => _deviceId;
+  String? get userName => _userName;
+  P2PRole get currentRole => _currentRole;
+  String? get groupOwnerAddress => _groupOwnerAddress;
+
+  // Collection getters
+  Map<String, ConnectedDevice> get connectedDevices =>
+      Map.from(_connectedDevices);
+  Map<String, DeviceCredentials> get knownDevices => Map.from(_knownDevices);
+  Map<String, Map<String, dynamic>> get discoveredDevices =>
+      Map.from(_discoveredDevices);
+  List<P2PMessage> get messageHistory => List.from(_messageHistory);
+
   List<Map<String, dynamic>> getAvailableHotspots() {
     return _availableHotspots
         .map(
           (hotspot) => {
             'ssid': hotspot.ssid,
-            'signalLevel': hotspot.level,
-            'frequency': hotspot.frequency,
             'bssid': hotspot.bssid,
+            'level': hotspot.level,
+            'frequency': hotspot.frequency,
             'capabilities': hotspot.capabilities,
           },
         )
         .toList();
   }
 
-  // Initialize service with role preference
+  // ═══════════════════════════════════════════════════════════════════════════
+  // INITIALIZATION
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Future<bool> initialize(String userName, {String? preferredRole}) async {
     try {
       _userName = userName;
       _deviceId = _generateDeviceId(userName);
       _preferredRole = preferredRole;
 
-      debugPrint(
-        "🚀 Initializing P2P Service for: $_userName (ID: $_deviceId)",
+      // Initialize managers with corrected function signatures
+      _messageQueue = EnhancedMessageQueue(sendToDevice: _sendToDevice);
+
+      _hotspotManager = HotspotManager(
+        wifiChannel: _wifiChannel,
+        deviceId: _deviceId,
+        startHotspotTcpServer: _startHotspotTcpServer,
+        connectToHotspotTcpServer: (ssid) =>
+            _connectToHotspotTcpServer({'ssid': ssid}),
+        setCurrentRole: (role) {
+          _currentRole = role == 'host' ? P2PRole.host : P2PRole.client;
+          notifyListeners();
+        },
       );
 
-    await _setupPlatformChannels();
-    
+      _connectionFallbackManager = ConnectionFallbackManager(
+        performDiscoveryScan: _performDiscoveryScan,
+        connectToAvailableDevice: _connectToAvailableDevice,
+        scanForResQLinkHotspots: _hotspotManager.scanForResQLinkHotspots,
+        connectToResQLinkHotspot: _hotspotManager.connectToResQLinkHotspot,
+        createResQLinkHotspot: _hotspotManager.createResQLinkHotspot,
+        getDiscoveredDevices: () => _discoveredDevices,
+        isConnected: () => _isConnected,
+        onConnectionModeChanged: (mode) {
+          debugPrint("🔗 Connection mode changed to: $mode");
+          notifyListeners();
+        },
+        onConnectionFailed: () {
+          debugPrint("❌ All connection attempts failed");
+          notifyListeners();
+        },
+      );
+
+      _emergencyConnectionManager = EmergencyConnectionManager(
+        isConnected: () => _isConnected,
+        isEmergencyMode: () => _emergencyMode,
+        sendEmergencyPing: _sendKeepAlivePing,
+        attemptEmergencyReconnection: () =>
+            _connectionFallbackManager.initiateConnection(),
+        createResQLinkHotspot: _hotspotManager.createResQLinkHotspot,
+        broadcastEmergencyBeacon: _broadcastEmergencyBeacon,
+        handleEmergencyConnectionLoss:
+            _handleTcpConnectionLoss, 
+      );
+      // Load pending messages
+      await _messageQueue.loadPendingMessages();
+
+      await _setupPlatformChannels();
+
       bool success = await WifiDirectPlugin.initialize();
       if (!success) {
         debugPrint("❌ Failed to initialize WiFi Direct");
@@ -182,13 +283,11 @@ class P2PConnectionService with ChangeNotifier {
       // Setup WiFi Direct event listeners
       _setupWifiDirectListeners();
 
-      // Start cleanup timers
+      // Start timers and monitoring
       _startMessageCleanup();
       _startHeartbeat();
       _startReconnectTimer();
       _startConnectionHealthMonitoring();
-
-      // Monitor connectivity
       _monitorConnectivity();
 
       // Load known devices and pending messages
@@ -201,6 +300,49 @@ class P2PConnectionService with ChangeNotifier {
     } catch (e) {
       debugPrint("❌ P2P initialization error: $e");
       return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HELPER METHODS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  void setHotspotFallbackEnabled(bool enabled) {
+    _hotspotFallbackEnabled = enabled;
+    debugPrint("🔧 Hotspot fallback ${enabled ? 'enabled' : 'disabled'}");
+    notifyListeners();
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
+  }
+
+  String _generateDeviceId(String userName) {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final hash = md5.convert(utf8.encode('$userName$timestamp')).toString();
+    return hash.substring(0, 16);
+  }
+
+  Future<void> _broadcastEmergencyBeacon() async {
+    try {
+      final beaconMessage = P2PMessage(
+        id: _generateMessageId(),
+        senderId: _deviceId!,
+        senderName: _userName!,
+        message: "🚨 EMERGENCY BEACON - Device seeking assistance",
+        type: MessageType.emergency,
+        timestamp: DateTime.now(),
+        ttl: maxTtl,
+        routePath: [_deviceId!],
+      );
+
+      await _broadcastMessage(beaconMessage);
+      debugPrint("📡 Emergency beacon broadcasted");
+    } catch (e) {
+      debugPrint("❌ Failed to broadcast emergency beacon: $e");
     }
   }
 
@@ -372,10 +514,6 @@ class P2PConnectionService with ChangeNotifier {
     // You can emit an error event here for the UI to show
     // Or use a callback if needed
   }
-
-  // Check if role is currently forced
-  bool get isRoleForced => _forceRoleMode;
-  P2PRole? get forcedRole => _forcedRole;
 
   Future<void> _makeRoleDecision() async {
     // Check if role is forced
@@ -657,9 +795,6 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Add periodic connection health check
-  Timer? _connectionHealthTimer;
-
   void _startConnectionHealthMonitoring() {
     _connectionHealthTimer?.cancel();
     _connectionHealthTimer = Timer.periodic(Duration(seconds: 30), (timer) {
@@ -698,13 +833,6 @@ class P2PConnectionService with ChangeNotifier {
         _gracefulDisconnect().then((_) => discoverDevices(force: true));
       }
     }
-  }
-
-  // Cleanup and utilities
-  String _generateDeviceId(String userName) {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final hash = md5.convert(utf8.encode('$userName$timestamp')).toString();
-    return hash.substring(0, 16);
   }
 
   // Check and request permissions
@@ -794,22 +922,42 @@ class P2PConnectionService with ChangeNotifier {
     if (_isDisposed) return;
 
     try {
-      debugPrint("Starting WiFi Direct discovery scan...");
+      debugPrint("🔍 Starting WiFi Direct discovery...");
+      _isDiscovering = true;
 
-      // Clear old discoveries
-      _discoveredDevices.clear();
-
-      // Start WiFi Direct discovery
+      // ISSUE: Too aggressive discovery
       bool success = await WifiDirectPlugin.startDiscovery();
-      if (!success) {
-        debugPrint("Failed to start discovery");
-      } else {
-        _isDiscovering = true;
-        debugPrint("WiFi Direct discovery scan initiated");
+
+      if (success) {
+        // CRITICAL: Add proper timeout and retry logic
+        Timer(Duration(seconds: 15), () async {
+          // Increased from unclear timeout
+          if (_isDiscovering) {
+            await WifiDirectPlugin.stopDiscovery();
+            _isDiscovering = false;
+
+            // Auto-retry if no devices found and emergency mode is on
+            if (_discoveredDevices.isEmpty && _emergencyMode) {
+              debugPrint("🔄 No devices found, retrying in 5 seconds...");
+              Timer(Duration(seconds: 5), () => _performDiscoveryScan());
+            }
+          }
+        });
       }
     } catch (e) {
-      debugPrint("Discovery scan error: $e");
+      debugPrint("❌ Discovery error: $e");
+      _isDiscovering = false;
+      // MISSING: Automatic fallback to hotspot mode
+      if (_emergencyMode && !_hotspotFallbackEnabled) {
+        _fallbackToHotspotMode();
+      }
     }
+  }
+
+  Future<void> _fallbackToHotspotMode() async {
+    debugPrint("🔄 WiFi Direct failed, falling back to hotspot mode");
+    setHotspotFallbackEnabled(true);
+    await _hotspotManager.createResQLinkHotspot();
   }
 
   Future<void> createEmergencyGroup() async {
@@ -834,7 +982,7 @@ class P2PConnectionService with ChangeNotifier {
         debugPrint("✅ Emergency WiFi Direct group created");
       } else {
         debugPrint("⚠️ WiFi Direct failed, creating hotspot fallback...");
-        await _createResQLinkHotspot();
+        await _hotspotManager.createResQLinkHotspot(); // ✅ Use manager
       }
 
       notifyListeners();
@@ -843,7 +991,7 @@ class P2PConnectionService with ChangeNotifier {
 
       // Final fallback - create hotspot
       try {
-        await _createResQLinkHotspot();
+        await _hotspotManager.createResQLinkHotspot(); // ✅ Use manager
       } catch (hotspotError) {
         debugPrint('❌ Hotspot fallback also failed: $hotspotError');
         rethrow;
@@ -1068,9 +1216,6 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // TCP server for hotspot mode
-  ServerSocket? _hotspotServer;
-
   Future<void> _startHotspotTcpServer() async {
     try {
       _hotspotServer = await ServerSocket.bind(InternetAddress.anyIPv4, 8888);
@@ -1255,8 +1400,6 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  Socket? _hotspotSocket;
-
   void _startHotspotKeepAlive(Socket socket) {
     _hotspotSocket = socket;
 
@@ -1380,9 +1523,8 @@ class P2PConnectionService with ChangeNotifier {
     };
   }
 
-  DateTime? _lastPongTime;
-
-  void _handleTcpConnectionLoss() {
+  Future<void> _handleTcpConnectionLoss() async {
+    // ✅ Changed from void to Future<void>
     debugPrint("💔 Handling TCP connection loss");
 
     // TCP connection lost - this could be due to:
@@ -1398,10 +1540,11 @@ class P2PConnectionService with ChangeNotifier {
 
     // In emergency mode, try to re-establish WiFi Direct group
     if (_emergencyMode && !_isDisposed) {
-      Timer(Duration(seconds: 2), () {
+      Timer(Duration(seconds: 2), () async {
+        // ✅ Made callback async
         if (!_isConnected && !_isConnecting) {
           debugPrint("🔄 Attempting to re-establish WiFi Direct connection");
-          discoverDevices(force: true);
+          await discoverDevices(force: true); // ✅ Added await
           _scheduleRoleDecision();
         }
       });
@@ -1559,10 +1702,8 @@ class P2PConnectionService with ChangeNotifier {
 
   void _handleSocketSuspectedDead() {
     debugPrint("💀 TCP socket suspected dead, attempting recovery");
-
     _socketHealthy = false;
     _pendingPings.clear();
-
     // Force disconnect and attempt reconnection
     _handleTcpConnectionLoss();
   }
@@ -1762,12 +1903,11 @@ class P2PConnectionService with ChangeNotifier {
         };
       }
 
-      // If no ResQLink hotspots found, create our own
       if (_availableHotspots.isEmpty) {
         debugPrint("📶 No ResQLink hotspots found, creating our own...");
         Timer(Duration(seconds: 2), () async {
           if (_discoveredDevices.isEmpty && _hotspotFallbackEnabled) {
-            await _createResQLinkHotspot();
+            await _hotspotManager.createResQLinkHotspot(); // ✅ Use manager
           }
         });
       }
@@ -1775,38 +1915,6 @@ class P2PConnectionService with ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint("❌ Hotspot discovery error: $e");
-    }
-  }
-
-  Future<void> _createResQLinkHotspot() async {
-    try {
-      final hotspotName =
-          "$hotspotPrefix${_userName}_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
-
-      debugPrint("📶 Creating ResQLink hotspot: $hotspotName");
-
-      // Start TCP server on hotspot
-      await _startHotspotTcpServer();
-
-      // Update role
-      _currentRole = P2PRole.host;
-      _connectedHotspotSSID = hotspotName;
-
-      // Add ourselves as a "discovered" hotspot device for UI purposes
-      _discoveredDevices[hotspotName] = {
-        'deviceName': hotspotName,
-        'deviceAddress': hotspotName,
-        'status': 0, // Available
-        'isAvailable': true,
-        'discoveredAt': DateTime.now().millisecondsSinceEpoch,
-        'connectionType': 'hotspot',
-        'isHost': true,
-      };
-
-      debugPrint("✅ ResQLink hotspot created: $hotspotName");
-      notifyListeners();
-    } catch (e) {
-      debugPrint("❌ Failed to create hotspot: $e");
     }
   }
 
@@ -1912,8 +2020,6 @@ class P2PConnectionService with ChangeNotifier {
       longitude: position?.longitude,
     );
   }
-
-  final Map<String, Socket> _deviceSockets = {};
 
   Future<void> _sendToDevice(String deviceId, String message) async {
     final socket = _deviceSockets[deviceId];
@@ -2426,10 +2532,19 @@ class P2PConnectionService with ChangeNotifier {
     _messageCleanupTimer?.cancel();
     _syncTimer?.cancel();
     _reconnectTimer?.cancel();
+    _keepAliveTimer?.cancel();
+    _connectionWatchdog?.cancel();
+    _connectionHealthTimer?.cancel();
+    _roleDecisionTimer?.cancel();
 
-    // Close hotspot server
+    // Dispose managers
+    _emergencyConnectionManager.dispose();
+    _messageQueue.clearAllQueues();
+
+    // Close sockets
     await _hotspotServer?.close();
     _hotspotServer = null;
+    _hotspotSocket = null;
 
     // Cancel subscriptions
     await _peersChangeSubscription?.cancel();
@@ -2447,23 +2562,6 @@ class P2PConnectionService with ChangeNotifier {
     debugPrint("✅ P2P service disposed");
     super.dispose();
   }
-
-  // Getters
-  bool get isDiscovering => _isDiscovering;
-  bool get isConnecting => _isConnecting;
-  Map<String, ConnectedDevice> get connectedDevices =>
-      Map.from(_connectedDevices);
-  Map<String, DeviceCredentials> get knownDevices => Map.from(_knownDevices);
-  Map<String, Map<String, dynamic>> get discoveredDevices =>
-      Map.from(_discoveredDevices);
-  List<P2PMessage> get messageHistory => List.from(_messageHistory);
-  String? get deviceId => _deviceId;
-  String? get userName => _userName;
-  P2PRole get currentRole => _currentRole;
-  bool get isOnline => _isOnline;
-  bool get isConnected => _isConnected;
-  bool get isGroupOwner => _isGroupOwner;
-  String? get groupOwnerAddress => _groupOwnerAddress;
 }
 
 // Keep all your existing enums and classes...
@@ -2626,6 +2724,18 @@ class DeviceCredentials {
       lastSeen: DateTime.fromMillisecondsSinceEpoch(json['lastSeen']),
     );
   }
+}
+
+class QueuedMessage {
+  final P2PMessage message;
+  final DateTime timestamp;
+  int retryCount;
+
+  QueuedMessage({
+    required this.message,
+    required this.timestamp,
+    this.retryCount = 0,
+  });
 }
 
 class PendingMessage {

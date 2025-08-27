@@ -1810,6 +1810,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     );
   }
 
+  // In your home_page.dart, update the connection button method:
   Future<void> _startUnifiedScan() async {
     setState(() {
       _isScanning = true;
@@ -1818,10 +1819,12 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
 
     try {
       await widget.p2pService.checkAndRequestPermissions();
-      await widget.p2pService.discoverDevices(force: true);
 
-      // Auto-stop scanning after 10 seconds
-      Timer(Duration(seconds: 10), () {
+      // Use the connection fallback manager
+      await widget.p2pService.connectionFallbackManager.initiateConnection();
+
+      // Auto-stop scanning after 15 seconds
+      Timer(Duration(seconds: 15), () {
         if (mounted && _isScanning) {
           setState(() {
             _isScanning = false;
@@ -1834,13 +1837,13 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
           SnackBar(
             content: Row(
               children: [
-                Icon(Icons.radar, color: Colors.white, size: 18),
+                Icon(Icons.network_check, color: Colors.white, size: 18),
                 SizedBox(width: 8),
-                Text('Network scan initiated'),
+                Text('Smart connection initiated (WiFi Direct + Hotspot)'),
               ],
             ),
             backgroundColor: Colors.blue,
-            duration: Duration(seconds: 2),
+            duration: Duration(seconds: 3),
           ),
         );
       }
@@ -1851,7 +1854,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Scan failed: $e'),
+            content: Text('Connection failed: $e'),
             backgroundColor: Colors.red,
           ),
         );
