@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/services/settings_service.dart';
+import 'package:resqlink/utils/responsive_text.dart';
+import 'package:resqlink/utils/resqlink_theme.dart' hide ResponsiveText, ResponsiveSpacing;
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
@@ -338,7 +341,7 @@ class _HomePageState extends State<HomePage>
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Logo with size adjustment
+        // Logo with responsive sizing
         Image.asset(
           'assets/1.png',
           height: isNarrowScreen ? 24 : 30,
@@ -348,18 +351,17 @@ class _HomePageState extends State<HomePage>
             color: Colors.white,
           ),
         ),
-        SizedBox(width: isNarrowScreen ? 6 : 8),
-        // App title with responsive sizing - Remove nested Flexible
-        ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 150), // Set a max width instead
+        SizedBox(width: ResponsiveSpacing.xs(context)),
+        Flexible(
           child: Text(
             "ResQLink",
-            style: TextStyle(
-              fontFamily: 'Ubuntu',
-              fontWeight: FontWeight.bold,
+            style: GoogleFonts.rajdhani(
               fontSize: isNarrowScreen ? 16 : 20,
+              fontWeight: FontWeight.w700,
               color: Colors.white,
+              letterSpacing: 0.5,
             ),
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
@@ -820,7 +822,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
       color: widget.p2pService.emergencyMode ? Colors.red.shade900 : null,
       elevation: 4,
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: ResponsiveSpacing.padding(context, all: 16),
         child: Column(
           children: [
             Row(
@@ -839,22 +841,23 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                             Icons.emergency,
                             color: widget.p2pService.emergencyMode
                                 ? Colors.white
-                                : Colors.red,
-                            size: 30,
+                                : ResQLinkTheme.primaryRed,
+                            size: ResponsiveSpacing.lg(context),
                           ),
                         );
                       },
                     ),
-                    const SizedBox(width: 12),
-                    Text(
+                    SizedBox(width: ResponsiveSpacing.sm(context)),
+                    ResponsiveTextWidget(
                       'Emergency Mode',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: widget.p2pService.emergencyMode
-                            ? Colors.white
-                            : null,
-                      ),
+                      styleBuilder: (context) =>
+                          ResQLinkTheme.emergencyTitle(context).copyWith(
+                            color: widget.p2pService.emergencyMode
+                                ? Colors.white
+                                : ResQLinkTheme.primaryRed,
+                          ),
+                      maxLines: 1,
+                      textAlign: TextAlign.start,
                     ),
                   ],
                 ),
@@ -867,11 +870,14 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
               ],
             ),
             if (widget.p2pService.emergencyMode) ...[
-              const SizedBox(height: 12),
-              Text(
+              SizedBox(height: ResponsiveSpacing.sm(context)),
+              ResponsiveTextWidget(
                 'Auto-connect enabled • Broadcasting location • High priority mode',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
+                styleBuilder: (context) => ResponsiveText.caption(
+                  context,
+                ).copyWith(color: Colors.white70),
                 textAlign: TextAlign.center,
+                maxLines: 3,
               ),
             ],
           ],

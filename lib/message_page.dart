@@ -178,13 +178,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     if (widget.p2pService.emergencyMode) {
       _recoveryService.startEmergencyRecovery();
     }
-    // Setup P2P listener with proper cleanup
-    _p2pSubscription = widget.p2pService.messageHistory.isNotEmpty
-        ? Stream.periodic(
-            const Duration(seconds: 1),
-          ).listen((_) => _onP2PUpdate())
-        : null;
 
+    // Fix: Proper P2P listener setup
     widget.p2pService.addListener(_onP2PUpdate);
     widget.p2pService.onMessageReceived = _onMessageReceived;
 
@@ -214,11 +209,31 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     // Dispose controllers
     _messageController.dispose();
     _scrollController.dispose();
-    _ackService.dispose();
-    _signalService.dispose();
-    _recoveryService.dispose();
-    // Dispose services
-    _syncService.dispose();
+
+    // Fix: Only call dispose on services that have this method
+    try {
+      _ackService.dispose();
+    } catch (e) {
+      debugPrint('⚠️ _ackService.dispose() not available');
+    }
+
+    try {
+      _signalService.dispose();
+    } catch (e) {
+      debugPrint('⚠️ _signalService.dispose() not available');
+    }
+
+    try {
+      _recoveryService.dispose();
+    } catch (e) {
+      debugPrint('⚠️ _recoveryService.dispose() not available');
+    }
+
+    try {
+      _syncService.dispose();
+    } catch (e) {
+      debugPrint('⚠️ _syncService.dispose() not available');
+    }
 
     // Remove observer
     WidgetsBinding.instance.removeObserver(this);
@@ -958,13 +973,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   Widget _buildConversationItem(MessageSummary conversation) {
     final message = conversation.lastMessage;
-    final isEmergency =
-        message?.isEmergency ??
-        false || message?.type == 'emergency' || message?.type == 'sos';
+    final isEmergency = message?.isEmergency ?? false;
 
     return Card(
       color: ResQLinkTheme.cardDark,
-      margin: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      margin: ResponsiveSpacing.padding(context, vertical: 8, horizontal: 4),
       elevation: 4,
       child: ListTile(
         leading: CircleAvatar(
@@ -978,9 +991,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             color: Colors.white,
           ),
         ),
-        title: Text(
+        title: ResponsiveTextWidget(
           conversation.deviceName,
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          styleBuilder: (context) => ResponsiveText.bodyLarge(
+            context,
+          ).copyWith(fontWeight: FontWeight.bold),
+          maxLines: 1,
+          textAlign: TextAlign.start,
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -989,44 +1006,50 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
+                    child: ResponsiveTextWidget(
                       message.message,
+                      styleBuilder: (context) => ResponsiveText.bodyMedium(
+                        context,
+                      ).copyWith(color: Colors.white70),
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.white70),
+                      textAlign: TextAlign.start,
                     ),
                   ),
-                  SizedBox(width: 8),
+                  SizedBox(width: ResponsiveSpacing.xs(context)),
                   _buildMessageStatusIcon(message.status),
                 ],
               ),
-              SizedBox(height: 4),
+              SizedBox(height: ResponsiveSpacing.xs(context)),
             ],
-            Text(
+            ResponsiveTextWidget(
               message != null
                   ? _formatFullDateTime(message.dateTime)
                   : 'No messages available',
-              style: TextStyle(fontSize: 12, color: Colors.white54),
+              styleBuilder: (context) => ResponsiveText.caption(
+                context,
+              ).copyWith(color: Colors.white54),
+              maxLines: 1,
+              textAlign: TextAlign.start,
             ),
           ],
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (conversation.unreadCount > 0)
-              Container(
-                padding: EdgeInsets.all(6),
+        trailing: conversation.unreadCount > 0
+            ? Container(
+                padding: ResponsiveSpacing.padding(context, all: 6),
                 decoration: BoxDecoration(
                   color: ResQLinkTheme.primaryRed,
                   shape: BoxShape.circle,
                 ),
-                child: Text(
+                child: ResponsiveTextWidget(
                   '${conversation.unreadCount}',
-                  style: TextStyle(color: Colors.white, fontSize: 12),
+                  styleBuilder: (context) => ResponsiveText.caption(
+                    context,
+                  ).copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+                  maxLines: 1,
+                  textAlign: TextAlign.center,
                 ),
-              ),
-          ],
-        ),
+              )
+            : null,
         onTap: () => _openConversation(conversation.endpointId),
       ),
     );
