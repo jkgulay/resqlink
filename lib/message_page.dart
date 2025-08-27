@@ -13,6 +13,10 @@ import 'dart:async';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
+import '../widgets/connection_status_widget.dart';
+import '../services/message_ack_service.dart';
+import '../services/signal_monitoring_service.dart';
+import '../services/emergency_recovery_service.dart';
 
 // Notification Service Class
 class NotificationService {
@@ -141,6 +145,10 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   // Services
   final MessageSyncService _syncService = MessageSyncService();
+  final MessageAcknowledgmentService _ackService =
+      MessageAcknowledgmentService();
+  final SignalMonitoringService _signalService = SignalMonitoringService();
+  final EmergencyRecoveryService _recoveryService = EmergencyRecoveryService();
 
   // State Variables
   List<MessageSummary> _conversations = [];
@@ -162,7 +170,14 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void _initialize() {
     _syncService.initialize();
     _loadConversations();
+    _ackService.initialize(widget.p2pService);
+    _signalService.startMonitoring(widget.p2pService);
+    _recoveryService.initialize(widget.p2pService, _signalService);
 
+    // Start emergency recovery if emergency mode is on
+    if (widget.p2pService.emergencyMode) {
+      _recoveryService.startEmergencyRecovery();
+    }
     // Setup P2P listener with proper cleanup
     _p2pSubscription = widget.p2pService.messageHistory.isNotEmpty
         ? Stream.periodic(
@@ -199,7 +214,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     // Dispose controllers
     _messageController.dispose();
     _scrollController.dispose();
-
+    _ackService.dispose();
+    _signalService.dispose();
+    _recoveryService.dispose();
     // Dispose services
     _syncService.dispose();
 
@@ -428,7 +445,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  // Message Sending Methods
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty || _selectedEndpointId == null || !mounted) return;
@@ -436,18 +452,33 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     _messageController.clear();
 
     try {
-      // Remove the unused messageId variable since we don't need it here
-      await _syncService.sendMessage(
-        endpointId: _selectedEndpointId!,
+      // Use acknowledgment service for reliable delivery
+      await _ackService.sendMessageWithAck(
+        widget.p2pService,
         message: text,
-        fromUser: widget.p2pService.userName ?? 'Unknown',
-        isEmergency: false,
-        messageType: MessageType.text,
-        p2pService: widget.p2pService,
+        type: MessageType.text,
+        targetDeviceId: _selectedEndpointId!,
       );
 
       if (mounted) {
         await _loadMessagesForDevice(_selectedEndpointId!);
+
+        // Show delivery status with mounted check
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.send, color: Colors.white, size: 16),
+                  SizedBox(width: 8),
+                  Text('Message sent - awaiting delivery confirmation'),
+                ],
+              ),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
       }
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
@@ -652,6 +683,10 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(_isChatView ? 'Chat Messages' : 'Emergency Messages'),
+          ConnectionStatusWidget(
+            p2pService: widget.p2pService,
+            showDetails: true,
+          ),
           Text(
             isConnected
                 ? 'Connected to $connectedCount device${connectedCount > 1 ? 's' : ''}'

@@ -12,6 +12,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wifi_scan/wifi_scan.dart';
+import 'package:flutter/services.dart';
 
 class P2PConnectionService with ChangeNotifier {
   static const String serviceType = "_resqlink._tcp";
@@ -21,6 +22,8 @@ class P2PConnectionService with ChangeNotifier {
   static const int maxTtl = 5;
   static const String hotspotPrefix = "ResQLink_";
   static const String hotspotPassword = "RESQLINK911";
+  String? get connectedHotspotSSID => _connectedHotspotSSID;
+  static const MethodChannel _wifiChannel = MethodChannel('resqlink/wifi');
 
   // Hotspot fallback state
   bool _hotspotFallbackEnabled = false;
@@ -168,7 +171,8 @@ class P2PConnectionService with ChangeNotifier {
         "🚀 Initializing P2P Service for: $_userName (ID: $_deviceId)",
       );
 
-      // Initialize WiFi Direct
+    await _setupPlatformChannels();
+    
       bool success = await WifiDirectPlugin.initialize();
       if (!success) {
         debugPrint("❌ Failed to initialize WiFi Direct");
@@ -908,19 +912,94 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Android WiFi connection using platform channels
   Future<void> _connectToAndroidWiFi(String ssid, String password) async {
     try {
-      debugPrint("🤖 Attempting Android WiFi connection to: $ssid");
+      debugPrint("🤖 Attempting automatic Android WiFi connection to: $ssid");
 
-      // For Android 10+ (API 29+), we need to use WifiNetworkSpecifier
-      // This requires platform-specific code (method channels)
+      // Try platform channel method first (requires native implementation)
+      try {
+        final result = await _wifiChannel.invokeMethod('connectToWiFi', {
+          'ssid': ssid,
+          'password': password,
+          'timeout': 30000, // 30 seconds
+        });
 
-      // Show user instructions for manual connection
-      await _showWiFiConnectionDialog(ssid, password);
+        if (result['success'] == true) {
+          debugPrint("✅ Automatic WiFi connection successful");
+          return;
+        }
+      } on PlatformException catch (e) {
+        debugPrint("⚠️ Platform channel not available: ${e.message}");
+        // Fall through to manual instructions
+      }
+
+      // Fallback to user instructions with enhanced guidance
+      await _showEnhancedWiFiConnectionDialog(ssid, password);
     } catch (e) {
       debugPrint("❌ Android WiFi connection error: $e");
       rethrow;
+    }
+  }
+
+  Future<void> _showEnhancedWiFiConnectionDialog(
+    String ssid,
+    String password,
+  ) async {
+    debugPrint("📋 Showing enhanced WiFi connection instructions for: $ssid");
+
+    // This would trigger a UI dialog in your app
+    // For now, provide detailed instructions
+    debugPrint("🔧 ENHANCED CONNECTION INSTRUCTIONS:");
+    debugPrint("   📱 STEP 1: Swipe down from top of screen");
+    debugPrint("   📱 STEP 2: Long-press WiFi icon");
+    debugPrint("   📱 STEP 3: Look for network: $ssid");
+    debugPrint("   📱 STEP 4: Tap to connect");
+    debugPrint("   📱 STEP 5: Enter password: $password");
+    debugPrint("   📱 STEP 6: Return to ResQLink app");
+    debugPrint("   ⏰ Connection will auto-detect in 10 seconds");
+
+    // Enhanced auto-detection with retry logic
+    bool isConnected = false;
+    int attempts = 0;
+    const maxAttempts = 30; // 30 seconds worth of attempts
+
+    while (!isConnected && attempts < maxAttempts) {
+      await Future.delayed(Duration(seconds: 1));
+      attempts++;
+
+      // Check if connected to target network
+      isConnected = await _checkWiFiConnection(ssid);
+
+      if (isConnected) {
+        debugPrint("✅ WiFi connection detected!");
+        break;
+      }
+
+      // Provide progress updates
+      if (attempts % 5 == 0) {
+        debugPrint("⏳ Still waiting for connection... (${attempts}s)");
+      }
+    }
+
+    if (!isConnected) {
+      throw Exception('WiFi connection timeout - please connect manually');
+    }
+  }
+
+  Future<bool> _checkWiFiConnection(String targetSSID) async {
+    try {
+      // This would use platform channels to check current WiFi SSID
+      // For now, simulate the check
+      final result = await _wifiChannel.invokeMethod('getCurrentWiFi');
+      final currentSSID = result['ssid'] as String?;
+
+      return currentSSID == targetSSID;
+    } on PlatformException {
+      // Platform channel not available, return false
+      return false;
+    } catch (e) {
+      debugPrint("❌ Error checking WiFi connection: $e");
+      return false;
     }
   }
 
@@ -1056,12 +1135,24 @@ class P2PConnectionService with ChangeNotifier {
       Socket? socket;
       String? connectedIP;
 
-      // Try connecting to each possible IP
+      // Enhanced connection attempt with progress tracking
+      debugPrint("🔌 Attempting TCP connection to ResQLink server...");
+
       for (final ip in possibleIPs) {
         try {
-          debugPrint("🔌 Trying to connect to: $ip:$port");
-          socket = await Socket.connect(ip, port).timeout(Duration(seconds: 3));
-          connectedIP = ip; // ✅ We use this variable
+          debugPrint("🔌 Trying: $ip:$port");
+
+          socket = await Socket.connect(ip, port).timeout(
+            Duration(seconds: 5),
+            onTimeout: () {
+              throw TimeoutException(
+                'Connection timeout to $ip',
+                Duration(seconds: 5),
+              );
+            },
+          );
+
+          connectedIP = ip;
           debugPrint(
             "✅ Connected to ResQLink TCP server at: $connectedIP:$port",
           );
@@ -1076,8 +1167,7 @@ class P2PConnectionService with ChangeNotifier {
         throw Exception('Could not connect to any ResQLink TCP server');
       }
 
-      // Rest of the method remains the same...
-      // Handle the connection like a regular P2P connection
+      // Enhanced connection setup
       final deviceId = deviceData['deviceAddress'] as String;
 
       _connectedDevices[deviceId] = ConnectedDevice(
@@ -1092,16 +1182,18 @@ class P2PConnectionService with ChangeNotifier {
       _isConnecting = false;
       _connectedHotspotSSID = deviceId;
 
-      // Log successful connection with IP
       debugPrint("🎉 Successfully connected to $deviceId via $connectedIP");
 
-      // Continue with rest of method...
-      // Set up message handling, etc.
+      // Enhanced message handling with error recovery
       socket.listen(
         (data) {
-          final message = String.fromCharCodes(data);
-          debugPrint("📨 Hotspot message received: ${message.length} bytes");
-          _handleIncomingText(message);
+          try {
+            final message = String.fromCharCodes(data);
+            debugPrint("📨 Hotspot message received: ${message.length} bytes");
+            _handleIncomingText(message);
+          } catch (e) {
+            debugPrint("❌ Error processing hotspot message: $e");
+          }
         },
         onDone: () {
           debugPrint("🔌 Hotspot connection closed");
@@ -1113,30 +1205,53 @@ class P2PConnectionService with ChangeNotifier {
         },
       );
 
-      // Send handshake
+      // Enhanced handshake with device capabilities
       final handshake = {
         'type': 'resqlink_handshake',
-        'version': '1.0',
+        'version': '1.2',
         'deviceId': _deviceId,
         'userName': _userName,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'role': _currentRole.name,
         'connectionType': 'hotspot',
-        'capabilities': ['messaging', 'location', 'emergency'],
+        'capabilities': [
+          'messaging',
+          'location',
+          'emergency',
+          'file_transfer',
+          'multi_hop',
+        ],
         'deviceInfo': {
           'platform': Platform.operatingSystem,
           'version': Platform.operatingSystemVersion,
+          'appVersion': '1.2.0',
         },
+        'emergencyMode': _emergencyMode,
       };
 
       socket.add(utf8.encode(jsonEncode(handshake)));
-      debugPrint("🤝 ResQLink handshake sent via hotspot");
+      debugPrint("🤝 Enhanced ResQLink handshake sent via hotspot");
 
       _startHotspotKeepAlive(socket);
       notifyListeners();
     } catch (e) {
       debugPrint("❌ Failed to connect to hotspot TCP server: $e");
       rethrow;
+    }
+  }
+
+  Future<void> _setupPlatformChannels() async {
+    _wifiChannel.setMethodCallHandler(_handleWiFiChannelCalls);
+  }
+
+  Future<dynamic> _handleWiFiChannelCalls(MethodCall call) async {
+    switch (call.method) {
+      case 'onWiFiStateChanged':
+        final isConnected = call.arguments['connected'] as bool;
+        final ssid = call.arguments['ssid'] as String?;
+        debugPrint("📶 WiFi state changed: connected=$isConnected, ssid=$ssid");
+      default:
+        debugPrint("🤷 Unknown method call: ${call.method}");
     }
   }
 
@@ -1662,8 +1777,6 @@ class P2PConnectionService with ChangeNotifier {
       debugPrint("❌ Hotspot discovery error: $e");
     }
   }
-
-  
 
   Future<void> _createResQLinkHotspot() async {
     try {
@@ -2228,8 +2341,23 @@ class P2PConnectionService with ChangeNotifier {
       'consecutiveFailures': _consecutiveFailures,
       'hotspotFallbackEnabled': _hotspotFallbackEnabled,
       'connectedHotspot': _connectedHotspotSSID,
-      'connectionType': _hotspotFallbackEnabled ? 'hotspot' : 'wifi_direct',
+      'deviceCount': _connectedDevices.length,
+      'connectionType': _determineConnectionType(),
+      'connectedHotspotSSID': _connectedHotspotSSID,
+      'discoveredDevicesCount': _discoveredDevices.length,
     };
+  }
+
+  String _determineConnectionType() {
+    if (!_isConnected) return 'none';
+
+    if (_hotspotFallbackEnabled && _connectedHotspotSSID != null) {
+      return 'hotspot';
+    } else if (_currentRole != P2PRole.none) {
+      return 'wifi_direct';
+    }
+
+    return 'p2p';
   }
 
   // Stop P2P operations

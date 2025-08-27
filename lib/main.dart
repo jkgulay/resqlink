@@ -16,7 +16,6 @@ import 'firebase_options.dart';
 import 'home_page.dart';
 import 'services/auth_service.dart';
 import 'services/database_service.dart';
-import 'widgets/connection_status_widget.dart';
 import 'models/user_model.dart';
 import 'services/firebase_debug.dart';
 
@@ -473,7 +472,8 @@ class LandingPage extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const ConnectionStatusWidget(),
+        // Add network status at the top
+        _buildNetworkStatusIndicator(),
         _buildImageSection(context),
         SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 20)),
         _buildTitleSection(context),
@@ -493,7 +493,8 @@ class LandingPage extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const ConnectionStatusWidget(),
+              // Fix: Replace ConnectionStatusWidget with simple network indicator
+              _buildNetworkStatusIndicator(),
               SizedBox(
                 height: ResponsiveUtils.getResponsiveSpacing(context, 20),
               ),
@@ -521,6 +522,47 @@ class LandingPage extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildNetworkStatusIndicator() {
+    return FutureBuilder<bool>(
+      future: isOnline(),
+      builder: (context, snapshot) {
+        final online = snapshot.data ?? false;
+        return Container(
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: online
+                ? Colors.green.withValues(alpha: 0.1)
+                : Colors.orange.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: online ? Colors.green : Colors.orange,
+              width: 1.5,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                online ? Icons.wifi : Icons.wifi_off,
+                color: online ? Colors.green : Colors.orange,
+                size: 16,
+              ),
+              SizedBox(width: 6),
+              Text(
+                online ? 'Online' : 'Offline Ready',
+                style: TextStyle(
+                  color: online ? Colors.green : Colors.orange,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -750,7 +792,6 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
     }
   }
 
-  // Update the _showSnackBar method to accept color
   void _showSnackBar(String message, [Color? color]) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -845,7 +886,44 @@ class _LoginRegisterDialogState extends State<LoginRegisterDialog> {
             color: Colors.white,
           ),
         ),
-        const ConnectionStatusWidget(),
+        // Fix: Replace ConnectionStatusWidget with simple network indicator
+        FutureBuilder<bool>(
+          future: isOnline(),
+          builder: (context, snapshot) {
+            final online = snapshot.data ?? false;
+            return Container(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: online
+                    ? Colors.green.withValues(alpha: 0.1)
+                    : Colors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: online ? Colors.green : Colors.orange,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    online ? Icons.cloud_done : Icons.cloud_off,
+                    color: online ? Colors.green : Colors.orange,
+                    size: 14,
+                  ),
+                  SizedBox(width: 4),
+                  Text(
+                    online ? 'Online' : 'Offline',
+                    style: TextStyle(
+                      color: online ? Colors.green : Colors.orange,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       ],
     );
   }
