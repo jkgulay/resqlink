@@ -17,6 +17,9 @@ class SettingsService extends ChangeNotifier {
   bool _autoSync = true;
   bool _backgroundSync = true;
 
+  String _connectionMode = 'hybrid';
+  String get connectionMode => _connectionMode;
+
   // Getters
   bool get offlineMode => _offlineMode;
   bool get locationSharingEnabled => _locationSharingEnabled;
@@ -31,7 +34,7 @@ class SettingsService extends ChangeNotifier {
   // Load settings from SharedPreferences
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     _offlineMode = prefs.getBool('offline_mode') ?? false;
     _locationSharingEnabled = prefs.getBool('location_sharing_enabled') ?? true;
     _multiHopEnabled = prefs.getBool('multi_hop_enabled') ?? true;
@@ -41,7 +44,15 @@ class SettingsService extends ChangeNotifier {
     _silentMode = prefs.getBool('silent_mode') ?? false;
     _autoSync = prefs.getBool('auto_sync') ?? true;
     _backgroundSync = prefs.getBool('background_sync') ?? true;
-    
+    _connectionMode = prefs.getString('connection_mode') ?? 'hybrid';
+
+    notifyListeners();
+  }
+
+  Future<void> setConnectionMode(String mode) async {
+    _connectionMode = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('connection_mode', mode);
     notifyListeners();
   }
 
@@ -111,6 +122,7 @@ class SettingsService extends ChangeNotifier {
       prefs.setBool('silent_mode', _silentMode),
       prefs.setBool('auto_sync', _autoSync),
       prefs.setBool('background_sync', _backgroundSync),
+      prefs.setString('connection_mode', _connectionMode),
     ]);
     notifyListeners();
   }
