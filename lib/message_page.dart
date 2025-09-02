@@ -176,9 +176,23 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       await _syncService.initialize();
       if (!mounted) return;
       widget.p2pService.addListener(_onP2PConnectionChanged);
-      widget.p2pService.addListener(_onP2PConnectionChanged);
       widget.p2pService.onDevicesDiscovered = _onDevicesDiscovered;
+      widget.p2pService.onDeviceConnected = (deviceId, userName) {
+        if (!mounted) return;
 
+        _createConversationForDevice(deviceId, userName);
+
+        _showSuccessMessage('Connected to $userName');
+      };
+      widget.p2pService.onDeviceDisconnected = (deviceId) {
+        if (!mounted) return;
+
+        // Update conversation status
+        _loadConversations();
+
+        // Show notification
+        _showErrorMessage('Device disconnected');
+      };
       _ackService.initialize(widget.p2pService);
       _signalService.startMonitoring(widget.p2pService);
       _recoveryService.initialize(widget.p2pService, _signalService);
@@ -253,8 +267,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     setState(() {
       _availableDevices = devices;
     });
-
-    // Check if any new connected devices should create conversations
     for (var device in devices) {
       final deviceId = device['deviceAddress'];
       final deviceName = device['deviceName'] ?? 'Unknown Device';
@@ -1869,6 +1881,47 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildAvailableDevicesSection() {
+    // Use both _availableDevices and P2P service discovered devices
+    final allAvailableDevices = <Map<String, dynamic>>[
+      ..._availableDevices,
+      ...widget.p2pService.discoveredDevices.values.map(
+        (device) => {
+          'deviceName': device['deviceName'] ?? 'Unknown',
+          'deviceAddress': device['deviceAddress'] ?? '',
+          'isAvailable': true,
+        },
+      ),
+    ];
+
+    final uniqueDevices = <String, Map<String, dynamic>>{};
+    for (var device in allAvailableDevices) {
+      final address = device['deviceAddress'] ?? '';
+      if (address.isNotEmpty) {
+        uniqueDevices[address] = device;
+      }
+    }
+
+    final deviceList = uniqueDevices.values.toList();
+
+    if (deviceList.isEmpty) return SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(height: ResponsiveSpacing.md(context)),
+        ResponsiveTextWidget(
+          'Available Devices (${deviceList.length})',
+          styleBuilder: (context) => ResponsiveText.bodyLarge(
+            context,
+          ).copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
+        SizedBox(height: ResponsiveSpacing.sm(context)),
+        ...deviceList.map((device) => _buildMobileDeviceItem(device)),
+      ],
+    );
+  }
+
   // ✅ Mobile Connection Controls
   Widget _buildMobileConnectionControls() {
     final connectionInfo = widget.p2pService.getConnectionInfo();
@@ -1939,6 +1992,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             '${discoveredDevices.length}',
             Colors.orange,
           ),
+          _buildAvailableDevicesSection(),
 
           SizedBox(height: ResponsiveSpacing.md(context)),
 
@@ -2067,6 +2121,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
   Widget _buildMobileDeviceItem(Map<String, dynamic> device) {
+    final deviceId = device['deviceAddress'] ?? '';
+    final deviceName = device['deviceName'] ?? 'Unknown Device';
+    final isConnected = widget.p2pService.connectedDevices.containsKey(
+      deviceId,
+    );
+    final isAvailable = device['isAvailable'] ?? true;
+
     return Container(
       margin: ResponsiveSpacing.padding(
         context,
@@ -2079,15 +2140,24 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       decoration: BoxDecoration(
         color: ResQLinkTheme.surfaceDark,
         borderRadius: BorderRadius.circular(12),
+        border: isConnected
+            ? Border.all(color: ResQLinkTheme.safeGreen, width: 1)
+            : null,
       ),
       child: Row(
         children: [
           CircleAvatar(
             radius: 16,
-            backgroundColor: device['isAvailable']
+            backgroundColor: isConnected
                 ? ResQLinkTheme.safeGreen
+                : isAvailable
+                ? ResQLinkTheme.warningYellow
                 : Colors.grey,
-            child: Icon(Icons.devices, size: 14, color: Colors.white),
+            child: Icon(
+              isConnected ? Icons.link : Icons.devices,
+              size: 14,
+              color: Colors.white,
+            ),
           ),
           SizedBox(width: ResponsiveSpacing.sm(context)),
           Expanded(
@@ -2095,33 +2165,55 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ResponsiveTextWidget(
-                  device['deviceName'] ?? 'Unknown Device',
+                  deviceName,
                   styleBuilder: (context) => ResponsiveText.bodySmall(
                     context,
                   ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
                   maxLines: 1,
                 ),
-                ResponsiveTextWidget(
-                  device['deviceAddress'] ?? '',
-                  styleBuilder: (context) => ResponsiveText.caption(
-                    context,
-                  ).copyWith(color: Colors.white54),
-                  maxLines: 1,
-                ),
+                if (deviceId.isNotEmpty)
+                  ResponsiveTextWidget(
+                    deviceId,
+                    styleBuilder: (context) => ResponsiveText.caption(
+                      context,
+                    ).copyWith(color: Colors.white54),
+                    maxLines: 1,
+                  ),
               ],
             ),
           ),
-          if (device['isAvailable'])
+          // ✅ IMPROVED: Better connection status and actions
+          if (isConnected)
+            Container(
+              padding: ResponsiveSpacing.padding(
+                context,
+                horizontal: ResponsiveSpacing.sm(context),
+                vertical: ResponsiveSpacing.xs(context),
+              ),
+              decoration: BoxDecoration(
+                color: ResQLinkTheme.safeGreen.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ResponsiveTextWidget(
+                'Connected',
+                styleBuilder: (context) =>
+                    ResponsiveText.caption(context).copyWith(
+                      color: ResQLinkTheme.safeGreen,
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            )
+          else if (isAvailable && deviceId.isNotEmpty)
             ElevatedButton(
               onPressed: () async {
                 try {
                   await widget.p2pService.connectToDevice(device);
                   if (mounted) {
-                    _showSuccessMessage('Connected to ${device['deviceName']}');
+                    _showSuccessMessage('Connected to $deviceName');
                   }
                 } catch (e) {
                   if (mounted) {
-                    _showErrorMessage('Connection failed');
+                    _showErrorMessage('Connection failed: ${e.toString()}');
                   }
                 }
               },

@@ -815,14 +815,13 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
         action: SnackBarAction(
           label: 'VIEW CHAT',
           onPressed: () {
-            // Navigate to messages page
-            if (context.findAncestorStateOfType<_HomePageState>() != null) {
-              context.findAncestorStateOfType<_HomePageState>()!.setState(() {
-                context
-                        .findAncestorStateOfType<_HomePageState>()!
-                        .selectedIndex =
-                    2;
+            final homeState = context.findAncestorStateOfType<_HomePageState>();
+            if (homeState != null) {
+              homeState.setState(() {
+                homeState.selectedIndex = 2;
               });
+
+              WidgetsBinding.instance.addPostFrameCallback((_) {});
             }
           },
         ),
