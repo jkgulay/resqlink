@@ -812,6 +812,20 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
         content: Text('Emergency message sent!'),
         backgroundColor: Colors.red,
         behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'VIEW CHAT',
+          onPressed: () {
+            // Navigate to messages page
+            if (context.findAncestorStateOfType<_HomePageState>() != null) {
+              context.findAncestorStateOfType<_HomePageState>()!.setState(() {
+                context
+                        .findAncestorStateOfType<_HomePageState>()!
+                        .selectedIndex =
+                    2;
+              });
+            }
+          },
+        ),
       ),
     );
   }

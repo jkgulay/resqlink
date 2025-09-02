@@ -160,6 +160,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   Timer? _refreshTimer;
   Timer? _typingTimer;
   StreamSubscription? _p2pSubscription;
+  List<Map<String, dynamic>> _availableDevices = [];
 
   @override
   void initState() {
@@ -174,6 +175,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     try {
       await _syncService.initialize();
       if (!mounted) return;
+      widget.p2pService.addListener(_onP2PConnectionChanged);
+      widget.p2pService.addListener(_onP2PConnectionChanged);
+      widget.p2pService.onDevicesDiscovered = _onDevicesDiscovered;
 
       _ackService.initialize(widget.p2pService);
       _signalService.startMonitoring(widget.p2pService);
@@ -190,7 +194,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
       if (!mounted) return;
 
-      _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      Timer.periodic(Duration(seconds: 5), (_) {
         if (mounted) {
           _loadConversations();
         }
@@ -233,6 +237,60 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       } catch (e) {
         debugPrint('❌ Error in didChangeAppLifecycleState: $e');
       }
+    }
+  }
+
+  void _onP2PConnectionChanged() {
+    if (!mounted) return;
+
+    _loadConversations();
+    setState(() {});
+  }
+
+  void _onDevicesDiscovered(List<Map<String, dynamic>> devices) {
+    if (!mounted) return;
+
+    setState(() {
+      _availableDevices = devices;
+    });
+
+    // Check if any new connected devices should create conversations
+    for (var device in devices) {
+      final deviceId = device['deviceAddress'];
+      final deviceName = device['deviceName'] ?? 'Unknown Device';
+      final isConnected = widget.p2pService.connectedDevices.containsKey(
+        deviceId,
+      );
+
+      if (isConnected) {
+        _createConversationForDevice(deviceId, deviceName);
+      }
+    }
+  }
+
+  void _createConversationForDevice(String deviceId, String deviceName) {
+    if (!mounted) return;
+
+    // Check if conversation already exists
+    final existingConversation = _conversations.any(
+      (conv) => conv.endpointId == deviceId,
+    );
+
+    if (!existingConversation) {
+      final newConversation = MessageSummary(
+        endpointId: deviceId,
+        deviceName: deviceName,
+        lastMessage: null,
+        messageCount: 0,
+        unreadCount: 0,
+        isConnected: true,
+      );
+
+      setState(() {
+        _conversations.insert(0, newConversation);
+      });
+
+      debugPrint('✅ Created conversation placeholder for $deviceName');
     }
   }
 
@@ -1178,7 +1236,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   List<Widget> _buildResponsiveAppBarActions(bool isNarrowScreen) {
     final actions = <Widget>[];
 
-    // Connection status indicator - aligned with home page
+    // ✅ SYNC: Connection status from home page
     actions.add(
       Container(
         margin: ResponsiveSpacing.padding(
@@ -1206,7 +1264,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             ),
             SizedBox(width: ResponsiveSpacing.xs(context)),
             ResponsiveTextWidget(
-              '${widget.p2pService.connectedDevices.length}',
+              widget.p2pService.currentRole == P2PRole.host
+                  ? 'HOST'
+                  : widget.p2pService.currentRole == P2PRole.client
+                  ? 'CLIENT'
+                  : 'OFF',
               styleBuilder: (context) => ResponsiveText.caption(
                 context,
               ).copyWith(color: Colors.white, fontWeight: FontWeight.bold),
@@ -1932,7 +1994,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           ),
 
           // Available devices
-          if (discoveredDevices.isNotEmpty) ...[
+          if (_availableDevices.isNotEmpty) ...[
             SizedBox(height: ResponsiveSpacing.md(context)),
             ResponsiveTextWidget(
               'Available Devices',
@@ -1941,8 +2003,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               ).copyWith(color: Colors.white, fontWeight: FontWeight.w600),
             ),
             SizedBox(height: ResponsiveSpacing.sm(context)),
-            ...discoveredDevices.entries.map(
-              (entry) => _buildMobileDeviceItem(entry.value),
+            ..._availableDevices.map(
+              (device) => _buildMobileDeviceItem(device),
             ),
           ],
         ],
