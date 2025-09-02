@@ -457,6 +457,10 @@ class PhilippinesMapService {
       throw StateError('MapService not initialized');
     }
 
+    if (!_isOnline) {
+      throw StateError('Cannot download maps while offline');
+    }
+
     final storeName = isEmergencyCache ? _emergencyStore : _userCacheStore;
     final store = FMTCStore(storeName);
 
@@ -470,31 +474,47 @@ class PhilippinesMapService {
       ),
     );
 
-    // Calculate estimated tiles
-    int estimatedTiles = 0;
-    for (int z = minZoom; z <= maxZoom; z++) {
-      final latDiff = bounds.north - bounds.south;
-      final lngDiff = bounds.east - bounds.west;
-      final tilesAtZoom = (latDiff * lngDiff * math.pow(4, z)).ceil();
-      estimatedTiles += tilesAtZoom;
-    }
-
-    debugPrint(
-      'Starting cache download for ${regionName ?? "region"}: ${bounds.toString()}',
-    );
-    debugPrint(
-      'Zoom levels: $minZoom-$maxZoom, Estimated tiles: $estimatedTiles',
-    );
+    debugPrint('🚀 Starting download for ${regionName ?? "region"}');
+    debugPrint('📍 Bounds: ${bounds.toString()}');
+    debugPrint('🔍 Zoom: $minZoom-$maxZoom');
 
     final downloadResult = store.download.startForeground(
       region: downloadable,
-      parallelThreads: 3,
-      maxBufferLength: 100,
+      parallelThreads: 2, // Reduced for stability
+      maxBufferLength: 50, // Reduced for stability
       skipExistingTiles: true,
       skipSeaTiles: true,
     );
 
-    return DownloadProgress(downloadResult.downloadProgress);
+    // Create a custom stream controller to track progress
+    late StreamController<double> progressController;
+    progressController = StreamController<double>();
+
+    downloadResult.downloadProgress.listen(
+      (progress) {
+        final percentage = progress.percentageProgress;
+        debugPrint('📊 Download progress: ${percentage.toStringAsFixed(1)}%');
+        if (!progressController.isClosed) {
+          progressController.add(percentage);
+        }
+      },
+      onDone: () {
+        debugPrint('✅ Download completed successfully');
+        if (!progressController.isClosed) {
+          progressController.add(100.0);
+          progressController.close();
+        }
+      },
+      onError: (error) {
+        debugPrint('❌ Download error: $error');
+        if (!progressController.isClosed) {
+          progressController.addError(error);
+          progressController.close();
+        }
+      },
+    );
+
+    return DownloadProgress(progressController.stream);
   }
 
   /// Pre-cache Philippines overview (low zoom levels)
@@ -813,7 +833,10 @@ enum CachePriority { low, medium, high, critical }
 
 // Download progress tracking
 class DownloadProgress {
-  final Stream<fmtc.DownloadProgress> stream;
+  final Stream<double> stream;
 
   DownloadProgress(this.stream);
+
+  // Add helper method to get percentage
+  Stream<double> get percentageStream => stream;
 }
