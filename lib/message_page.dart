@@ -161,6 +161,23 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   Timer? _typingTimer;
   StreamSubscription? _p2pSubscription;
   List<Map<String, dynamic>> _availableDevices = [];
+  List<Map<String, dynamic>> get availableDevices =>
+      widget.p2pService.discoveredDevices.values.toList();
+
+  Duration get _refreshInterval {
+    if (!widget.p2pService.isConnected) return Duration(minutes: 1);
+    if (widget.p2pService.emergencyMode) return Duration(seconds: 10);
+    return Duration(seconds: 30);
+  }
+
+  void _startAdaptiveRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(_refreshInterval, (_) {
+      if (mounted) {
+        _loadConversations();
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -213,6 +230,12 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           _loadConversations();
         }
       });
+
+      _refreshTimer = Timer.periodic(Duration(seconds: 5), (_) {
+        if (mounted) {
+          _loadConversations();
+        }
+      });
     } catch (e) {
       debugPrint('❌ Error initializing MessagePage: $e');
       if (mounted) {
@@ -232,8 +255,17 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     _p2pSubscription?.cancel();
     _p2pSubscription = null;
 
+    _syncService.dispose();
+    _signalService.dispose();
+    _recoveryService.dispose();
+    _ackService.dispose();
+
     widget.p2pService.removeListener(_onP2PUpdate);
+    widget.p2pService.removeListener(_onP2PConnectionChanged);
     widget.p2pService.onMessageReceived = null;
+    widget.p2pService.onDevicesDiscovered = null;
+    widget.p2pService.onDeviceConnected = null;
+    widget.p2pService.onDeviceDisconnected = null;
 
     _messageController.dispose();
     _scrollController.dispose();
@@ -245,12 +277,17 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
-    if (state == AppLifecycleState.resumed && mounted) {
-      try {
-        await _loadConversations();
-      } catch (e) {
-        debugPrint('❌ Error in didChangeAppLifecycleState: $e');
-      }
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _startAdaptiveRefresh(); // Resume normal polling
+        if (mounted) await _loadConversations();
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+        _refreshTimer?.cancel(); // Stop polling when app is background
+      case AppLifecycleState.detached:
+        dispose();
+      case AppLifecycleState.hidden:
+        _refreshTimer?.cancel();
     }
   }
 
@@ -310,7 +347,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     if (!mounted) return;
 
     try {
-      final messages = await DatabaseService.getAllMessages();
+      final messages = await DatabaseService.getAllMessages().timeout(
+        Duration(seconds: 10),
+      );
       if (!mounted) return;
 
       final connectedDevices = widget.p2pService.connectedDevices;
@@ -429,12 +468,16 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
   void _onMessageReceived(P2PMessage message) async {
-    if (!mounted) return; // ✅ Guard against disposed state
+    if (!mounted) return;
 
     try {
+      final messageId = message.id;
+      final senderId = message.senderId;
+      final senderName = message.senderName;
+
       final messageModel = MessageModel(
-        endpointId: message.senderId,
-        fromUser: message.senderName,
+        endpointId: senderId,
+        fromUser: senderName,
         message: message.message,
         isMe: false,
         isEmergency:
@@ -443,33 +486,48 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         timestamp: message.timestamp.millisecondsSinceEpoch,
         latitude: message.latitude,
         longitude: message.longitude,
-        messageId: message.id,
+        messageId: messageId,
         type: message.type.name,
         status: MessageStatus.delivered,
       );
+
+      final existingMessage = await DatabaseService.getMessageById(messageId);
+      if (existingMessage != null) {
+        debugPrint('⚠️ Duplicate message received: $messageId');
+        return;
+      }
 
       await DatabaseService.insertMessage(messageModel);
 
       if (!mounted) return;
 
-      await _loadConversations();
+      await _batchUIUpdates(() async {
+        await _loadConversations();
 
-      if (!mounted) return;
+        if (message.type == MessageType.emergency ||
+            message.type == MessageType.sos) {
+          await _showEmergencyNotification(message);
+        }
 
-      if (message.type == MessageType.emergency ||
-          message.type == MessageType.sos) {
-        await _showEmergencyNotification(message);
-      }
-
-      if (!mounted) return;
-
-      if (_isChatView && _selectedEndpointId == message.senderId) {
-        await _loadMessagesForDevice(_selectedEndpointId!);
-      } else {
-        _showInAppNotification(message);
-      }
+        if (_isChatView && _selectedEndpointId == senderId) {
+          await _loadMessagesForDevice(_selectedEndpointId!);
+        } else {
+          _showInAppNotification(message);
+        }
+      });
     } catch (e) {
       debugPrint('❌ Error in _onMessageReceived: $e');
+      if (mounted) {
+        _showErrorMessage('Failed to process received message');
+      }
+    }
+  }
+
+  Future<void> _batchUIUpdates(Future<void> Function() updates) async {
+    try {
+      await updates();
+    } catch (e) {
+      debugPrint('❌ Error in batch UI updates: $e');
     }
   }
 
