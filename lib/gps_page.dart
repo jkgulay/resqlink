@@ -267,25 +267,58 @@ class FirebaseLocationService {
 
   static Future<void> syncLocation(LocationModel location) async {
     try {
-      await _firestore.collection(_collection).add(location.toFirestore());
+      debugPrint(
+        '🔄 Syncing location to Firebase: ${location.latitude}, ${location.longitude}',
+      );
+
+      final docRef = await _firestore
+          .collection(_collection)
+          .add(location.toFirestore());
+      debugPrint('✅ Location synced to Firebase with ID: ${docRef.id}');
+
       if (location.id != null) {
         await LocationService.markLocationSynced(location.id!);
+        debugPrint('✅ Local location marked as synced');
       }
     } catch (e) {
-      debugPrint('Error syncing location to Firebase: $e');
+      debugPrint('❌ Error syncing location to Firebase: $e');
       rethrow;
     }
   }
 
   static Future<void> syncAllUnsyncedLocations() async {
     try {
+      debugPrint('🔄 Starting bulk sync of unsynced locations...');
       final unsyncedLocations = await LocationService.getUnsyncedLocations();
+      debugPrint('📊 Found ${unsyncedLocations.length} unsynced locations');
+
       for (final location in unsyncedLocations) {
-        await syncLocation(location);
+        try {
+          await syncLocation(location);
+          debugPrint('✅ Synced location ${location.id}');
+        } catch (e) {
+          debugPrint('❌ Failed to sync location ${location.id}: $e');
+        }
       }
+
+      debugPrint('✅ Bulk sync completed');
     } catch (e) {
-      debugPrint('Error syncing all locations: $e');
+      debugPrint('❌ Error during bulk sync: $e');
       rethrow;
+    }
+  }
+
+  static Future<bool> testFirebaseConnection() async {
+    try {
+      await _firestore.collection('test').doc('connection').set({
+        'timestamp': FieldValue.serverTimestamp(),
+        'test': true,
+      });
+      debugPrint('✅ Firebase connection test successful');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Firebase connection test failed: $e');
+      return false;
     }
   }
 }
@@ -329,6 +362,9 @@ class _GpsPageState extends State<GpsPage>
   // Offline map features
   bool _isDownloadingMaps = false;
   double _downloadProgress = 0.0;
+  String _downloadStatus = 'Ready to download';
+  int _totalTiles = 0;
+  int _downloadedTiles = 0;
   bool _offlineMode = false;
   Map<String, dynamic> _cacheInfo = {};
 
@@ -337,6 +373,7 @@ class _GpsPageState extends State<GpsPage>
   Timer? _batteryTimer;
   StreamSubscription<Position>? _positionStream;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  StreamSubscription<double>? _downloadProgressSubscription;
 
   late AnimationController _pulseController;
   late AnimationController _sosAnimationController;
@@ -376,59 +413,6 @@ class _GpsPageState extends State<GpsPage>
     );
   }
 
-  void _testOfflineMaps() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      // Initialize map service if not done
-      if (!PhilippinesMapService.instance.isInitialized) {
-        await PhilippinesMapService.instance.initialize();
-      }
-
-      // Test offline capability
-      final isReady = await PhilippinesMapService.instance
-          .testOfflineCapability();
-
-      // Get cache statistics
-      final stats = await PhilippinesMapService.instance.getCacheStats();
-      final baseAvailable = await PhilippinesMapService.instance
-          .isPhilippinesBaseAvailable();
-
-      if (isReady && baseAvailable) {
-        // Force offline mode temporarily for testing
-        setState(() {
-          _isConnected = false;
-          _offlineMode = true;
-        });
-
-        // Show success message with stats
-        final philippinesStats = stats['philippines_base'];
-        final message = philippinesStats != null
-            ? '✅ Offline maps working!\n${philippinesStats.tileCount} tiles (${philippinesStats.sizeFormatted})'
-            : '✅ Offline maps working!';
-
-        _showMessage(message, isSuccess: true);
-
-        // Debug output
-        await PhilippinesMapService.instance.debugCacheStatus();
-      } else {
-        _showMessage(
-          '❌ Offline maps not ready!\nCheck console for details',
-          isDanger: true,
-        );
-      }
-    } catch (e) {
-      _showMessage('❌ Test failed: $e', isDanger: true);
-      debugPrint('Offline test error: $e');
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
   @override
   void dispose() {
     print('🔧 GpsPage: Starting disposal...');
@@ -446,6 +430,9 @@ class _GpsPageState extends State<GpsPage>
 
     _positionStream?.cancel();
     _positionStream = null;
+
+    _downloadProgressSubscription?.cancel();
+    _downloadProgressSubscription = null;
 
     _connectivitySubscription?.cancel();
     _connectivitySubscription = null;
@@ -776,53 +763,96 @@ class _GpsPageState extends State<GpsPage>
     setState(() {
       _isDownloadingMaps = true;
       _downloadProgress = 0.0;
+      _downloadStatus = 'Preparing download...';
+      _downloadedTiles = 0;
+      _totalTiles = 0;
     });
 
     try {
-      // Calculate bounds for the download area
+      // Calculate bounds and estimate total tiles
       final radiusKm = result['radius'];
+      final minZoom = result['minZoom'];
+      final maxZoom = result['maxZoom'];
       final bounds = _calculateBounds(_currentLocation!, radiusKm);
 
-      // Use PhilippinesMapService for caching
+      // Estimate total tiles for progress calculation
+      _totalTiles = _estimateTotalTiles(bounds, minZoom, maxZoom);
+
+      setState(() {
+        _downloadStatus = 'Downloading $_totalTiles tiles...';
+      });
+
+      debugPrint('📊 Estimated total tiles: $_totalTiles');
+
+      // Start download with progress tracking
       final downloadProgress = await PhilippinesMapService.instance.cacheArea(
         bounds: bounds,
-        minZoom: result['minZoom'],
-        maxZoom: result['maxZoom'],
+        minZoom: minZoom,
+        maxZoom: maxZoom,
         regionName: 'Current Area Download',
         isEmergencyCache: false,
       );
 
-      // Listen to download progress
-      downloadProgress.stream.listen(
+      // Cancel any existing subscription
+      _downloadProgressSubscription?.cancel();
+
+      // Listen to download progress with proper error handling
+      _downloadProgressSubscription = downloadProgress.percentageStream.listen(
         (progress) {
-          // Remove the percentageProgress access since it doesn't exist
           if (mounted) {
             setState(() {
-              _downloadProgress =
-                  0.5; // Use a placeholder or implement proper progress tracking
+              _downloadProgress = progress / 100.0; // Convert to 0-1 range
+              _downloadedTiles = (_totalTiles * _downloadProgress).round();
+              _downloadStatus =
+                  'Downloaded $_downloadedTiles of $_totalTiles tiles (${progress.toStringAsFixed(1)}%)';
             });
+            debugPrint(
+              '📊 Download progress: ${progress.toStringAsFixed(1)}% ($_downloadedTiles/$_totalTiles tiles)',
+            );
           }
         },
         onDone: () {
           if (mounted) {
             setState(() {
               _isDownloadingMaps = false;
-              _downloadProgress = 0.0;
+              _downloadProgress = 1.0;
+              _downloadStatus = 'Download completed!';
             });
             _showMessage(
-              'Offline maps downloaded successfully!',
+              'Offline maps downloaded successfully!\n$_totalTiles tiles cached',
               isSuccess: true,
             );
             _updateCacheInfo();
+
+            // Reset status after 3 seconds
+            Timer(Duration(seconds: 3), () {
+              if (mounted) {
+                setState(() {
+                  _downloadStatus = 'Ready to download';
+                  _downloadProgress = 0.0;
+                });
+              }
+            });
           }
         },
         onError: (error) {
+          debugPrint('❌ Download error: $error');
           if (mounted) {
             setState(() {
               _isDownloadingMaps = false;
               _downloadProgress = 0.0;
+              _downloadStatus = 'Download failed';
             });
             _showMessage('Download failed: $error', isDanger: true);
+
+            // Reset status after 3 seconds
+            Timer(Duration(seconds: 3), () {
+              if (mounted) {
+                setState(() {
+                  _downloadStatus = 'Ready to download';
+                });
+              }
+            });
           }
         },
       );
@@ -831,10 +861,46 @@ class _GpsPageState extends State<GpsPage>
         setState(() {
           _isDownloadingMaps = false;
           _downloadProgress = 0.0;
+          _downloadStatus = 'Download failed';
         });
         _showMessage('Download failed: $e', isDanger: true);
       }
     }
+  }
+
+  int _estimateTotalTiles(LatLngBounds bounds, int minZoom, int maxZoom) {
+    int totalTiles = 0;
+
+    for (int zoom = minZoom; zoom <= maxZoom; zoom++) {
+      final scale = math.pow(2, zoom);
+      final minTileX = ((bounds.west + 180) / 360 * scale).floor();
+      final maxTileX = ((bounds.east + 180) / 360 * scale).floor();
+      final minTileY =
+          ((1 -
+                      math.log(
+                            math.tan(bounds.north * math.pi / 180) +
+                                1 / math.cos(bounds.north * math.pi / 180),
+                          ) /
+                          math.pi) /
+                  2 *
+                  scale)
+              .floor();
+      final maxTileY =
+          ((1 -
+                      math.log(
+                            math.tan(bounds.south * math.pi / 180) +
+                                1 / math.cos(bounds.south * math.pi / 180),
+                          ) /
+                          math.pi) /
+                  2 *
+                  scale)
+              .floor();
+
+      final tilesAtZoom = (maxTileX - minTileX + 1) * (maxTileY - minTileY + 1);
+      totalTiles += tilesAtZoom;
+    }
+
+    return totalTiles;
   }
 
   Future<void> _loadLastKnownLocation() async {
@@ -1150,26 +1216,34 @@ class _GpsPageState extends State<GpsPage>
       batteryLevel: _batteryLevel,
     );
 
+    debugPrint('💾 Saving SOS location to SQLite...');
     await LocationService.insertLocation(sosLocation);
 
     if (_isConnected) {
       try {
+        debugPrint('🔄 Syncing SOS location to Firebase...');
         await FirebaseLocationService.syncLocation(sosLocation);
-        _showMessage('SOS location broadcast!', isDanger: true);
+        _showMessage('SOS location broadcast to cloud!', isDanger: true);
       } catch (e) {
+        debugPrint('❌ Firebase sync failed: $e');
         _showMessage(
           'SOS saved locally - will sync when online',
           isWarning: true,
         );
       }
+    } else {
+      _showMessage('SOS saved locally - offline mode', isWarning: true);
     }
 
-    if (widget.onLocationShare != null &&
-        bool.fromEnvironment('dart.vm.product')) {
-      widget.onLocationShare!(sosLocation);
-    } else {
-      debugPrint('Skipping P2P location share on emulator');
-      _showMessage('P2P sharing disabled on emulator', isWarning: true);
+    try {
+      debugPrint('📡 Broadcasting SOS via P2P...');
+      if (widget.onLocationShare != null) {
+        widget.onLocationShare!(sosLocation);
+        _showMessage('SOS broadcast via P2P network!', isDanger: true);
+      }
+    } catch (e) {
+      debugPrint('❌ P2P broadcast failed: $e');
+      _showMessage('P2P broadcast failed', isDanger: true);
     }
 
     await _loadSavedLocations();
@@ -1188,17 +1262,21 @@ class _GpsPageState extends State<GpsPage>
       batteryLevel: _batteryLevel,
     );
 
+    debugPrint('💾 Saving location to SQLite...');
     await LocationService.insertLocation(location);
+    if (!silent) _showMessage('Location saved locally!', isSuccess: true);
 
     if (_isConnected) {
       try {
+        debugPrint('🔄 Syncing location to Firebase...');
         await FirebaseLocationService.syncLocation(location);
-        if (!silent) _showMessage('Location saved & synced!', isSuccess: true);
+        if (!silent) _showMessage('Location synced to cloud!', isSuccess: true);
       } catch (e) {
-        if (!silent) _showMessage('Location saved locally', isWarning: true);
+        debugPrint('❌ Firebase sync failed: $e');
+        if (!silent) {
+          _showMessage('Location saved, sync pending', isWarning: true);
+        }
       }
-    } else {
-      if (!silent) _showMessage('Location saved offline', isWarning: true);
     }
 
     await _loadSavedLocations();
@@ -1645,16 +1723,16 @@ class _GpsPageState extends State<GpsPage>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Enhanced status panel
+            // Enhanced status panel with download info
             IntrinsicWidth(
               child: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: ResQLinkTheme.cardDark.withAlpha((255 * 0.9).toInt()),
+                  color: ResQLinkTheme.cardDark.withValues(alpha: 0.9),
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withAlpha((255 * 0.3).toInt()),
+                      color: Colors.black.withValues(alpha: 0.3),
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     ),
@@ -1687,17 +1765,60 @@ class _GpsPageState extends State<GpsPage>
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Icon(Icons.map, color: Colors.white70, size: 14),
+                        Icon(
+                          _isDownloadingMaps
+                              ? Icons.download
+                              : (_cacheInfo['cachedTiles'] > 0
+                                    ? Icons.offline_pin
+                                    : Icons.map),
+                          color: _isDownloadingMaps
+                              ? ResQLinkTheme.emergencyOrange
+                              : (_cacheInfo['cachedTiles'] > 0
+                                    ? ResQLinkTheme.safeGreen
+                                    : Colors.white70),
+                          size: 14,
+                        ),
                         const SizedBox(width: 4),
-                        Text(
-                          'Maps: ${_cacheInfo['cachedTiles'] ?? 0} tiles',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 10,
+                        Flexible(
+                          child: Text(
+                            _isDownloadingMaps
+                                ? '${(_downloadProgress * 100).toInt()}%'
+                                : 'Maps: ${_cacheInfo['cachedTiles'] ?? 0} tiles',
+                            style: TextStyle(
+                              color: _isDownloadingMaps
+                                  ? ResQLinkTheme.emergencyOrange
+                                  : Colors.white70,
+                              fontSize: 10,
+                              fontWeight: _isDownloadingMaps
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
                           ),
                         ),
                       ],
                     ),
+
+                    // Download status indicator
+                    if (_isDownloadingMaps) ...[
+                      const SizedBox(height: 4),
+                      SizedBox(
+                        width: 150,
+                        child: LinearProgressIndicator(
+                          value: _downloadProgress,
+                          backgroundColor: Colors.white.withValues(alpha: 0.3),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            ResQLinkTheme.emergencyOrange,
+                          ),
+                          minHeight: 2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$_downloadedTiles/$_totalTiles tiles',
+                        style: TextStyle(color: Colors.white70, fontSize: 8),
+                      ),
+                    ],
+
                     if (_batteryLevel < 20) ...[
                       const SizedBox(height: 4),
                       Row(
@@ -1722,7 +1843,8 @@ class _GpsPageState extends State<GpsPage>
                 ),
               ),
             ),
-            // Enhanced control buttons
+
+            // Control buttons
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1744,7 +1866,7 @@ class _GpsPageState extends State<GpsPage>
                 const SizedBox(height: 8),
                 _buildControlButton(
                   icon: Icons.bug_report,
-                  onPressed: _testOfflineMaps,
+                  onPressed: _runFullDiagnostics,
                 ),
               ],
             ),
@@ -1752,6 +1874,160 @@ class _GpsPageState extends State<GpsPage>
         ),
       ),
     );
+  }
+
+  Future<void> _runFullDiagnostics() async {
+    debugPrint('🔍 === STARTING GPS DIAGNOSTICS ===');
+
+    setState(() => _isLoading = true);
+
+    try {
+      // 1. Test SQLite
+      debugPrint('💾 Testing SQLite...');
+      final testLocation = LocationModel(
+        latitude: 14.5995,
+        longitude: 120.9842,
+        timestamp: DateTime.now(),
+        userId: widget.userId,
+        type: LocationType.normal,
+        message: 'Test location',
+      );
+
+      final locationId = await LocationService.insertLocation(testLocation);
+      debugPrint('✅ SQLite: Location inserted with ID $locationId');
+
+      final retrievedLocation = await LocationService.getLastKnownLocation();
+      if (retrievedLocation != null) {
+        debugPrint('✅ SQLite: Location retrieved successfully');
+      } else {
+        debugPrint('❌ SQLite: Failed to retrieve location');
+      }
+
+      // 2. Test Firebase
+      debugPrint('☁️ Testing Firebase...');
+      final firebaseConnected =
+          await FirebaseLocationService.testFirebaseConnection();
+      if (firebaseConnected) {
+        debugPrint('✅ Firebase: Connection successful');
+
+        try {
+          await FirebaseLocationService.syncLocation(testLocation);
+          debugPrint('✅ Firebase: Location sync successful');
+        } catch (e) {
+          debugPrint('❌ Firebase: Location sync failed: $e');
+        }
+      } else {
+        debugPrint('❌ Firebase: Connection failed');
+      }
+
+      // 3. Test Offline Maps
+      debugPrint('🗺️ Testing Offline Maps...');
+      await PhilippinesMapService.instance.debugCacheStatus();
+      final offlineReady = await PhilippinesMapService.instance
+          .testOfflineCapability();
+      debugPrint('📊 Offline maps ready: $offlineReady');
+
+      // 4. Test P2P
+      debugPrint('📡 Testing P2P...');
+      final p2pConnected = widget.p2pService.isConnected;
+      final p2pDevices = widget.p2pService.connectedDevices.length;
+      debugPrint('📊 P2P connected: $p2pConnected, devices: $p2pDevices');
+
+      // 5. Check unsynced count
+      final unsyncedCount = await LocationService.getUnsyncedCount();
+      debugPrint('📊 Unsynced locations: $unsyncedCount');
+
+      // Show results
+      _showDiagnosticResults(
+        firebaseConnected,
+        offlineReady,
+        p2pConnected,
+        unsyncedCount,
+      );
+    } catch (e) {
+      debugPrint('❌ Diagnostics error: $e');
+      _showMessage('Diagnostics failed: $e', isDanger: true);
+    } finally {
+      setState(() => _isLoading = false);
+      debugPrint('🔍 === DIAGNOSTICS COMPLETED ===');
+    }
+  }
+
+  void _showDiagnosticResults(
+    bool firebase,
+    bool offline,
+    bool p2p,
+    int unsynced,
+  ) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: ResQLinkTheme.cardDark,
+        title: Text(
+          'Diagnostics Results',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildDiagnosticRow('SQLite Storage', true),
+            _buildDiagnosticRow('Firebase Sync', firebase),
+            _buildDiagnosticRow('Offline Maps', offline),
+            _buildDiagnosticRow('P2P Network', p2p),
+            SizedBox(height: 8),
+            Text(
+              'Unsynced Locations: $unsynced',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK', style: TextStyle(color: Colors.white)),
+          ),
+          if (unsynced > 0)
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await _forceSyncAll();
+              },
+              child: Text(
+                'Sync All',
+                style: TextStyle(color: ResQLinkTheme.primaryRed),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiagnosticRow(String label, bool status) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(
+            status ? Icons.check_circle : Icons.error,
+            color: status ? ResQLinkTheme.safeGreen : ResQLinkTheme.primaryRed,
+            size: 16,
+          ),
+          SizedBox(width: 8),
+          Text(label, style: TextStyle(color: Colors.white)),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _forceSyncAll() async {
+    try {
+      _showMessage('Starting sync...', isSuccess: true);
+      await FirebaseLocationService.syncAllUnsyncedLocations();
+      _showMessage('All locations synced!', isSuccess: true);
+    } catch (e) {
+      _showMessage('Sync failed: $e', isDanger: true);
+    }
   }
 
   Widget _buildControlButton({
@@ -1762,12 +2038,12 @@ class _GpsPageState extends State<GpsPage>
     return Container(
       decoration: BoxDecoration(
         color: isActive
-            ? ResQLinkTheme.primaryRed.withAlpha((255 * 0.9).toInt())
-            : ResQLinkTheme.cardDark.withAlpha((255 * 0.9).toInt()),
+            ? ResQLinkTheme.primaryRed.withValues(alpha: 0.9)
+            : ResQLinkTheme.cardDark.withValues(alpha: 0.9),
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withAlpha((255 * 0.3).toInt()),
+            color: Colors.black.withValues(alpha: 0.3),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1778,17 +2054,62 @@ class _GpsPageState extends State<GpsPage>
         children: [
           IconButton(
             icon: Icon(icon, color: Colors.white),
-            onPressed: onPressed,
+            onPressed: _isDownloadingMaps && icon == Icons.download
+                ? null
+                : onPressed,
             iconSize: 24,
           ),
-          if (_isDownloadingMaps && icon == Icons.download)
+
+          // Enhanced progress indicator for download button
+          if (_isDownloadingMaps && icon == Icons.download) ...[
+            // Outer progress ring
             SizedBox(
-              width: 48,
-              height: 48,
+              width: 45,
+              height: 45,
               child: CircularProgressIndicator(
                 value: _downloadProgress,
-                strokeWidth: 2,
+                strokeWidth: 3,
+                backgroundColor: Colors.white.withValues(alpha: 0.3),
                 valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+            // Percentage text
+            Positioned(
+              bottom: -2,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: ResQLinkTheme.primaryRed,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${(_downloadProgress * 100).toInt()}%',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+
+          // Download ready indicator
+          if (!_isDownloadingMaps &&
+              icon == Icons.download &&
+              _cacheInfo['cachedTiles'] > 0)
+            Positioned(
+              top: 2,
+              right: 2,
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: ResQLinkTheme.safeGreen,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1),
+                ),
+                child: Icon(Icons.check, color: Colors.white, size: 8),
               ),
             ),
         ],
@@ -1803,16 +2124,16 @@ class _GpsPageState extends State<GpsPage>
       right: 0,
       child: IntrinsicHeight(
         child: Container(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: ResQLinkTheme.surfaceDark.withAlpha((255 * 0.95).toInt()),
+            color: ResQLinkTheme.surfaceDark.withValues(alpha: 0.95),
             borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(24),
               topRight: Radius.circular(24),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withAlpha((255 * 0.3).toInt()),
+                color: Colors.black.withValues(alpha: 0.3),
                 blurRadius: 10,
                 offset: const Offset(0, -2),
               ),
@@ -1821,6 +2142,7 @@ class _GpsPageState extends State<GpsPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Handle bar
               Container(
                 width: 40,
                 height: 4,
@@ -1829,7 +2151,67 @@ class _GpsPageState extends State<GpsPage>
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
+
+              // Download progress bar (only show when downloading)
+              if (_isDownloadingMaps) ...[
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: ResQLinkTheme.emergencyOrange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: ResQLinkTheme.emergencyOrange.withValues(
+                        alpha: 0.3,
+                      ),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.download,
+                            color: ResQLinkTheme.emergencyOrange,
+                            size: 16,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _downloadStatus,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${(_downloadProgress * 100).toInt()}%',
+                            style: TextStyle(
+                              color: ResQLinkTheme.emergencyOrange,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: _downloadProgress,
+                        backgroundColor: Colors.white.withValues(alpha: 0.3),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          ResQLinkTheme.emergencyOrange,
+                        ),
+                        minHeight: 4,
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: 12),
+              ],
+
+              // Location info
               if (_lastKnownLocation != null) ...[
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1839,18 +2221,18 @@ class _GpsPageState extends State<GpsPage>
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Current Location',
                             style: TextStyle(
                               color: Colors.white70,
                               fontSize: 12,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          SizedBox(height: 4),
                           Text(
                             '${_lastKnownLocation!.latitude.toStringAsFixed(6)}, '
                             '${_lastKnownLocation!.longitude.toStringAsFixed(6)}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: Colors.white,
                               fontSize: 14,
                               fontWeight: FontWeight.w500,
@@ -1859,7 +2241,7 @@ class _GpsPageState extends State<GpsPage>
                         ],
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    SizedBox(width: 16),
                     Flexible(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -1874,10 +2256,10 @@ class _GpsPageState extends State<GpsPage>
                               fontSize: 12,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          SizedBox(height: 4),
                           Text(
                             _formatTime(_lastKnownLocation!.timestamp),
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: Colors.white,
                               fontSize: 14,
                               fontWeight: FontWeight.w500,
@@ -1888,25 +2270,36 @@ class _GpsPageState extends State<GpsPage>
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-              ] else
-                const SizedBox(height: 8),
+                SizedBox(height: 12),
+              ],
+
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Long press map to mark locations • Hold SOS for emergency',
-                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                    style: TextStyle(color: Colors.white54, fontSize: 11),
                   ),
-                  if (_cacheInfo['cachedTiles'] > 0)
-                    GestureDetector(
-                      onTap: _showOfflineMapInfo,
-                      child: Icon(
-                        Icons.info_outline,
-                        color: Colors.white54,
-                        size: 16,
+                  Row(
+                    children: [
+                      if (_cacheInfo['cachedTiles'] > 0) ...[
+                        Icon(
+                          Icons.offline_pin,
+                          color: ResQLinkTheme.safeGreen,
+                          size: 14,
+                        ),
+                        SizedBox(width: 4),
+                      ],
+                      GestureDetector(
+                        onTap: _showOfflineMapInfo,
+                        child: Icon(
+                          Icons.info_outline,
+                          color: Colors.white54,
+                          size: 16,
+                        ),
                       ),
-                    ),
+                    ],
+                  ),
                 ],
               ),
             ],
@@ -1921,24 +2314,56 @@ class _GpsPageState extends State<GpsPage>
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: ResQLinkTheme.cardDark,
-        title: const Text(
-          'Offline Maps',
-          style: TextStyle(color: Colors.white),
+        title: Row(
+          children: [
+            Icon(
+              _cacheInfo['cachedTiles'] > 0 ? Icons.offline_pin : Icons.map,
+              color: _cacheInfo['cachedTiles'] > 0
+                  ? ResQLinkTheme.safeGreen
+                  : Colors.white70,
+            ),
+            SizedBox(width: 8),
+            Text('Offline Maps', style: TextStyle(color: Colors.white)),
+          ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Cached Tiles: ${_cacheInfo['cachedTiles'] ?? 0}',
-              style: TextStyle(color: Colors.white70),
+            _buildInfoRow('Status', _downloadStatus),
+            SizedBox(height: 8),
+            _buildInfoRow('Cached Tiles', '${_cacheInfo['cachedTiles'] ?? 0}'),
+            _buildInfoRow(
+              'Storage Used',
+              '${_cacheInfo['storageSizeMB'] ?? '0'} MB',
             ),
+
+            if (_isDownloadingMaps) ...[
+              SizedBox(height: 16),
+              Text(
+                'Download Progress',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              SizedBox(height: 8),
+              LinearProgressIndicator(
+                value: _downloadProgress,
+                backgroundColor: Colors.white.withValues(alpha: 0.3),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  ResQLinkTheme.emergencyOrange,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                '${(_downloadProgress * 100).toStringAsFixed(1)}% ($_downloadedTiles/$_totalTiles tiles)',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+
+            SizedBox(height: 16),
             Text(
-              'Storage Used: ${_cacheInfo['storageSizeMB'] ?? '0'} MB',
-              style: TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 16),
-            const Text(
               'Offline maps allow you to use GPS even without internet connection. '
               'Philippines base maps are pre-loaded.',
               style: TextStyle(color: Colors.white54, fontSize: 12),
@@ -1946,21 +2371,43 @@ class _GpsPageState extends State<GpsPage>
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await PhilippinesMapService.instance.clearCache(null);
-              await _updateCacheInfo();
-              _showMessage('User cache cleared', isSuccess: true);
-            },
-            child: const Text(
-              'Clear Cache',
-              style: TextStyle(color: ResQLinkTheme.primaryRed),
+          if (!_isDownloadingMaps) ...[
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await PhilippinesMapService.instance.clearCache(null);
+                await _updateCacheInfo();
+                _showMessage('User cache cleared', isSuccess: true);
+              },
+              child: Text(
+                'Clear Cache',
+                style: TextStyle(color: ResQLinkTheme.primaryRed),
+              ),
             ),
-          ),
+          ],
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('OK', style: TextStyle(color: Colors.white70)),
+            child: Text('OK', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: Colors.white70, fontSize: 14)),
+          Text(
+            value,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ],
       ),
