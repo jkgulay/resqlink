@@ -4,9 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/services/settings_service.dart';
-import 'package:resqlink/utils/responsive_text.dart';
-import 'package:resqlink/utils/resqlink_theme.dart'
-    hide ResponsiveText, ResponsiveSpacing;
+import 'package:resqlink/utils/resqlink_theme.dart';
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
@@ -887,14 +885,23 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     return Card(
       color: widget.p2pService.emergencyMode ? Colors.red.shade900 : null,
       elevation: 4,
-      child: Padding(
-        padding: ResponsiveSpacing.padding(context, all: 16),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
+      child: ResponsiveWidget(
+        mobile: _buildMobileEmergencyCard(),
+        tablet: _buildTabletEmergencyCard(),
+      ),
+    );
+  }
+
+  Widget _buildMobileEmergencyCard() {
+    return Padding(
+      padding: ResponsiveSpacing.padding(context, all: 16),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
                   children: [
                     AnimatedBuilder(
                       animation: _pulseAnimation,
@@ -914,40 +921,101 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                       },
                     ),
                     SizedBox(width: ResponsiveSpacing.sm(context)),
-                    ResponsiveTextWidget(
-                      'Emergency Mode',
-                      styleBuilder: (context) =>
-                          ResQLinkTheme.emergencyTitle(context).copyWith(
-                            color: widget.p2pService.emergencyMode
-                                ? Colors.white
-                                : ResQLinkTheme.primaryRed,
-                          ),
-                      maxLines: 1,
-                      textAlign: TextAlign.start,
+                    Expanded(
+                      child: ResponsiveTextWidget(
+                        'Emergency Mode',
+                        styleBuilder: (context) =>
+                            ResponsiveText.heading3(context).copyWith(
+                              color: widget.p2pService.emergencyMode
+                                  ? Colors.white
+                                  : ResQLinkTheme.primaryRed,
+                            ),
+                        maxLines: 1,
+                      ),
                     ),
                   ],
                 ),
-                Switch(
-                  value: widget.p2pService.emergencyMode,
-                  onChanged: (value) => _toggleEmergencyMode(),
-                  activeColor: Colors.white,
-                  activeTrackColor: Colors.red.shade300,
-                ),
-              ],
-            ),
-            if (widget.p2pService.emergencyMode) ...[
-              SizedBox(height: ResponsiveSpacing.sm(context)),
-              ResponsiveTextWidget(
-                'Auto-connect enabled • Broadcasting location • High priority mode',
-                styleBuilder: (context) => ResponsiveText.caption(
-                  context,
-                ).copyWith(color: Colors.white70),
-                textAlign: TextAlign.center,
-                maxLines: 3,
+              ),
+              Switch(
+                value: widget.p2pService.emergencyMode,
+                onChanged: (value) => _toggleEmergencyMode(),
+                activeColor: Colors.white,
+                activeTrackColor: Colors.red.shade300,
               ),
             ],
+          ),
+          if (widget.p2pService.emergencyMode) ...[
+            SizedBox(height: ResponsiveSpacing.sm(context)),
+            ResponsiveTextWidget(
+              'Auto-connect enabled • Broadcasting location • High priority mode',
+              styleBuilder: (context) => ResponsiveText.caption(
+                context,
+              ).copyWith(color: Colors.white70),
+              textAlign: TextAlign.center,
+              maxLines: 3,
+            ),
           ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabletEmergencyCard() {
+    return Padding(
+      padding: ResponsiveSpacing.padding(context, all: 24),
+      child: Row(
+        children: [
+          AnimatedBuilder(
+            animation: _pulseAnimation,
+            builder: (context, child) {
+              return Transform.scale(
+                scale: widget.p2pService.emergencyMode
+                    ? _pulseAnimation.value
+                    : 1.0,
+                child: Icon(
+                  Icons.emergency,
+                  color: widget.p2pService.emergencyMode
+                      ? Colors.white
+                      : ResQLinkTheme.primaryRed,
+                  size: ResponsiveSpacing.xl(context),
+                ),
+              );
+            },
+          ),
+          SizedBox(width: ResponsiveSpacing.md(context)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ResponsiveTextWidget(
+                  'Emergency Mode',
+                  styleBuilder: (context) =>
+                      ResponsiveText.heading2(context).copyWith(
+                        color: widget.p2pService.emergencyMode
+                            ? Colors.white
+                            : ResQLinkTheme.primaryRed,
+                      ),
+                ),
+                if (widget.p2pService.emergencyMode) ...[
+                  SizedBox(height: ResponsiveSpacing.xs(context)),
+                  ResponsiveTextWidget(
+                    'Auto-connect enabled • Broadcasting location • High priority mode',
+                    styleBuilder: (context) => ResponsiveText.bodySmall(
+                      context,
+                    ).copyWith(color: Colors.white70),
+                    maxLines: 2,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Switch(
+            value: widget.p2pService.emergencyMode,
+            onChanged: (value) => _toggleEmergencyMode(),
+            activeColor: Colors.white,
+            activeTrackColor: Colors.red.shade300,
+          ),
+        ],
       ),
     );
   }
@@ -2002,7 +2070,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
     bool isKnown,
   ) {
     return Padding(
-      padding: EdgeInsets.all(16),
+      padding: ResponsiveSpacing.padding(context, all: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
