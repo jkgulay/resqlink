@@ -40,7 +40,7 @@ class MessageAcknowledgmentService {
         type: type,
         targetDeviceId: targetDeviceId,
         latitude: latitude,
-        longitude: longitude,
+        longitude: longitude, senderName: '',
       );
 
       // Track for acknowledgment
@@ -82,7 +82,7 @@ class MessageAcknowledgmentService {
       await p2pService.sendMessage(
         message: ackMessage,
         type: MessageType.system,
-        targetDeviceId: originalMessage.senderId,
+        targetDeviceId: originalMessage.senderId, senderName: '',
       );
 
       debugPrint("📨 ACK sent for message: ${originalMessage.id}");

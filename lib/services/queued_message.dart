@@ -41,9 +41,9 @@ class EnhancedMessageQueue {
     sendToDevice, // Fixed: Future<void>
   }) : _sendToDevice = sendToDevice;
 
-  Future<void> queueMessage(String deviceId, P2PMessage message) async {
-    _deviceQueues.putIfAbsent(deviceId, () => []);
-    _deviceQueues[deviceId]!.add(
+Future<void> queueMessage(P2PMessage message, String targetDevice) async {
+    _deviceQueues.putIfAbsent(targetDevice, () => []);
+    _deviceQueues[targetDevice]!.add(
       QueuedMessage(message: message, timestamp: DateTime.now(), retryCount: 0),
     );
 

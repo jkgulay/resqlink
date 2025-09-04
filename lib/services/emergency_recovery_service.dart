@@ -196,7 +196,7 @@ class EmergencyRecoveryService {
         debugPrint("✅ Hotspot recovery successful");
       } else {
         // Create our own hotspot if none available
-        await _p2pService!.createEmergencyGroup();
+        await _p2pService!.createEmergencyHotspot();
         debugPrint("✅ Emergency hotspot created");
       }
     } catch (e) {
@@ -304,11 +304,45 @@ class EmergencyRecoveryService {
     // Try multiple times to create emergency group
     for (int i = 0; i < 3; i++) {
       try {
-        await _p2pService!.createEmergencyGroup();
+        await _p2pService!.createEmergencyHotspot();
         break;
       } catch (e) {
         await Future.delayed(Duration(seconds: 5));
       }
+    }
+  }
+
+  Future<void> createEmergencyHotspot({String? deviceId}) async {
+    try {
+      debugPrint("🚨 Creating emergency hotspot via P2P service...");
+
+      // Use the P2P service's existing method
+      final success = await _p2pService!.createEmergencyHotspot(
+        deviceId: deviceId,
+      );
+
+      if (success) {
+        debugPrint("✅ Emergency hotspot created successfully");
+      } else {
+        throw Exception("Failed to create emergency hotspot");
+      }
+    } catch (e) {
+      debugPrint('❌ Error creating emergency hotspot: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> forceHostRole() async {
+    try {
+      debugPrint("🔄 Forcing host role via P2P service...");
+
+      // Use the P2P service to create emergency hotspot (which makes it host)
+      await _p2pService!.createEmergencyHotspot();
+
+      debugPrint("✅ Host role forced successfully");
+    } catch (e) {
+      debugPrint("❌ Failed to force host role: $e");
+      rethrow;
     }
   }
 
@@ -342,8 +376,8 @@ class EmergencyRecoveryService {
     try {
       debugPrint("🚨 Becoming emergency beacon - creating persistent hotspot");
 
-      // Force role to host and create persistent emergency group
-      await _p2pService!.forceHostRole();
+      // Create emergency hotspot (which makes us host)
+      await _p2pService!.createEmergencyHotspot();
 
       // Enable all fallback mechanisms
       _p2pService!.setHotspotFallbackEnabled(true);

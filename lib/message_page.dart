@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/gps_page.dart';
 import 'package:resqlink/services/message_sync_service.dart';
@@ -142,14 +140,14 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  // Services (aligned with home page service usage)
+  // Services
   final MessageSyncService _syncService = MessageSyncService();
   final MessageAcknowledgmentService _ackService =
       MessageAcknowledgmentService();
   final SignalMonitoringService _signalService = SignalMonitoringService();
   final EmergencyRecoveryService _recoveryService = EmergencyRecoveryService();
 
-  // State Variables (consistent with home page patterns)
+  // State Variables
   List<MessageSummary> _conversations = [];
   List<MessageModel> _selectedConversationMessages = [];
   String? _selectedEndpointId;
@@ -159,10 +157,10 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   bool _isTyping = false;
   Timer? _refreshTimer;
   Timer? _typingTimer;
-  StreamSubscription? _p2pSubscription;
-  List<Map<String, dynamic>> _availableDevices = [];
-  List<Map<String, dynamic>> get availableDevices =>
-      widget.p2pService.discoveredDevices.values.toList();
+
+  // Current user info
+  String get _currentUserId => widget.p2pService.deviceId ?? 'unknown';
+  LocationModel? get _currentLocation => widget.currentLocation;
 
   Duration get _refreshInterval {
     if (!widget.p2pService.isConnected) return Duration(minutes: 1);
@@ -192,24 +190,21 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     try {
       await _syncService.initialize();
       if (!mounted) return;
+
       widget.p2pService.addListener(_onP2PConnectionChanged);
       widget.p2pService.onDevicesDiscovered = _onDevicesDiscovered;
       widget.p2pService.onDeviceConnected = (deviceId, userName) {
         if (!mounted) return;
-
         _createConversationForDevice(deviceId, userName);
-
         _showSuccessMessage('Connected to $userName');
       };
+
       widget.p2pService.onDeviceDisconnected = (deviceId) {
         if (!mounted) return;
-
-        // Update conversation status
         _loadConversations();
-
-        // Show notification
         _showErrorMessage('Device disconnected');
       };
+
       _ackService.initialize(widget.p2pService);
       _signalService.startMonitoring(widget.p2pService);
       _recoveryService.initialize(widget.p2pService, _signalService);
@@ -245,32 +240,38 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+  }
+
+  @override
   void dispose() {
     debugPrint('🗑️ MessagePage disposing...');
 
     _refreshTimer?.cancel();
     _refreshTimer = null;
+
     _typingTimer?.cancel();
     _typingTimer = null;
-    _p2pSubscription?.cancel();
-    _p2pSubscription = null;
 
-    _syncService.dispose();
-    _signalService.dispose();
-    _recoveryService.dispose();
-    _ackService.dispose();
+    try {
+      _syncService.dispose();
+      _signalService.dispose();
+      _recoveryService.dispose();
+      _ackService.dispose();
+    } catch (e) {
+      debugPrint('Error disposing services: $e');
+    }
 
-    widget.p2pService.removeListener(_onP2PUpdate);
-    widget.p2pService.removeListener(_onP2PConnectionChanged);
+    try {
+      widget.p2pService.removeListener(_onP2PUpdate);
+      widget.p2pService.removeListener(_onP2PConnectionChanged);
+    } catch (e) {
+      debugPrint('Error removing listeners: $e');
+    }
+
     widget.p2pService.onMessageReceived = null;
     widget.p2pService.onDevicesDiscovered = null;
-    widget.p2pService.onDeviceConnected = null;
-    widget.p2pService.onDeviceDisconnected = null;
-
-    _messageController.dispose();
-    _scrollController.dispose();
-
-    WidgetsBinding.instance.removeObserver(this);
 
     super.dispose();
   }
@@ -279,11 +280,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     switch (state) {
       case AppLifecycleState.resumed:
-        _startAdaptiveRefresh(); // Resume normal polling
+        _startAdaptiveRefresh();
         if (mounted) await _loadConversations();
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
-        _refreshTimer?.cancel(); // Stop polling when app is background
+        _refreshTimer?.cancel();
       case AppLifecycleState.detached:
         dispose();
       case AppLifecycleState.hidden:
@@ -293,7 +294,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   void _onP2PConnectionChanged() {
     if (!mounted) return;
-
     _loadConversations();
     setState(() {});
   }
@@ -301,9 +301,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void _onDevicesDiscovered(List<Map<String, dynamic>> devices) {
     if (!mounted) return;
 
-    setState(() {
-      _availableDevices = devices;
-    });
     for (var device in devices) {
       final deviceId = device['deviceAddress'];
       final deviceName = device['deviceName'] ?? 'Unknown Device';
@@ -320,7 +317,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void _createConversationForDevice(String deviceId, String deviceName) {
     if (!mounted) return;
 
-    // Check if conversation already exists
     final existingConversation = _conversations.any(
       (conv) => conv.endpointId == deviceId,
     );
@@ -549,7 +545,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         vibrate: vibrate,
       );
 
-      if (!mounted) return; // ✅ Check after notification
+      if (!mounted) return;
 
       String body = message.message;
       if (message.latitude != null && message.longitude != null) {
@@ -563,26 +559,23 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             content: Row(
               children: [
                 Icon(Icons.warning, color: Colors.white),
-                SizedBox(width: ResponsiveSpacing.sm(context)),
+                SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      ResponsiveTextWidget(
+                      Text(
                         '${message.type.name.toUpperCase()} from ${message.senderName}',
-                        styleBuilder: (context) =>
-                            ResponsiveText.bodyLarge(context).copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                         maxLines: 1,
                       ),
-                      ResponsiveTextWidget(
+                      Text(
                         body,
-                        styleBuilder: (context) => ResponsiveText.bodyMedium(
-                          context,
-                        ).copyWith(color: Colors.white),
+                        style: TextStyle(color: Colors.white),
                         maxLines: 2,
                       ),
                     ],
@@ -629,26 +622,23 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                 size: 16,
               ),
             ),
-            SizedBox(width: ResponsiveSpacing.sm(context)),
+            SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  ResponsiveTextWidget(
+                  Text(
                     'New message from ${message.senderName}',
-                    styleBuilder: (context) =>
-                        ResponsiveText.bodyMedium(context).copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
                     maxLines: 1,
                   ),
-                  ResponsiveTextWidget(
+                  Text(
                     message.message,
-                    styleBuilder: (context) => ResponsiveText.bodySmall(
-                      context,
-                    ).copyWith(color: Colors.white70),
+                    style: TextStyle(color: Colors.white70),
                     maxLines: 1,
                   ),
                 ],
@@ -667,49 +657,80 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ Message actions aligned with home page patterns
-  Future<void> _sendMessage() async {
-    if (!mounted) return;
+  String _generateMessageId() {
+    return 'msg_${DateTime.now().millisecondsSinceEpoch}_${_currentUserId.hashCode}';
+  }
 
-    final text = _messageController.text.trim();
-    if (text.isEmpty || _selectedEndpointId == null) return;
-
-    _messageController.clear();
-
+  Future<void> _sendMessage(String messageText, MessageType type) async {
     try {
-      await _ackService.sendMessageWithAck(
-        widget.p2pService,
-        message: text,
-        type: MessageType.text,
-        targetDeviceId: _selectedEndpointId!,
+      final messageId = _generateMessageId();
+      final timestamp = DateTime.now();
+
+      await widget.p2pService.sendMessage(
+        message: messageText,
+        type: type,
+        latitude: _currentLocation?.latitude,
+        longitude: _currentLocation?.longitude,
+        senderName: '',
       );
 
-      if (mounted) {
-        await _loadMessagesForDevice(_selectedEndpointId!);
-        _showSuccessMessage('Message sent');
-      }
+      final dbMessage = MessageModel(
+        endpointId: _selectedEndpointId ?? 'broadcast',
+        fromUser: widget.p2pService.userName ?? 'Unknown',
+        message: messageText,
+        isMe: true,
+        isEmergency: type == MessageType.emergency || type == MessageType.sos,
+        timestamp: timestamp.millisecondsSinceEpoch,
+        latitude: _currentLocation?.latitude,
+        longitude: _currentLocation?.longitude,
+        messageId: messageId,
+        type: type.name,
+        status: MessageStatus.sent,
+      );
+
+      await DatabaseService.insertMessage(dbMessage);
+      await _loadMessagesForDevice(_selectedEndpointId!);
     } catch (e) {
-      debugPrint('❌ Error sending message: $e');
-      if (mounted) {
-        _showErrorMessage('Failed to send message');
-      }
+      debugPrint('Error sending message: $e');
+      _showErrorMessage('Failed to send message');
     }
   }
 
   Future<void> _sendLocationMessage() async {
-    if (widget.currentLocation == null ||
-        _selectedEndpointId == null ||
-        !mounted) {
+    if (_selectedEndpointId == null || !mounted) {
       if (mounted) {
-        _showErrorMessage('No location available');
+        _showErrorMessage('No conversation selected');
+      }
+      return;
+    }
+
+    if (widget.currentLocation?.latitude == null ||
+        widget.currentLocation?.longitude == null) {
+      if (mounted) {
+        _showErrorMessage('Location not available. Please enable GPS.');
       }
       return;
     }
 
     try {
+      final locationText =
+          '📍 Location shared\nLat: ${widget.currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${widget.currentLocation!.longitude.toStringAsFixed(6)}';
+
+      // ENHANCED: Save location to your existing database first
+      final locationModel = LocationModel(
+        latitude: widget.currentLocation!.latitude,
+        longitude: widget.currentLocation!.longitude,
+        timestamp: DateTime.now(),
+        userId: widget.p2pService.deviceId,
+        type: LocationType.normal,
+        message: 'Shared via sync service',
+      );
+
+      await LocationService.insertLocation(locationModel);
+
       await _syncService.sendMessage(
         endpointId: _selectedEndpointId!,
-        message: '📍 Shared my location',
+        message: locationText,
         fromUser: widget.p2pService.userName ?? 'Unknown',
         isEmergency: false,
         messageType: MessageType.location,
@@ -720,12 +741,68 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
       if (mounted) {
         await _loadMessagesForDevice(_selectedEndpointId!);
-        _showSuccessMessage('Location shared');
+        _showSuccessMessage('Location shared successfully');
       }
     } catch (e) {
       debugPrint('❌ Error sending location: $e');
       if (mounted) {
         _showErrorMessage('Failed to share location');
+      }
+    }
+  }
+
+  Future<void> _sendLocationViaP2P() async {
+    if (_selectedEndpointId == null || !mounted) {
+      if (mounted) {
+        _showErrorMessage('No conversation selected');
+      }
+      return;
+    }
+
+    if (widget.currentLocation == null) {
+      if (mounted) {
+        _showErrorMessage('Location not available. Please enable GPS.');
+      }
+      return;
+    }
+
+    try {
+      // ENHANCED: Save to your existing database first
+      final locationModel = LocationModel(
+        latitude: widget.currentLocation!.latitude,
+        longitude: widget.currentLocation!.longitude,
+        timestamp: DateTime.now(),
+        userId: widget.p2pService.deviceId,
+        type: LocationType.normal,
+        message: 'Shared via P2P',
+      );
+
+      await LocationService.insertLocation(locationModel);
+
+      // Generate proper message ID
+      final messageId =
+          'msg_${DateTime.now().millisecondsSinceEpoch}_${widget.p2pService.deviceId?.hashCode ?? 0}';
+
+      await widget.p2pService.sendMessage(
+        id: messageId,
+        senderName: widget.p2pService.userName ?? 'Unknown',
+        message: '📍 Shared my location',
+        type: MessageType.location,
+        ttl: 5,
+        routePath: [],
+        targetDeviceId: _selectedEndpointId,
+        latitude: widget.currentLocation!.latitude,
+        longitude: widget.currentLocation!.longitude,
+      );
+
+      if (mounted) {
+        await _loadMessagesForDevice(_selectedEndpointId!);
+        _showSuccessMessage('Location shared via P2P');
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending location via P2P: $e');
+      if (mounted) {
+        _showErrorMessage('Failed to share location via P2P');
       }
     }
   }
@@ -737,19 +814,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     if (confirm == true && mounted && _selectedEndpointId != null) {
       try {
-        await _syncService.sendMessage(
-          endpointId: _selectedEndpointId!,
-          message: '🚨 Emergency SOS',
-          fromUser: widget.p2pService.userName ?? 'Unknown',
-          isEmergency: true,
-          messageType: MessageType.sos,
-          latitude: widget.currentLocation?.latitude,
-          longitude: widget.currentLocation?.longitude,
-          p2pService: widget.p2pService,
-        );
-
+        await _sendMessage('🚨 Emergency SOS', MessageType.sos);
         if (mounted) {
-          await _loadMessagesForDevice(_selectedEndpointId!);
           _showSuccessMessage('Emergency SOS sent');
         }
       } catch (e) {
@@ -761,7 +827,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ UI Helper methods aligned with home page
   void _openConversation(String endpointId, [String? deviceName]) {
     if (!mounted) return;
     setState(() {
@@ -808,13 +873,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         content: Row(
           children: [
             Icon(Icons.check_circle, color: Colors.white, size: 20),
-            SizedBox(width: ResponsiveSpacing.sm(context)),
-            ResponsiveTextWidget(
-              message,
-              styleBuilder: (context) => ResponsiveText.bodyMedium(
-                context,
-              ).copyWith(color: Colors.white),
-            ),
+            SizedBox(width: 8),
+            Text(message, style: TextStyle(color: Colors.white)),
           ],
         ),
         backgroundColor: ResQLinkTheme.safeGreen,
@@ -830,13 +890,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         content: Row(
           children: [
             Icon(Icons.error_outline, color: Colors.white, size: 20),
-            SizedBox(width: ResponsiveSpacing.sm(context)),
+            SizedBox(width: 8),
             Expanded(
-              child: ResponsiveTextWidget(
+              child: Text(
                 message,
-                styleBuilder: (context) => ResponsiveText.bodyMedium(
-                  context,
-                ).copyWith(color: Colors.white),
+                style: TextStyle(color: Colors.white),
                 maxLines: 2,
               ),
             ),
@@ -852,150 +910,38 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => ResponsiveWidget(
-        mobile: _buildMobileEmergencyDialog(),
-        tablet: _buildTabletEmergencyDialog(),
-      ),
+      builder: (context) => _buildEmergencyDialog(),
     );
   }
 
-  Widget _buildMobileEmergencyDialog() {
+  Widget _buildEmergencyDialog() {
     return AlertDialog(
       backgroundColor: ResQLinkTheme.cardDark,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Row(
         children: [
           Icon(Icons.warning, color: ResQLinkTheme.primaryRed, size: 24),
-          SizedBox(width: ResponsiveSpacing.sm(context)),
-          ResponsiveTextWidget(
-            'Send Emergency SOS?',
-            styleBuilder: (context) =>
-                ResponsiveText.heading3(context).copyWith(color: Colors.white),
-          ),
+          SizedBox(width: 8),
+          Text('Send Emergency SOS?', style: TextStyle(color: Colors.white)),
         ],
       ),
-      content: ResponsiveTextWidget(
+      content: Text(
         'This will send an emergency SOS message to the selected device, including your location if available.',
-        styleBuilder: (context) =>
-            ResponsiveText.bodyMedium(context).copyWith(color: Colors.white70),
+        style: TextStyle(color: Colors.white70),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: ResponsiveTextWidget(
-            'Cancel',
-            styleBuilder: (context) =>
-                ResponsiveText.button(context).copyWith(color: Colors.white70),
-          ),
+          child: Text('Cancel', style: TextStyle(color: Colors.white70)),
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: ResQLinkTheme.primaryRed,
           ),
           onPressed: () => Navigator.pop(context, true),
-          child: ResponsiveTextWidget(
-            'Send SOS',
-            styleBuilder: (context) =>
-                ResponsiveText.button(context).copyWith(color: Colors.white),
-          ),
+          child: Text('Send SOS', style: TextStyle(color: Colors.white)),
         ),
       ],
-    );
-  }
-
-  Widget _buildTabletEmergencyDialog() {
-    return Dialog(
-      backgroundColor: ResQLinkTheme.cardDark,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Container(
-        width: 400,
-        padding: ResponsiveSpacing.padding(
-          context,
-          all: ResponsiveSpacing.lg(context),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: ResponsiveSpacing.padding(
-                    context,
-                    all: ResponsiveSpacing.sm(context),
-                  ),
-                  decoration: BoxDecoration(
-                    color: ResQLinkTheme.primaryRed.withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.warning,
-                    color: ResQLinkTheme.primaryRed,
-                    size: 32,
-                  ),
-                ),
-                SizedBox(width: ResponsiveSpacing.md(context)),
-                Expanded(
-                  child: ResponsiveTextWidget(
-                    'Send Emergency SOS?',
-                    styleBuilder: (context) => ResponsiveText.heading2(
-                      context,
-                    ).copyWith(color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: ResponsiveSpacing.lg(context)),
-            ResponsiveTextWidget(
-              'This will send an emergency SOS message to the selected device, including your location if available. This action should only be used in real emergencies.',
-              styleBuilder: (context) => ResponsiveText.bodyLarge(
-                context,
-              ).copyWith(color: Colors.white70),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: ResponsiveSpacing.xl(context)),
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    style: TextButton.styleFrom(
-                      padding: ResponsiveSpacing.padding(
-                        context,
-                        vertical: ResponsiveSpacing.md(context),
-                      ),
-                    ),
-                    onPressed: () => Navigator.pop(context, false),
-                    child: ResponsiveTextWidget(
-                      'Cancel',
-                      styleBuilder: (context) => ResponsiveText.button(
-                        context,
-                      ).copyWith(color: Colors.white70),
-                    ),
-                  ),
-                ),
-                SizedBox(width: ResponsiveSpacing.md(context)),
-                Expanded(
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: ResQLinkTheme.primaryRed,
-                      padding: ResponsiveSpacing.padding(
-                        context,
-                        vertical: ResponsiveSpacing.md(context),
-                      ),
-                    ),
-                    onPressed: () => Navigator.pop(context, true),
-                    child: ResponsiveTextWidget(
-                      'Send SOS',
-                      styleBuilder: (context) => ResponsiveText.button(
-                        context,
-                      ).copyWith(color: Colors.white),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -1016,7 +962,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         }
       case 'create_group':
         try {
-          await widget.p2pService.createEmergencyGroup();
+          await widget.p2pService.createEmergencyHotspot();
           if (mounted) {
             _showSuccessMessage('Emergency group created');
           }
@@ -1037,37 +983,25 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: ResQLinkTheme.cardDark,
-        title: ResponsiveTextWidget(
+        title: Text(
           'Clear Chat History?',
-          styleBuilder: (context) =>
-              ResponsiveText.heading3(context).copyWith(color: Colors.white),
+          style: TextStyle(color: Colors.white),
         ),
-        content: ResponsiveTextWidget(
+        content: Text(
           'This will permanently delete all messages in this conversation.',
-          styleBuilder: (context) => ResponsiveText.bodyMedium(
-            context,
-          ).copyWith(color: Colors.white70),
+          style: TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: ResponsiveTextWidget(
-              'Cancel',
-              styleBuilder: (context) => ResponsiveText.button(
-                context,
-              ).copyWith(color: Colors.white70),
-            ),
+            child: Text('Cancel', style: TextStyle(color: Colors.white70)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: ResQLinkTheme.primaryRed,
             ),
             onPressed: () => Navigator.pop(context, true),
-            child: ResponsiveTextWidget(
-              'Clear',
-              styleBuilder: (context) =>
-                  ResponsiveText.button(context).copyWith(color: Colors.white),
-            ),
+            child: Text('Clear', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -1079,29 +1013,24 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ Responsive UI Building Methods aligned with home page
   @override
   Widget build(BuildContext context) {
     return Theme(
       data: ResQLinkTheme.darkTheme,
       child: Scaffold(
         backgroundColor: ResQLinkTheme.backgroundDark,
-        appBar: _buildResponsiveAppBar(),
-        body: _buildResponsiveBody(),
-        floatingActionButton: _buildResponsiveFloatingActionButton(),
+        appBar: _buildAppBar(),
+        body: _buildBody(),
+        floatingActionButton: _buildFloatingActionButton(),
       ),
     );
   }
 
-  PreferredSizeWidget _buildResponsiveAppBar() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isNarrowScreen = screenWidth < 600;
-
+  PreferredSizeWidget _buildAppBar() {
     return AppBar(
       elevation: 2,
       shadowColor: Colors.black26,
       backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-      toolbarHeight: isNarrowScreen ? 56 : 64,
       flexibleSpace: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -1123,115 +1052,49 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               }),
             )
           : null,
-      title: _buildResponsiveAppBarTitle(isNarrowScreen),
-      actions: _buildResponsiveAppBarActions(isNarrowScreen),
+      title: _buildAppBarTitle(),
+      actions: _buildAppBarActions(),
     );
   }
 
-  Widget _buildResponsiveAppBarTitle(bool isNarrowScreen) {
+  Widget _buildAppBarTitle() {
     if (_isChatView) {
-      return ResponsiveWidget(
-        mobile: _buildMobileChatTitle(isNarrowScreen),
-        tablet: _buildTabletChatTitle(isNarrowScreen),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _selectedDeviceName ?? 'Unknown Device',
+            style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+            maxLines: 1,
+          ),
+          Text(
+            widget.p2pService.connectedDevices.containsKey(_selectedEndpointId)
+                ? 'Connected'
+                : 'Offline',
+            style: TextStyle(
+              fontSize: 12,
+              color:
+                  widget.p2pService.connectedDevices.containsKey(
+                    _selectedEndpointId,
+                  )
+                  ? ResQLinkTheme.safeGreen
+                  : ResQLinkTheme.warningYellow,
+            ),
+          ),
+        ],
       );
     }
 
-    return ResponsiveWidget(
-      mobile: _buildMobileMessagesTitle(isNarrowScreen),
-      tablet: _buildTabletMessagesTitle(isNarrowScreen),
-    );
-  }
-
-  Widget _buildMobileChatTitle(bool isNarrowScreen) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ResponsiveTextWidget(
-          _selectedDeviceName ?? 'Unknown Device',
-          styleBuilder: (context) => ResponsiveText.bodyLarge(
-            context,
-          ).copyWith(fontWeight: FontWeight.w600, color: Colors.white),
-          maxLines: 1,
-        ),
-        ResponsiveTextWidget(
-          widget.p2pService.connectedDevices.containsKey(_selectedEndpointId)
-              ? 'Connected'
-              : 'Offline',
-          styleBuilder: (context) => ResponsiveText.caption(context).copyWith(
-            color:
-                widget.p2pService.connectedDevices.containsKey(
-                  _selectedEndpointId,
-                )
-                ? ResQLinkTheme.safeGreen
-                : ResQLinkTheme.warningYellow,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTabletChatTitle(bool isNarrowScreen) {
-    return Row(
-      children: [
-        CircleAvatar(
-          radius: 20,
-          backgroundColor:
-              widget.p2pService.connectedDevices.containsKey(
-                _selectedEndpointId,
-              )
-              ? ResQLinkTheme.safeGreen
-              : ResQLinkTheme.offlineGray,
-          child: Icon(Icons.person, color: Colors.white, size: 20),
-        ),
-        SizedBox(width: ResponsiveSpacing.md(context)),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ResponsiveTextWidget(
-                _selectedDeviceName ?? 'Unknown Device',
-                styleBuilder: (context) => ResponsiveText.heading3(
-                  context,
-                ).copyWith(color: Colors.white),
-                maxLines: 1,
-              ),
-              ResponsiveTextWidget(
-                widget.p2pService.connectedDevices.containsKey(
-                      _selectedEndpointId,
-                    )
-                    ? 'Connected • Online'
-                    : 'Offline • Last seen unknown',
-                styleBuilder: (context) =>
-                    ResponsiveText.bodySmall(context).copyWith(
-                      color:
-                          widget.p2pService.connectedDevices.containsKey(
-                            _selectedEndpointId,
-                          )
-                          ? ResQLinkTheme.safeGreen
-                          : ResQLinkTheme.offlineGray,
-                    ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMobileMessagesTitle(bool isNarrowScreen) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ResponsiveTextWidget(
-          'Messages',
-          styleBuilder: (context) =>
-              ResponsiveText.heading3(context).copyWith(color: Colors.white),
-        ),
-        ResponsiveTextWidget(
+        Text('Messages', style: TextStyle(color: Colors.white)),
+        Text(
           widget.p2pService.isConnected
               ? '${widget.p2pService.connectedDevices.length} connected'
               : 'No connection',
-          styleBuilder: (context) => ResponsiveText.caption(context).copyWith(
+          style: TextStyle(
+            fontSize: 12,
             color: widget.p2pService.isConnected
                 ? ResQLinkTheme.safeGreen
                 : ResQLinkTheme.warningYellow,
@@ -1241,83 +1104,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildTabletMessagesTitle(bool isNarrowScreen) {
-    return Row(
-      children: [
-        Container(
-          padding: ResponsiveSpacing.padding(
-            context,
-            all: ResponsiveSpacing.sm(context),
-          ),
-          decoration: BoxDecoration(
-            color: ResQLinkTheme.primaryRed.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            Icons.chat_bubble_outline,
-            color: ResQLinkTheme.primaryRed,
-            size: 24,
-          ),
-        ),
-        SizedBox(width: ResponsiveSpacing.md(context)),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ResponsiveTextWidget(
-                'Emergency Messages',
-                styleBuilder: (context) => ResponsiveText.heading2(
-                  context,
-                ).copyWith(color: Colors.white),
-              ),
-              Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: widget.p2pService.isConnected
-                          ? ResQLinkTheme.safeGreen
-                          : ResQLinkTheme.warningYellow,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  SizedBox(width: ResponsiveSpacing.xs(context)),
-                  ResponsiveTextWidget(
-                    widget.p2pService.isConnected
-                        ? '${widget.p2pService.connectedDevices.length} devices connected'
-                        : 'No connection',
-                    styleBuilder: (context) =>
-                        ResponsiveText.bodySmall(context).copyWith(
-                          color: widget.p2pService.isConnected
-                              ? ResQLinkTheme.safeGreen
-                              : ResQLinkTheme.warningYellow,
-                        ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  List<Widget> _buildResponsiveAppBarActions(bool isNarrowScreen) {
+  List<Widget> _buildAppBarActions() {
     final actions = <Widget>[];
 
-    // ✅ SYNC: Connection status from home page
     actions.add(
       Container(
-        margin: ResponsiveSpacing.padding(
-          context,
-          right: ResponsiveSpacing.xs(context),
-        ),
-        padding: ResponsiveSpacing.padding(
-          context,
-          horizontal: ResponsiveSpacing.sm(context),
-          vertical: ResponsiveSpacing.xs(context),
-        ),
+        margin: EdgeInsets.only(right: 8),
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: widget.p2pService.isConnected
               ? ResQLinkTheme.safeGreen
@@ -1332,23 +1125,24 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               size: 14,
               color: Colors.white,
             ),
-            SizedBox(width: ResponsiveSpacing.xs(context)),
-            ResponsiveTextWidget(
+            SizedBox(width: 4),
+            Text(
               widget.p2pService.currentRole == P2PRole.host
                   ? 'HOST'
                   : widget.p2pService.currentRole == P2PRole.client
                   ? 'CLIENT'
                   : 'OFF',
-              styleBuilder: (context) => ResponsiveText.caption(
-                context,
-              ).copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ],
         ),
       ),
     );
 
-    // Options menu
     actions.add(
       PopupMenuButton<String>(
         icon: Icon(Icons.more_vert, color: Colors.white),
@@ -1359,13 +1153,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             child: Row(
               children: [
                 Icon(Icons.search, color: Colors.white70, size: 20),
-                SizedBox(width: ResponsiveSpacing.sm(context)),
-                ResponsiveTextWidget(
-                  'Scan for Devices',
-                  styleBuilder: (context) => ResponsiveText.bodyMedium(
-                    context,
-                  ).copyWith(color: Colors.white),
-                ),
+                SizedBox(width: 8),
+                Text('Scan for Devices', style: TextStyle(color: Colors.white)),
               ],
             ),
           ),
@@ -1374,13 +1163,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             child: Row(
               children: [
                 Icon(Icons.wifi_tethering, color: Colors.white70, size: 20),
-                SizedBox(width: ResponsiveSpacing.sm(context)),
-                ResponsiveTextWidget(
-                  'Create Group',
-                  styleBuilder: (context) => ResponsiveText.bodyMedium(
-                    context,
-                  ).copyWith(color: Colors.white),
-                ),
+                SizedBox(width: 8),
+                Text('Create Group', style: TextStyle(color: Colors.white)),
               ],
             ),
           ),
@@ -1391,13 +1175,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               child: Row(
                 children: [
                   Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                  SizedBox(width: ResponsiveSpacing.sm(context)),
-                  ResponsiveTextWidget(
-                    'Clear Chat',
-                    styleBuilder: (context) => ResponsiveText.bodyMedium(
-                      context,
-                    ).copyWith(color: Colors.red),
-                  ),
+                  SizedBox(width: 8),
+                  Text('Clear Chat', style: TextStyle(color: Colors.red)),
                 ],
               ),
             ),
@@ -1409,109 +1188,58 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     return actions;
   }
 
-  Widget _buildResponsiveBody() {
+  Widget _buildBody() {
     if (_isLoading) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             CircularProgressIndicator(color: ResQLinkTheme.primaryRed),
-            SizedBox(height: ResponsiveSpacing.md(context)),
-            ResponsiveTextWidget(
+            SizedBox(height: 16),
+            Text(
               'Loading messages...',
-              styleBuilder: (context) => ResponsiveText.bodyMedium(
-                context,
-              ).copyWith(color: Colors.white70),
+              style: TextStyle(color: Colors.white70),
             ),
           ],
         ),
       );
     }
 
-    return ResponsiveWidget(
-      mobile: _buildMobileBody(),
-      tablet: _buildTabletBody(),
-    );
-  }
-
-  Widget _buildMobileBody() {
     return Column(
       children: [
-        if (!widget.p2pService.isConnected) _buildMobileConnectionBanner(),
+        if (!widget.p2pService.isConnected) _buildConnectionBanner(),
         Expanded(
-          child: _isChatView
-              ? _buildMobileChatView()
-              : _buildMobileConversationList(),
+          child: _isChatView ? _buildChatView() : _buildConversationList(),
         ),
-        if (_isChatView) _buildMobileMessageInput(),
+        if (_isChatView) _buildMessageInput(),
       ],
     );
   }
 
-  Widget _buildTabletBody() {
-    return Row(
-      children: [
-        // Conversation list sidebar
-        Container(
-          width: 350,
-          decoration: BoxDecoration(
-            color: ResQLinkTheme.surfaceDark,
-            border: Border(
-              right: BorderSide(color: ResQLinkTheme.cardDark, width: 1),
-            ),
-          ),
-          child: Column(
-            children: [
-              if (!widget.p2pService.isConnected)
-                _buildTabletConnectionBanner(),
-              Expanded(child: _buildTabletConversationList()),
-            ],
-          ),
-        ),
-
-        // Chat area
-        Expanded(
-          child: _isChatView
-              ? Column(
-                  children: [
-                    Expanded(child: _buildTabletChatView()),
-                    _buildTabletMessageInput(),
-                  ],
-                )
-              : _buildTabletEmptyState(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMobileConnectionBanner() {
+  Widget _buildConnectionBanner() {
     return Container(
       width: double.infinity,
-      padding: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.sm(context),
-      ),
+      padding: EdgeInsets.all(12),
       color: ResQLinkTheme.warningYellow.withValues(alpha: 0.9),
       child: Row(
         children: [
           Icon(Icons.wifi_off, color: Colors.white, size: 20),
-          SizedBox(width: ResponsiveSpacing.sm(context)),
+          SizedBox(width: 8),
           Expanded(
-            child: ResponsiveTextWidget(
+            child: Text(
               'Not connected to any devices. Messages will be saved locally.',
-              styleBuilder: (context) => ResponsiveText.bodySmall(
-                context,
-              ).copyWith(color: Colors.white),
+              style: TextStyle(color: Colors.white),
               maxLines: 2,
             ),
           ),
           TextButton(
             onPressed: () => widget.p2pService.discoverDevices(force: true),
-            child: ResponsiveTextWidget(
+            child: Text(
               'SCAN',
-              styleBuilder: (context) => ResponsiveText.button(
-                context,
-              ).copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
@@ -1519,609 +1247,362 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildTabletConnectionBanner() {
-    return Container(
-      width: double.infinity,
-      padding: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.md(context),
-      ),
-      decoration: BoxDecoration(
-        color: ResQLinkTheme.warningYellow.withValues(alpha: 0.1),
-        border: Border(
-          bottom: BorderSide(color: ResQLinkTheme.warningYellow, width: 2),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.wifi_off,
-                color: ResQLinkTheme.warningYellow,
-                size: 24,
-              ),
-              SizedBox(width: ResponsiveSpacing.sm(context)),
-              ResponsiveTextWidget(
-                'No Connection',
-                styleBuilder: (context) => ResponsiveText.heading3(
-                  context,
-                ).copyWith(color: ResQLinkTheme.warningYellow),
-              ),
-            ],
-          ),
-          SizedBox(height: ResponsiveSpacing.xs(context)),
-          ResponsiveTextWidget(
-            'Messages will be saved locally until connection is restored.',
-            styleBuilder: (context) => ResponsiveText.bodySmall(
-              context,
-            ).copyWith(color: Colors.white70),
-          ),
-          SizedBox(height: ResponsiveSpacing.sm(context)),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              icon: Icon(Icons.search, size: 18),
-              label: ResponsiveTextWidget(
-                'Scan for Devices',
-                styleBuilder: (context) => ResponsiveText.button(context),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: ResQLinkTheme.primaryRed,
-                padding: ResponsiveSpacing.padding(
-                  context,
-                  vertical: ResponsiveSpacing.sm(context),
-                ),
-              ),
-              onPressed: () => widget.p2pService.discoverDevices(force: true),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget? _buildResponsiveFloatingActionButton() {
+  Widget? _buildFloatingActionButton() {
     if (_isChatView || widget.p2pService.isConnected) return null;
 
-    return ResponsiveWidget(
-      mobile: FloatingActionButton(
-        backgroundColor: ResQLinkTheme.primaryRed,
-        onPressed: widget.p2pService.isDiscovering
-            ? null
-            : () async {
-                await widget.p2pService.discoverDevices(force: true);
-                if (mounted) {
-                  _showSuccessMessage('Scanning for nearby devices...');
-                }
-              },
-        child: Icon(
-          widget.p2pService.isDiscovering
-              ? Icons.hourglass_empty
-              : Icons.wifi_tethering,
-          color: Colors.white,
-        ),
-      ),
-      tablet: FloatingActionButton.extended(
-        backgroundColor: ResQLinkTheme.primaryRed,
-        onPressed: widget.p2pService.isDiscovering
-            ? null
-            : () async {
-                await widget.p2pService.discoverDevices(force: true);
-                if (mounted) {
-                  _showSuccessMessage('Scanning for nearby devices...');
-                }
-              },
-        icon: Icon(
-          widget.p2pService.isDiscovering
-              ? Icons.hourglass_empty
-              : Icons.wifi_tethering,
-          color: Colors.white,
-        ),
-        label: ResponsiveTextWidget(
-          widget.p2pService.isDiscovering ? 'Scanning...' : 'Scan Devices',
-          styleBuilder: (context) =>
-              ResponsiveText.button(context).copyWith(color: Colors.white),
-        ),
+    return FloatingActionButton(
+      backgroundColor: ResQLinkTheme.primaryRed,
+      onPressed: widget.p2pService.isDiscovering
+          ? null
+          : () async {
+              await widget.p2pService.discoverDevices(force: true);
+              if (mounted) {
+                _showSuccessMessage('Scanning for nearby devices...');
+              }
+            },
+      child: Icon(
+        widget.p2pService.isDiscovering
+            ? Icons.hourglass_empty
+            : Icons.wifi_tethering,
+        color: Colors.white,
       ),
     );
   }
 
-  Widget _buildMobileConversationList() {
+  Widget _buildConversationList() {
     if (_conversations.isEmpty) {
-      return SingleChildScrollView(
+      return Center(
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildMobileConnectionControls(),
-            SizedBox(height: ResponsiveSpacing.xl(context)),
-            Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.chat_bubble_outline,
-                    size: 64,
-                    color: ResQLinkTheme.offlineGray,
-                  ),
-                  SizedBox(height: ResponsiveSpacing.md(context)),
-                  ResponsiveTextWidget(
-                    'No messages yet',
-                    styleBuilder: (context) => ResponsiveText.heading3(
-                      context,
-                    ).copyWith(color: Colors.white),
-                  ),
-                  SizedBox(height: ResponsiveSpacing.sm(context)),
-                  ResponsiveTextWidget(
-                    widget.p2pService.connectedDevices.isEmpty
-                        ? 'Connect to a device to start messaging'
-                        : 'Select a device to start messaging',
-                    styleBuilder: (context) => ResponsiveText.bodyMedium(
-                      context,
-                    ).copyWith(color: Colors.white70),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
+            Icon(
+              Icons.chat_bubble_outline,
+              size: 64,
+              color: ResQLinkTheme.offlineGray,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'No messages yet',
+              style: TextStyle(fontSize: 18, color: Colors.white),
+            ),
+            SizedBox(height: 8),
+            Text(
+              widget.p2pService.connectedDevices.isEmpty
+                  ? 'Connect to a device to start messaging'
+                  : 'Select a device to start messaging',
+              style: TextStyle(color: Colors.white70),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
       );
     }
 
-    return Column(
-      children: [
-        // Compact connection status
-        SizedBox(
-          height: 100,
-          child: SingleChildScrollView(
-            child: _buildMobileConnectionStatusSummary(),
-          ),
-        ),
-        // Conversations list
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: _loadConversations,
-            color: ResQLinkTheme.primaryRed,
-            backgroundColor: ResQLinkTheme.surfaceDark,
-            child: ListView.builder(
-              padding: ResponsiveSpacing.padding(
-                context,
-                all: ResponsiveSpacing.md(context),
-              ),
-              itemCount: _conversations.length,
-              itemBuilder: (context, index) =>
-                  _buildMobileConversationCard(_conversations[index]),
-            ),
-          ),
-        ),
-      ],
+    return RefreshIndicator(
+      onRefresh: _loadConversations,
+      color: ResQLinkTheme.primaryRed,
+      backgroundColor: ResQLinkTheme.surfaceDark,
+      child: ListView.builder(
+        padding: EdgeInsets.all(16),
+        itemCount: _conversations.length,
+        itemBuilder: (context, index) =>
+            _buildConversationCard(_conversations[index]),
+      ),
     );
   }
 
-  // ✅ Tablet Conversation List
-  Widget _buildTabletConversationList() {
-    return Column(
-      children: [
-        // Header
-        Container(
-          padding: ResponsiveSpacing.padding(
-            context,
-            all: ResponsiveSpacing.md(context),
+  Widget _buildConversationCard(MessageSummary conversation) {
+    final message = conversation.lastMessage;
+    final isEmergency = message?.isEmergency ?? false;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: ResQLinkTheme.cardDark,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isEmergency ? ResQLinkTheme.primaryRed : Colors.transparent,
+          width: isEmergency ? 2 : 0,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _openConversation(
+            conversation.endpointId,
+            conversation.deviceName,
           ),
-          decoration: BoxDecoration(
-            color: ResQLinkTheme.cardDark,
-            border: Border(
-              bottom: BorderSide(
-                color: ResQLinkTheme.offlineGray.withValues(alpha: 0.3),
-                width: 1,
-              ),
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.chat_bubble_outline,
-                color: ResQLinkTheme.primaryRed,
-                size: 20,
-              ),
-              SizedBox(width: ResponsiveSpacing.sm(context)),
-              ResponsiveTextWidget(
-                'Conversations',
-                styleBuilder: (context) => ResponsiveText.heading3(
-                  context,
-                ).copyWith(color: Colors.white),
-              ),
-              Spacer(),
-              Container(
-                padding: ResponsiveSpacing.padding(
-                  context,
-                  horizontal: ResponsiveSpacing.sm(context),
-                  vertical: ResponsiveSpacing.xs(context),
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Stack(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: conversation.isConnected
+                          ? ResQLinkTheme.safeGreen
+                          : ResQLinkTheme.offlineGray,
+                      radius: 24,
+                      child: Icon(Icons.person, color: Colors.white, size: 24),
+                    ),
+                    if (conversation.isConnected)
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: ResQLinkTheme.safeGreen,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-                decoration: BoxDecoration(
-                  color: ResQLinkTheme.primaryRed.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12),
+                SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              conversation.deviceName,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          if (message != null)
+                            Text(
+                              _formatRelativeTime(message.dateTime),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.white54,
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (message != null) ...[
+                        SizedBox(height: 4),
+                        Text(
+                          message.message,
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-                child: ResponsiveTextWidget(
-                  '${_conversations.length}',
-                  styleBuilder: (context) =>
-                      ResponsiveText.caption(context).copyWith(
-                        color: ResQLinkTheme.primaryRed,
+                SizedBox(width: 8),
+                if (conversation.unreadCount > 0)
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: ResQLinkTheme.primaryRed,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${conversation.unreadCount}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
                         fontWeight: FontWeight.bold,
                       ),
-                ),
-              ),
-            ],
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
 
-        // Conversations
-        if (_conversations.isEmpty)
-          Expanded(
-            child: Center(
+  Widget _buildChatView() {
+    return ListView.builder(
+      controller: _scrollController,
+      padding: EdgeInsets.all(16),
+      itemCount: _selectedConversationMessages.length,
+      itemBuilder: (context, index) {
+        final message = _selectedConversationMessages[index];
+        final previousMessage = index > 0
+            ? _selectedConversationMessages[index - 1]
+            : null;
+        final showDateHeader = _shouldShowDateHeader(message, previousMessage);
+
+        return Column(
+          children: [
+            if (showDateHeader) _buildDateHeader(message.dateTime),
+            _buildMessageBubble(message),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildDateHeader(DateTime date) {
+    final now = DateTime.now();
+    final isToday =
+        date.day == now.day && date.month == now.month && date.year == now.year;
+    final isYesterday = date.difference(now).inDays == -1;
+
+    String dateText;
+    if (isToday) {
+      dateText = 'Today';
+    } else if (isYesterday) {
+      dateText = 'Yesterday';
+    } else {
+      dateText = '${date.day}/${date.month}/${date.year}';
+    }
+
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.white12,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            dateText,
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble(MessageModel message) {
+    final isMe = message.isMe;
+    final hasLocation = message.hasLocation;
+    final isEmergency =
+        message.isEmergency ||
+        message.type == 'emergency' ||
+        message.type == 'sos';
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.7,
+        ),
+        margin: EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          crossAxisAlignment: isMe
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            if (isEmergency) _buildEmergencyHeader(message.type),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: _getMessageGradient(isMe, isEmergency, message.type),
+                borderRadius: BorderRadius.circular(16),
+              ),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.chat_bubble_outline,
-                    size: 48,
-                    color: ResQLinkTheme.offlineGray,
+                  Text(
+                    message.message,
+                    style: TextStyle(color: Colors.white, fontSize: 16),
                   ),
-                  SizedBox(height: ResponsiveSpacing.md(context)),
-                  ResponsiveTextWidget(
-                    'No conversations yet',
-                    styleBuilder: (context) => ResponsiveText.bodyLarge(
-                      context,
-                    ).copyWith(color: Colors.white70),
-                  ),
-                  SizedBox(height: ResponsiveSpacing.sm(context)),
-                  ResponsiveTextWidget(
-                    'Connect to devices to start messaging',
-                    styleBuilder: (context) => ResponsiveText.bodySmall(
-                      context,
-                    ).copyWith(color: Colors.white54),
-                    textAlign: TextAlign.center,
+                  if (hasLocation) ...[
+                    SizedBox(height: 8),
+                    _buildLocationPreview(message),
+                  ],
+                  SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _formatTime(message.dateTime),
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      if (isMe) ...[
+                        SizedBox(width: 4),
+                        _buildMessageStatusIcon(message.status),
+                      ],
+                    ],
                   ),
                 ],
               ),
             ),
-          )
-        else
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _loadConversations,
-              color: ResQLinkTheme.primaryRed,
-              backgroundColor: ResQLinkTheme.surfaceDark,
-              child: ListView.builder(
-                padding: ResponsiveSpacing.padding(
-                  context,
-                  all: ResponsiveSpacing.sm(context),
-                ),
-                itemCount: _conversations.length,
-                itemBuilder: (context, index) =>
-                    _buildTabletConversationCard(_conversations[index]),
-              ),
-            ),
-          ),
-      ],
+          ],
+        ),
+      ),
     );
   }
 
-  // ✅ Mobile Connection Status Summary
-  Widget _buildMobileConnectionStatusSummary() {
-    final isConnected = widget.p2pService.isConnected;
-    final connectionInfo = widget.p2pService.getConnectionInfo();
-
-    return Container(
-      margin: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.sm(context),
-      ),
-      padding: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.sm(context),
-      ),
-      decoration: BoxDecoration(
-        color: ResQLinkTheme.cardDark,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isConnected
-              ? ResQLinkTheme.safeGreen
-              : ResQLinkTheme.warningYellow,
-          width: 1,
-        ),
-      ),
-      child: Column(
+  Widget _buildEmergencyHeader(String type) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: ResponsiveSpacing.padding(
-                  context,
-                  all: ResponsiveSpacing.xs(context),
-                ),
-                decoration: BoxDecoration(
-                  color:
-                      (isConnected
-                              ? ResQLinkTheme.safeGreen
-                              : ResQLinkTheme.warningYellow)
-                          .withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  isConnected ? Icons.wifi : Icons.wifi_off,
-                  color: isConnected
-                      ? ResQLinkTheme.safeGreen
-                      : ResQLinkTheme.warningYellow,
-                  size: 16,
-                ),
-              ),
-              SizedBox(width: ResponsiveSpacing.sm(context)),
-              Expanded(
-                child: ResponsiveTextWidget(
-                  isConnected ? 'Connected' : 'Offline',
-                  styleBuilder: (context) =>
-                      ResponsiveText.bodyMedium(context).copyWith(
-                        color: isConnected
-                            ? ResQLinkTheme.safeGreen
-                            : ResQLinkTheme.warningYellow,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ),
-              if (!isConnected)
-                TextButton(
-                  onPressed: () =>
-                      widget.p2pService.discoverDevices(force: true),
-                  style: TextButton.styleFrom(
-                    padding: ResponsiveSpacing.padding(
-                      context,
-                      horizontal: ResponsiveSpacing.sm(context),
-                      vertical: ResponsiveSpacing.xs(context),
-                    ),
-                  ),
-                  child: ResponsiveTextWidget(
-                    'SCAN',
-                    styleBuilder: (context) =>
-                        ResponsiveText.caption(context).copyWith(
-                          color: ResQLinkTheme.primaryRed,
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ),
-            ],
-          ),
-          if (isConnected) ...[
-            SizedBox(height: ResponsiveSpacing.xs(context)),
-            Row(
-              children: [
-                _buildMobileQuickStatusItem(
-                  '${connectionInfo['connectedDevices'] ?? 0}',
-                  'Connected',
-                  ResQLinkTheme.safeGreen,
-                ),
-                Spacer(),
-                _buildMobileQuickStatusItem(
-                  connectionInfo['role']?.toString().toUpperCase() ?? 'NONE',
-                  'Role',
-                  Colors.blue,
-                ),
-                Spacer(),
-                _buildMobileQuickStatusItem(
-                  '${widget.p2pService.discoveredDevices.length}',
-                  'Available',
-                  Colors.orange,
-                ),
-              ],
+          Icon(Icons.warning, color: ResQLinkTheme.primaryRed, size: 16),
+          SizedBox(width: 4),
+          Text(
+            type.toUpperCase(),
+            style: TextStyle(
+              color: ResQLinkTheme.primaryRed,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
             ),
-          ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildMobileQuickStatusItem(String value, String label, Color color) {
-    return Column(
-      children: [
-        ResponsiveTextWidget(
-          value,
-          styleBuilder: (context) => ResponsiveText.bodySmall(
-            context,
-          ).copyWith(color: color, fontWeight: FontWeight.bold),
+  Widget _buildLocationPreview(MessageModel message) {
+    return InkWell(
+      onTap: () => _showLocationDetails(message),
+      child: Container(
+        padding: EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white12,
+          borderRadius: BorderRadius.circular(8),
         ),
-        ResponsiveTextWidget(
-          label,
-          styleBuilder: (context) =>
-              ResponsiveText.caption(context).copyWith(color: Colors.white70),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.location_on, color: Colors.white, size: 16),
+            SizedBox(width: 4),
+            Text(
+              'Location shared',
+              style: TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
-  Widget _buildAvailableDevicesSection() {
-    // Use both _availableDevices and P2P service discovered devices
-    final allAvailableDevices = <Map<String, dynamic>>[
-      ..._availableDevices,
-      ...widget.p2pService.discoveredDevices.values.map(
-        (device) => {
-          'deviceName': device['deviceName'] ?? 'Unknown',
-          'deviceAddress': device['deviceAddress'] ?? '',
-          'isAvailable': true,
-        },
-      ),
-    ];
-
-    final uniqueDevices = <String, Map<String, dynamic>>{};
-    for (var device in allAvailableDevices) {
-      final address = device['deviceAddress'] ?? '';
-      if (address.isNotEmpty) {
-        uniqueDevices[address] = device;
-      }
+  LinearGradient _getMessageGradient(bool isMe, bool isEmergency, String type) {
+    if (isEmergency) {
+      return LinearGradient(
+        colors: [ResQLinkTheme.primaryRed, Colors.red.shade700],
+      );
     }
 
-    final deviceList = uniqueDevices.values.toList();
+    if (type == 'location') {
+      return LinearGradient(colors: [Colors.blue, Colors.blue.shade700]);
+    }
 
-    if (deviceList.isEmpty) return SizedBox.shrink();
+    if (isMe) {
+      return LinearGradient(colors: [Color(0xFF1E3A5F), Color(0xFF0B192C)]);
+    }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(height: ResponsiveSpacing.md(context)),
-        ResponsiveTextWidget(
-          'Available Devices (${deviceList.length})',
-          styleBuilder: (context) => ResponsiveText.bodyLarge(
-            context,
-          ).copyWith(color: Colors.white, fontWeight: FontWeight.w600),
-        ),
-        SizedBox(height: ResponsiveSpacing.sm(context)),
-        ...deviceList.map((device) => _buildMobileDeviceItem(device)),
-      ],
-    );
-  }
-
-  // ✅ Mobile Connection Controls
-  Widget _buildMobileConnectionControls() {
-    final connectionInfo = widget.p2pService.getConnectionInfo();
-    final isConnected = widget.p2pService.isConnected;
-    final discoveredDevices = widget.p2pService.discoveredDevices;
-
-    return Container(
-      margin: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.md(context),
-      ),
-      padding: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.md(context),
-      ),
-      decoration: BoxDecoration(
-        color: ResQLinkTheme.cardDark,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.wifi_tethering,
-                color: isConnected
-                    ? ResQLinkTheme.safeGreen
-                    : ResQLinkTheme.warningYellow,
-                size: 20,
-              ),
-              SizedBox(width: ResponsiveSpacing.sm(context)),
-              ResponsiveTextWidget(
-                'Network Status',
-                styleBuilder: (context) => ResponsiveText.heading3(
-                  context,
-                ).copyWith(color: Colors.white),
-              ),
-            ],
-          ),
-          SizedBox(height: ResponsiveSpacing.md(context)),
-
-          // Status indicators
-          _buildMobileStatusRow(
-            'Status',
-            isConnected ? 'Connected' : 'Disconnected',
-            isConnected ? ResQLinkTheme.safeGreen : ResQLinkTheme.warningYellow,
-          ),
-          _buildMobileStatusRow(
-            'Role',
-            connectionInfo['role']?.toString().toUpperCase() ?? 'NONE',
-            isConnected ? ResQLinkTheme.safeGreen : Colors.grey,
-          ),
-          _buildMobileStatusRow(
-            'Connected Devices',
-            '${connectionInfo['connectedDevices'] ?? 0}',
-            Colors.blue,
-          ),
-          _buildMobileStatusRow(
-            'Available Devices',
-            '${discoveredDevices.length}',
-            Colors.orange,
-          ),
-          _buildAvailableDevicesSection(),
-
-          SizedBox(height: ResponsiveSpacing.md(context)),
-
-          // Action buttons
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: Icon(Icons.search, size: 18),
-                  label: ResponsiveTextWidget(
-                    'Scan',
-                    styleBuilder: (context) => ResponsiveText.button(context),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: ResQLinkTheme.primaryRed,
-                    padding: ResponsiveSpacing.padding(
-                      context,
-                      vertical: ResponsiveSpacing.sm(context),
-                    ),
-                  ),
-                  onPressed: widget.p2pService.isDiscovering
-                      ? null
-                      : () async {
-                          await widget.p2pService.discoverDevices(force: true);
-                          if (mounted) {
-                            _showSuccessMessage('Scanning for devices...');
-                          }
-                        },
-                ),
-              ),
-              SizedBox(width: ResponsiveSpacing.sm(context)),
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: Icon(
-                    isConnected ? Icons.group_add : Icons.wifi_tethering,
-                    size: 18,
-                  ),
-                  label: ResponsiveTextWidget(
-                    isConnected ? 'Host' : 'Create',
-                    styleBuilder: (context) => ResponsiveText.button(context),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: ResQLinkTheme.safeGreen,
-                    padding: ResponsiveSpacing.padding(
-                      context,
-                      vertical: ResponsiveSpacing.sm(context),
-                    ),
-                  ),
-                  onPressed: () => _handleMenuAction('create_group'),
-                ),
-              ),
-            ],
-          ),
-
-          // Available devices
-          if (_availableDevices.isNotEmpty) ...[
-            SizedBox(height: ResponsiveSpacing.md(context)),
-            ResponsiveTextWidget(
-              'Available Devices',
-              styleBuilder: (context) => ResponsiveText.bodyLarge(
-                context,
-              ).copyWith(color: Colors.white, fontWeight: FontWeight.w600),
-            ),
-            SizedBox(height: ResponsiveSpacing.sm(context)),
-            ..._availableDevices.map(
-              (device) => _buildMobileDeviceItem(device),
-            ),
-          ],
-        ],
-      ),
-    );
+    return LinearGradient(colors: [Colors.grey.shade700, Colors.grey.shade800]);
   }
 
   Widget _buildMessageStatusIcon(MessageStatus status) {
@@ -2147,653 +1628,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     return Icon(icon, size: 14, color: color);
   }
 
-  Widget _buildMobileStatusRow(String label, String value, Color color) {
-    return Padding(
-      padding: ResponsiveSpacing.padding(
-        context,
-        vertical: ResponsiveSpacing.xs(context),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          SizedBox(width: ResponsiveSpacing.sm(context)),
-          ResponsiveTextWidget(
-            '$label: ',
-            styleBuilder: (context) => ResponsiveText.bodySmall(
-              context,
-            ).copyWith(color: Colors.white70),
-          ),
-          ResponsiveTextWidget(
-            value,
-            styleBuilder: (context) => ResponsiveText.bodySmall(
-              context,
-            ).copyWith(color: color, fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMobileDeviceItem(Map<String, dynamic> device) {
-    final deviceId = device['deviceAddress'] ?? '';
-    final deviceName = device['deviceName'] ?? 'Unknown Device';
-    final isConnected = widget.p2pService.connectedDevices.containsKey(
-      deviceId,
-    );
-    final isAvailable = device['isAvailable'] ?? true;
-
+  Widget _buildMessageInput() {
     return Container(
-      margin: ResponsiveSpacing.padding(
-        context,
-        vertical: ResponsiveSpacing.xs(context),
-      ),
-      padding: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.sm(context),
-      ),
-      decoration: BoxDecoration(
-        color: ResQLinkTheme.surfaceDark,
-        borderRadius: BorderRadius.circular(12),
-        border: isConnected
-            ? Border.all(color: ResQLinkTheme.safeGreen, width: 1)
-            : null,
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 16,
-            backgroundColor: isConnected
-                ? ResQLinkTheme.safeGreen
-                : isAvailable
-                ? ResQLinkTheme.warningYellow
-                : Colors.grey,
-            child: Icon(
-              isConnected ? Icons.link : Icons.devices,
-              size: 14,
-              color: Colors.white,
-            ),
-          ),
-          SizedBox(width: ResponsiveSpacing.sm(context)),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ResponsiveTextWidget(
-                  deviceName,
-                  styleBuilder: (context) => ResponsiveText.bodySmall(
-                    context,
-                  ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
-                  maxLines: 1,
-                ),
-                if (deviceId.isNotEmpty)
-                  ResponsiveTextWidget(
-                    deviceId,
-                    styleBuilder: (context) => ResponsiveText.caption(
-                      context,
-                    ).copyWith(color: Colors.white54),
-                    maxLines: 1,
-                  ),
-              ],
-            ),
-          ),
-          // ✅ IMPROVED: Better connection status and actions
-          if (isConnected)
-            Container(
-              padding: ResponsiveSpacing.padding(
-                context,
-                horizontal: ResponsiveSpacing.sm(context),
-                vertical: ResponsiveSpacing.xs(context),
-              ),
-              decoration: BoxDecoration(
-                color: ResQLinkTheme.safeGreen.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: ResponsiveTextWidget(
-                'Connected',
-                styleBuilder: (context) =>
-                    ResponsiveText.caption(context).copyWith(
-                      color: ResQLinkTheme.safeGreen,
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            )
-          else if (isAvailable && deviceId.isNotEmpty)
-            ElevatedButton(
-              onPressed: () async {
-                try {
-                  await widget.p2pService.connectToDevice(device);
-                  if (mounted) {
-                    _showSuccessMessage('Connected to $deviceName');
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    _showErrorMessage('Connection failed: ${e.toString()}');
-                  }
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: ResQLinkTheme.primaryRed,
-                padding: ResponsiveSpacing.padding(
-                  context,
-                  horizontal: ResponsiveSpacing.sm(context),
-                  vertical: ResponsiveSpacing.xs(context),
-                ),
-              ),
-              child: ResponsiveTextWidget(
-                'Connect',
-                styleBuilder: (context) => ResponsiveText.caption(
-                  context,
-                ).copyWith(color: Colors.white),
-              ),
-            )
-          else
-            ResponsiveTextWidget(
-              'Unavailable',
-              styleBuilder: (context) =>
-                  ResponsiveText.caption(context).copyWith(color: Colors.grey),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ✅ Conversation Cards
-  Widget _buildMobileConversationCard(MessageSummary conversation) {
-    final message = conversation.lastMessage;
-    final isEmergency = message?.isEmergency ?? false;
-
-    return Container(
-      margin: ResponsiveSpacing.padding(
-        context,
-        bottom: ResponsiveSpacing.sm(context),
-      ),
-      decoration: BoxDecoration(
-        color: ResQLinkTheme.cardDark,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isEmergency ? ResQLinkTheme.primaryRed : Colors.transparent,
-          width: isEmergency ? 2 : 0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => _openConversation(
-            conversation.endpointId,
-            conversation.deviceName,
-          ),
-          child: Padding(
-            padding: ResponsiveSpacing.padding(
-              context,
-              all: ResponsiveSpacing.md(context),
-            ),
-            child: Row(
-              children: [
-                // Avatar with status
-                Stack(
-                  children: [
-                    CircleAvatar(
-                      radius: 24,
-                      backgroundColor: isEmergency
-                          ? ResQLinkTheme.primaryRed
-                          : conversation.isConnected
-                          ? ResQLinkTheme.safeGreen
-                          : ResQLinkTheme.offlineGray,
-                      child: Icon(
-                        isEmergency ? Icons.warning : Icons.person,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                    if (conversation.isConnected)
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            color: ResQLinkTheme.safeGreen,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: ResQLinkTheme.cardDark,
-                              width: 2,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-
-                SizedBox(width: ResponsiveSpacing.md(context)),
-
-                // Content
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ResponsiveTextWidget(
-                              conversation.deviceName,
-                              styleBuilder: (context) =>
-                                  ResponsiveText.bodyLarge(context).copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white,
-                                  ),
-                              maxLines: 1,
-                            ),
-                          ),
-                          if (message != null)
-                            ResponsiveTextWidget(
-                              _formatRelativeTime(message.dateTime),
-                              styleBuilder: (context) => ResponsiveText.caption(
-                                context,
-                              ).copyWith(color: Colors.white54),
-                            ),
-                        ],
-                      ),
-
-                      SizedBox(height: ResponsiveSpacing.xs(context)),
-
-                      if (message != null) ...[
-                        Row(
-                          children: [
-                            if (message.isMe) ...[
-                              Icon(
-                                Icons.reply,
-                                size: 14,
-                                color: Colors.white54,
-                              ),
-                              SizedBox(width: ResponsiveSpacing.xs(context)),
-                            ],
-                            Expanded(
-                              child: ResponsiveTextWidget(
-                                isEmergency
-                                    ? '🚨 ${message.message}'
-                                    : message.message,
-                                styleBuilder: (context) =>
-                                    ResponsiveText.bodyMedium(
-                                      context,
-                                    ).copyWith(color: Colors.white70),
-                                maxLines: 1,
-                              ),
-                            ),
-                            SizedBox(width: ResponsiveSpacing.sm(context)),
-                            _buildMessageStatusIcon(message.status),
-                          ],
-                        ),
-                      ] else ...[
-                        ResponsiveTextWidget(
-                          'No messages yet',
-                          styleBuilder: (context) =>
-                              ResponsiveText.bodySmall(context).copyWith(
-                                color: Colors.white54,
-                                fontStyle: FontStyle.italic,
-                              ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-
-                SizedBox(width: ResponsiveSpacing.sm(context)),
-
-                // Unread badge
-                if (conversation.unreadCount > 0)
-                  Container(
-                    padding: ResponsiveSpacing.padding(
-                      context,
-                      horizontal: ResponsiveSpacing.sm(context),
-                      vertical: ResponsiveSpacing.xs(context),
-                    ),
-                    decoration: BoxDecoration(
-                      color: ResQLinkTheme.primaryRed,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: ResponsiveTextWidget(
-                      '${conversation.unreadCount}',
-                      styleBuilder: (context) =>
-                          ResponsiveText.caption(context).copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabletConversationCard(MessageSummary conversation) {
-    final message = conversation.lastMessage;
-    final isEmergency = message?.isEmergency ?? false;
-    final isSelected = _selectedEndpointId == conversation.endpointId;
-
-    return Container(
-      margin: ResponsiveSpacing.padding(
-        context,
-        bottom: ResponsiveSpacing.xs(context),
-      ),
-      decoration: BoxDecoration(
-        color: isSelected
-            ? ResQLinkTheme.primaryRed.withValues(alpha: 0.1)
-            : ResQLinkTheme.cardDark,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isSelected
-              ? ResQLinkTheme.primaryRed
-              : isEmergency
-              ? ResQLinkTheme.primaryRed.withValues(alpha: 0.5)
-              : Colors.transparent,
-          width: isSelected
-              ? 2
-              : isEmergency
-              ? 1
-              : 0,
-        ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => _openConversation(
-            conversation.endpointId,
-            conversation.deviceName,
-          ),
-          child: Padding(
-            padding: ResponsiveSpacing.padding(
-              context,
-              all: ResponsiveSpacing.sm(context),
-            ),
-            child: Row(
-              children: [
-                // Avatar
-                Stack(
-                  children: [
-                    CircleAvatar(
-                      radius: 20,
-                      backgroundColor: isEmergency
-                          ? ResQLinkTheme.primaryRed
-                          : conversation.isConnected
-                          ? ResQLinkTheme.safeGreen
-                          : ResQLinkTheme.offlineGray,
-                      child: Icon(
-                        isEmergency ? Icons.warning : Icons.person,
-                        color: Colors.white,
-                        size: 16,
-                      ),
-                    ),
-                    if (conversation.isConnected)
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: ResQLinkTheme.safeGreen,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: ResQLinkTheme.cardDark,
-                              width: 1,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-
-                SizedBox(width: ResponsiveSpacing.sm(context)),
-
-                // Content
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ResponsiveTextWidget(
-                        conversation.deviceName,
-                        styleBuilder: (context) =>
-                            ResponsiveText.bodyMedium(context).copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                        maxLines: 1,
-                      ),
-                      if (message != null) ...[
-                        SizedBox(height: ResponsiveSpacing.xs(context)),
-                        ResponsiveTextWidget(
-                          isEmergency
-                              ? '🚨 ${message.message}'
-                              : message.message,
-                          styleBuilder: (context) => ResponsiveText.bodySmall(
-                            context,
-                          ).copyWith(color: Colors.white70),
-                          maxLines: 1,
-                        ),
-                        SizedBox(height: ResponsiveSpacing.xs(context)),
-                        Row(
-                          children: [
-                            ResponsiveTextWidget(
-                              _formatRelativeTime(message.dateTime),
-                              styleBuilder: (context) => ResponsiveText.caption(
-                                context,
-                              ).copyWith(color: Colors.white54),
-                            ),
-                            Spacer(),
-                            _buildMessageStatusIcon(message.status),
-                          ],
-                        ),
-                      ] else ...[
-                        ResponsiveTextWidget(
-                          'No messages',
-                          styleBuilder: (context) =>
-                              ResponsiveText.caption(context).copyWith(
-                                color: Colors.white54,
-                                fontStyle: FontStyle.italic,
-                              ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-
-                // Unread badge
-                if (conversation.unreadCount > 0) ...[
-                  SizedBox(width: ResponsiveSpacing.xs(context)),
-                  Container(
-                    padding: ResponsiveSpacing.padding(
-                      context,
-                      all: ResponsiveSpacing.xs(context),
-                    ),
-                    decoration: BoxDecoration(
-                      color: ResQLinkTheme.primaryRed,
-                      shape: BoxShape.circle,
-                    ),
-                    child: ResponsiveTextWidget(
-                      '${conversation.unreadCount}',
-                      styleBuilder: (context) =>
-                          ResponsiveText.caption(context).copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ✅ Chat Views
-  Widget _buildMobileChatView() {
-    return ListView.builder(
-      controller: _scrollController,
-      padding: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.md(context),
-      ),
-      itemCount: _selectedConversationMessages.length,
-      itemBuilder: (context, index) {
-        final message = _selectedConversationMessages[index];
-        final previousMessage = index > 0
-            ? _selectedConversationMessages[index - 1]
-            : null;
-        final showDateHeader = _shouldShowDateHeader(message, previousMessage);
-
-        return Column(
-          children: [
-            if (showDateHeader) _buildDateHeader(message.dateTime),
-            _buildResponsiveMessageBubble(message, isMobile: true),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildTabletChatView() {
-    if (_selectedConversationMessages.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 64,
-              color: ResQLinkTheme.offlineGray,
-            ),
-            SizedBox(height: ResponsiveSpacing.md(context)),
-            ResponsiveTextWidget(
-              'No messages in this conversation',
-              styleBuilder: (context) => ResponsiveText.heading3(
-                context,
-              ).copyWith(color: Colors.white70),
-            ),
-            SizedBox(height: ResponsiveSpacing.sm(context)),
-            ResponsiveTextWidget(
-              'Start typing to send the first message',
-              styleBuilder: (context) => ResponsiveText.bodyMedium(
-                context,
-              ).copyWith(color: Colors.white54),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      controller: _scrollController,
-      padding: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.lg(context),
-      ),
-      itemCount: _selectedConversationMessages.length,
-      itemBuilder: (context, index) {
-        final message = _selectedConversationMessages[index];
-        final previousMessage = index > 0
-            ? _selectedConversationMessages[index - 1]
-            : null;
-        final showDateHeader = _shouldShowDateHeader(message, previousMessage);
-
-        return Column(
-          children: [
-            if (showDateHeader) _buildDateHeader(message.dateTime),
-            _buildResponsiveMessageBubble(message, isMobile: false),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildTabletEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.chat_bubble_outline,
-            size: 96,
-            color: ResQLinkTheme.offlineGray,
-          ),
-          SizedBox(height: ResponsiveSpacing.lg(context)),
-          ResponsiveTextWidget(
-            'Select a conversation',
-            styleBuilder: (context) =>
-                ResponsiveText.heading2(context).copyWith(color: Colors.white),
-          ),
-          SizedBox(height: ResponsiveSpacing.sm(context)),
-          ResponsiveTextWidget(
-            'Choose a conversation from the sidebar to start messaging',
-            styleBuilder: (context) => ResponsiveText.bodyLarge(
-              context,
-            ).copyWith(color: Colors.white70),
-            textAlign: TextAlign.center,
-          ),
-          SizedBox(height: ResponsiveSpacing.xl(context)),
-          if (_conversations.isEmpty)
-            Column(
-              children: [
-                ResponsiveTextWidget(
-                  'No conversations available',
-                  styleBuilder: (context) => ResponsiveText.bodyLarge(
-                    context,
-                  ).copyWith(color: Colors.white54),
-                ),
-                SizedBox(height: ResponsiveSpacing.md(context)),
-                ElevatedButton.icon(
-                  icon: Icon(Icons.search),
-                  label: ResponsiveTextWidget(
-                    'Scan for Devices',
-                    styleBuilder: (context) => ResponsiveText.button(context),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: ResQLinkTheme.primaryRed,
-                    padding: ResponsiveSpacing.padding(
-                      context,
-                      horizontal: ResponsiveSpacing.lg(context),
-                      vertical: ResponsiveSpacing.md(context),
-                    ),
-                  ),
-                  onPressed: () async {
-                    await widget.p2pService.discoverDevices(force: true);
-                    if (mounted) {
-                      _showSuccessMessage('Scanning for nearby devices...');
-                    }
-                  },
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ✅ Message Input Areas
-  Widget _buildMobileMessageInput() {
-    return Container(
-      padding: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.md(context),
-      ),
+      padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: ResQLinkTheme.surfaceDark,
         boxShadow: [
@@ -2807,427 +1644,68 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       child: SafeArea(
         child: Column(
           children: [
-            // Quick actions row
             Row(
               children: [
-                _buildQuickActionButton(
-                  icon: Icons.location_on,
-                  color: ResQLinkTheme.locationBlue,
+                IconButton(
+                  icon: Icon(Icons.location_on, color: Colors.blue),
                   onPressed: _sendLocationMessage,
                   tooltip: 'Share Location',
                 ),
-                SizedBox(width: ResponsiveSpacing.sm(context)),
-                _buildQuickActionButton(
-                  icon: Icons.sos,
-                  color: ResQLinkTheme.primaryRed,
-                  onPressed: _sendEmergencyMessage,
-                  tooltip: 'Emergency SOS',
+                IconButton(
+                  icon: Icon(Icons.my_location, color: Colors.green),
+                  onPressed: _sendLocationViaP2P,
+                  tooltip: 'Share via P2P',
                 ),
-                Spacer(),
-                if (_isTyping)
-                  ResponsiveTextWidget(
-                    'Typing...',
-                    styleBuilder: (context) => ResponsiveText.caption(
-                      context,
-                    ).copyWith(color: Colors.white54),
-                  ),
+                IconButton(
+                  icon: Icon(Icons.warning, color: ResQLinkTheme.primaryRed),
+                  onPressed: _sendEmergencyMessage,
+                  tooltip: 'Send Emergency',
+                ),
               ],
             ),
-            SizedBox(height: ResponsiveSpacing.sm(context)),
-            // Input row
+            SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: ResQLinkTheme.cardDark,
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: TextField(
-                      controller: _messageController,
-                      decoration: InputDecoration(
-                        hintText: widget.p2pService.isConnected
-                            ? 'Type a message...'
-                            : 'Type a message (offline)',
-                        hintStyle: TextStyle(color: Colors.white54),
-                        border: InputBorder.none,
-                        contentPadding: ResponsiveSpacing.padding(
-                          context,
-                          horizontal: ResponsiveSpacing.lg(context),
-                          vertical: ResponsiveSpacing.sm(context),
-                        ),
-                      ),
-                      style: ResponsiveText.bodyMedium(
-                        context,
-                      ).copyWith(color: Colors.white),
-                      onChanged: _handleTyping,
-                      onSubmitted: (_) => _sendMessage(),
-                      textCapitalization: TextCapitalization.sentences,
-                      maxLines: 4,
-                      minLines: 1,
-                    ),
-                  ),
-                ),
-                SizedBox(width: ResponsiveSpacing.sm(context)),
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [ResQLinkTheme.primaryRed, ResQLinkTheme.darkRed],
-                    ),
-                    shape: BoxShape.circle,
-                  ),
-                  child: IconButton(
-                    icon: Icon(Icons.send_rounded, color: Colors.white),
-                    onPressed: _sendMessage,
-                    splashRadius: 24,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabletMessageInput() {
-    return Container(
-      padding: ResponsiveSpacing.padding(
-        context,
-        all: ResponsiveSpacing.lg(context),
-      ),
-      decoration: BoxDecoration(
-        color: ResQLinkTheme.surfaceDark,
-        border: Border(
-          top: BorderSide(color: ResQLinkTheme.cardDark, width: 1),
-        ),
-      ),
-      child: Column(
-        children: [
-          // Quick actions
-          Row(
-            children: [
-              _buildQuickActionButton(
-                icon: Icons.location_on,
-                color: ResQLinkTheme.locationBlue,
-                onPressed: _sendLocationMessage,
-                tooltip: 'Share Location',
-              ),
-              SizedBox(width: ResponsiveSpacing.md(context)),
-              _buildQuickActionButton(
-                icon: Icons.sos,
-                color: ResQLinkTheme.primaryRed,
-                onPressed: _sendEmergencyMessage,
-                tooltip: 'Emergency SOS',
-              ),
-              Spacer(),
-              if (_isTyping)
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: ResQLinkTheme.primaryRed,
-                      ),
-                    ),
-                    SizedBox(width: ResponsiveSpacing.sm(context)),
-                    ResponsiveTextWidget(
-                      'Typing...',
-                      styleBuilder: (context) => ResponsiveText.bodySmall(
-                        context,
-                      ).copyWith(color: Colors.white54),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-          SizedBox(height: ResponsiveSpacing.md(context)),
-          // Input area
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Container(
-                  constraints: BoxConstraints(maxHeight: 120),
-                  decoration: BoxDecoration(
-                    color: ResQLinkTheme.cardDark,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.1),
-                    ),
-                  ),
                   child: TextField(
                     controller: _messageController,
-                    decoration: InputDecoration(
-                      hintText: widget.p2pService.isConnected
-                          ? 'Type a message...'
-                          : 'Type a message (will be sent when connected)',
-                      hintStyle: ResponsiveText.bodyMedium(
-                        context,
-                      ).copyWith(color: Colors.white54),
-                      border: InputBorder.none,
-                      contentPadding: ResponsiveSpacing.padding(
-                        context,
-                        horizontal: ResponsiveSpacing.lg(context),
-                        vertical: ResponsiveSpacing.md(context),
-                      ),
-                    ),
-                    style: ResponsiveText.bodyLarge(
-                      context,
-                    ).copyWith(color: Colors.white),
                     onChanged: _handleTyping,
-                    onSubmitted: (_) => _sendMessage(),
-                    textCapitalization: TextCapitalization.sentences,
-                    maxLines: 5,
-                    minLines: 1,
-                  ),
-                ),
-              ),
-              SizedBox(width: ResponsiveSpacing.md(context)),
-              Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [ResQLinkTheme.primaryRed, ResQLinkTheme.darkRed],
-                  ),
-                  shape: BoxShape.circle,
-                ),
-                child: IconButton(
-                  icon: Icon(Icons.send_rounded, color: Colors.white, size: 24),
-                  onPressed: _sendMessage,
-                  splashRadius: 28,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ✅ Helper Widgets
-  Widget _buildQuickActionButton({
-    required IconData icon,
-    required Color color,
-    required VoidCallback onPressed,
-    required String tooltip,
-  }) {
-    return Tooltip(
-      message: tooltip,
-      child: Container(
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.2),
-          shape: BoxShape.circle,
-          border: Border.all(color: color.withValues(alpha: 0.5)),
-        ),
-        child: IconButton(
-          icon: Icon(icon, color: color, size: 20),
-          onPressed: onPressed,
-          splashRadius: 20,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildResponsiveMessageBubble(
-    MessageModel message, {
-    required bool isMobile,
-  }) {
-    final isMe = message.isMe;
-    final hasLocation = message.hasLocation;
-    final isEmergency =
-        message.isEmergency ||
-        message.type == 'emergency' ||
-        message.type == 'sos';
-
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth:
-              MediaQuery.of(context).size.width * (isMobile ? 0.75 : 0.65),
-        ),
-        margin: ResponsiveSpacing.padding(
-          context,
-          vertical: ResponsiveSpacing.xs(context),
-        ),
-        child: Column(
-          crossAxisAlignment: isMe
-              ? CrossAxisAlignment.end
-              : CrossAxisAlignment.start,
-          children: [
-            if (!isMe)
-              Padding(
-                padding: ResponsiveSpacing.padding(
-                  context,
-                  left: ResponsiveSpacing.sm(context),
-                  bottom: ResponsiveSpacing.xs(context),
-                ),
-                child: ResponsiveTextWidget(
-                  message.fromUser,
-                  styleBuilder: (context) =>
-                      ResponsiveText.caption(context).copyWith(
-                        color: Colors.white60,
-                        fontWeight: FontWeight.w500,
+                    decoration: InputDecoration(
+                      hintText: 'Type a message...',
+                      hintStyle: TextStyle(color: Colors.white54),
+                      filled: true,
+                      fillColor: ResQLinkTheme.cardDark,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
                       ),
-                ),
-              ),
-
-            Container(
-              padding: ResponsiveSpacing.padding(
-                context,
-                all: ResponsiveSpacing.md(context),
-              ),
-              decoration: BoxDecoration(
-                gradient: _getMessageGradient(isMe, isEmergency, message.type),
-                borderRadius: BorderRadius.circular(isMobile ? 16 : 20)
-                    .copyWith(
-                      topLeft: isMe ? null : Radius.circular(isMobile ? 4 : 6),
-                      topRight: isMe ? Radius.circular(isMobile ? 4 : 6) : null,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                     ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 4,
-                    offset: Offset(0, 2),
+                    style: TextStyle(color: Colors.white),
+                    maxLines: null,
                   ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (isEmergency) _buildEmergencyHeader(message.type),
-
-                  ResponsiveTextWidget(
-                    message.message,
-                    styleBuilder: (context) =>
-                        (isMobile
-                                ? ResponsiveText.bodyMedium(context)
-                                : ResponsiveText.bodyLarge(context))
-                            .copyWith(color: Colors.white, height: 1.4),
-                  ),
-
-                  if (hasLocation) ...[
-                    SizedBox(height: ResponsiveSpacing.sm(context)),
-                    _buildLocationPreview(message),
-                  ],
-
-                  SizedBox(height: ResponsiveSpacing.xs(context)),
-
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ResponsiveTextWidget(
-                        _formatTime(message.dateTime),
-                        styleBuilder: (context) => ResponsiveText.caption(
-                          context,
-                        ).copyWith(color: Colors.white70),
-                      ),
-                      if (isMe) ...[
-                        SizedBox(width: ResponsiveSpacing.xs(context)),
-                        _buildMessageStatusIcon(message.status),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmergencyHeader(String type) {
-    return Padding(
-      padding: ResponsiveSpacing.padding(
-        context,
-        bottom: ResponsiveSpacing.sm(context),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            type == 'sos' ? Icons.sos : Icons.warning,
-            color: Colors.white,
-            size: 16,
-          ),
-          SizedBox(width: ResponsiveSpacing.xs(context)),
-          ResponsiveTextWidget(
-            type.toUpperCase(),
-            styleBuilder: (context) => ResponsiveText.caption(context).copyWith(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLocationPreview(MessageModel message) {
-    return InkWell(
-      onTap: () => _showLocationDetails(message),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        height: 120,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: FlutterMap(
-          options: MapOptions(
-            initialCenter: LatLng(message.latitude!, message.longitude!),
-            initialZoom: 15.0,
-            interactionOptions: InteractionOptions(flags: InteractiveFlag.none),
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.resqlink.app',
-            ),
-            MarkerLayer(
-              markers: [
-                Marker(
-                  point: LatLng(message.latitude!, message.longitude!),
-                  child: Icon(
-                    Icons.location_pin,
-                    color: ResQLinkTheme.primaryRed,
-                    size: 30,
-                  ),
+                ),
+                SizedBox(width: 8),
+                FloatingActionButton(
+                  mini: true,
+                  backgroundColor: ResQLinkTheme.primaryRed,
+                  onPressed: () {
+                    final text = _messageController.text.trim();
+                    if (text.isNotEmpty) {
+                      _sendMessage(text, MessageType.text);
+                      _messageController.clear();
+                    }
+                  },
+                  child: Icon(Icons.send, color: Colors.white),
                 ),
               ],
             ),
           ],
         ),
       ),
-    );
-  }
-
-  LinearGradient _getMessageGradient(bool isMe, bool isEmergency, String type) {
-    if (isEmergency) {
-      return LinearGradient(
-        colors: [ResQLinkTheme.primaryRed, ResQLinkTheme.darkRed],
-      );
-    }
-
-    if (type == 'location') {
-      return LinearGradient(
-        colors: [ResQLinkTheme.locationBlue, Colors.blue.shade700],
-      );
-    }
-
-    if (isMe) {
-      return LinearGradient(
-        colors: [ResQLinkTheme.safeGreen, Colors.green.shade700],
-      );
-    }
-
-    return LinearGradient(
-      colors: [ResQLinkTheme.cardDark, Colors.grey.shade800],
     );
   }
 
@@ -3257,55 +1735,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         currentDate.year != previousDate.year;
   }
 
-  Widget _buildDateHeader(DateTime date) {
-    final now = DateTime.now();
-    final isToday =
-        date.day == now.day && date.month == now.month && date.year == now.year;
-    final isYesterday =
-        date.day == now.day - 1 &&
-        date.month == now.month &&
-        date.year == now.year;
-
-    String dateText;
-    if (isToday) {
-      dateText = 'Today';
-    } else if (isYesterday) {
-      dateText = 'Yesterday';
-    } else {
-      dateText = '${date.day}/${date.month}/${date.year}';
-    }
-
-    return Padding(
-      padding: ResponsiveSpacing.padding(
-        context,
-        vertical: ResponsiveSpacing.md(context),
-      ),
-      child: Center(
-        child: Container(
-          padding: ResponsiveSpacing.padding(
-            context,
-            horizontal: ResponsiveSpacing.sm(context),
-            vertical: ResponsiveSpacing.xs(context),
-          ),
-          decoration: BoxDecoration(
-            color: ResQLinkTheme.cardDark,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: ResponsiveTextWidget(
-            dateText,
-            styleBuilder: (context) => ResponsiveText.caption(
-              context,
-            ).copyWith(color: Colors.white70, fontWeight: FontWeight.w500),
-          ),
-        ),
-      ),
-    );
-  }
-
   String _formatTime(DateTime time) {
-    final hour = time.hour.toString().padLeft(2, '0');
+    final hour = time.hour;
     final minute = time.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+
+    return '$displayHour:$minute $period';
   }
 
   void _showLocationDetails(MessageModel message) {
@@ -3313,105 +1749,28 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     showDialog(
       context: context,
-      builder: (context) => Dialog(
+      builder: (context) => AlertDialog(
         backgroundColor: ResQLinkTheme.cardDark,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.9,
-          height: MediaQuery.of(context).size.height * 0.6,
-          padding: ResponsiveSpacing.padding(
-            context,
-            all: ResponsiveSpacing.md(context),
-          ),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.location_on, color: ResQLinkTheme.locationBlue),
-                  SizedBox(width: ResponsiveSpacing.sm(context)),
-                  ResponsiveTextWidget(
-                    'Location Details',
-                    styleBuilder: (context) => ResponsiveText.heading3(
-                      context,
-                    ).copyWith(color: Colors.white),
-                  ),
-                  Spacer(),
-                  IconButton(
-                    icon: Icon(Icons.close, color: Colors.white),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-              SizedBox(height: ResponsiveSpacing.md(context)),
-              Expanded(
-                child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: LatLng(
-                      message.latitude!,
-                      message.longitude!,
-                    ),
-                    initialZoom: 15.0,
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.resqlink.app',
-                    ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: LatLng(message.latitude!, message.longitude!),
-                          child: Icon(
-                            Icons.location_pin,
-                            color: ResQLinkTheme.primaryRed,
-                            size: 40,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(height: ResponsiveSpacing.md(context)),
-              Container(
-                padding: ResponsiveSpacing.padding(
-                  context,
-                  all: ResponsiveSpacing.sm(context),
-                ),
-                decoration: BoxDecoration(
-                  color: ResQLinkTheme.surfaceDark,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    ResponsiveTextWidget(
-                      'Coordinates',
-                      styleBuilder: (context) =>
-                          ResponsiveText.bodyLarge(context).copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                    SizedBox(height: ResponsiveSpacing.xs(context)),
-                    ResponsiveTextWidget(
-                      'Lat: ${message.latitude!.toStringAsFixed(6)}',
-                      styleBuilder: (context) => ResponsiveText.bodyMedium(
-                        context,
-                      ).copyWith(color: Colors.white70),
-                    ),
-                    ResponsiveTextWidget(
-                      'Lng: ${message.longitude!.toStringAsFixed(6)}',
-                      styleBuilder: (context) => ResponsiveText.bodyMedium(
-                        context,
-                      ).copyWith(color: Colors.white70),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+        title: Text('Location Details', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Latitude: ${message.latitude!.toStringAsFixed(6)}',
+              style: TextStyle(color: Colors.white70),
+            ),
+            Text(
+              'Longitude: ${message.longitude!.toStringAsFixed(6)}',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
       ),
     );
   }

@@ -25,6 +25,8 @@ class _HomePageState extends State<HomePage>
   LocationModel? _currentLocation;
   String? _userId = "user_${DateTime.now().millisecondsSinceEpoch}";
   bool _isP2PInitialized = false;
+  final StreamController<LocationModel> _locationController =
+      StreamController<LocationModel>.broadcast();
 
   // Store the settings service reference
   SettingsService? _settingsService;
@@ -42,8 +44,16 @@ class _HomePageState extends State<HomePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _locationController.stream.listen((location) {
+      if (mounted) {
+        setState(() {
+          _currentLocation = location;
+        });
+        // Update all pages that need location
+        _updatePagesWithLocation(location);
+      }
+    });
 
-    // Don't access context.read here - do it in didChangeDependencies
     _loadCurrentLocation();
     _initializeP2P();
     _initializeMapService();
@@ -78,15 +88,21 @@ class _HomePageState extends State<HomePage>
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    // Safely get the settings service reference here
     if (_settingsService == null) {
       _settingsService = context.read<SettingsService>();
-      // Load settings and apply them
-      _settingsService!.loadSettings().then((_) {
+
+      _settingsService!.loadSettings().then((_) async {
         if (mounted) {
-          _onSettingsChanged(); // Apply settings to P2P service
+          _onSettingsChanged();
+
+          if (!_isP2PInitialized) {
+            await _initializeP2P();
+          }
+
+          await _loadCurrentLocation();
         }
       });
+
       _settingsService!.addListener(_onSettingsChanged);
     }
   }
@@ -96,6 +112,16 @@ class _HomePageState extends State<HomePage>
     if (state == AppLifecycleState.resumed) {
       // Check permissions when app resumes
       _p2pService.checkAndRequestPermissions();
+    }
+  }
+
+  void _updatePagesWithLocation(LocationModel location) {
+    // Update message page
+    if (selectedIndex == 2 && pages.length > 2) {
+      pages[2] = MessagePage(
+        p2pService: _p2pService,
+        currentLocation: location,
+      );
     }
   }
 
@@ -191,21 +217,61 @@ class _HomePageState extends State<HomePage>
   void _shareLocationViaP2P(LocationModel location) async {
     if (!_isP2PInitialized) return;
 
-    await _p2pService.sendMessage(
-      message: 'Shared location: ${location.type.name}',
-      type: MessageType.location,
-      latitude: location.latitude,
-      longitude: location.longitude,
-    );
+    // Generate proper message ID
+    final messageId =
+        'msg_${DateTime.now().millisecondsSinceEpoch}_${_p2pService.deviceId?.hashCode ?? 0}';
 
-    if (!mounted) return;
+    try {
+      await _p2pService.sendMessage(
+        id: messageId,
+        senderName: _p2pService.userName ?? 'Unknown',
+        message: 'Shared location: ${location.type.name}',
+        type: MessageType.location,
+        ttl: 5,
+        routePath: [],
+        latitude: location.latitude,
+        longitude: location.longitude,
+      );
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Location shared via P2P network'),
-        backgroundColor: Colors.green,
-      ),
-    );
+      // ENHANCED: Update current location state AND broadcast to location stream
+      setState(() {
+        _currentLocation = location;
+      });
+
+      // Broadcast to location stream for all pages
+      _locationController.add(location);
+
+      // FIXED: Save to your existing database
+      await _saveLocationToDatabase(location);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Location shared via P2P network'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Error sharing location via P2P: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to share location: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _saveLocationToDatabase(LocationModel location) async {
+    try {
+      // Use your existing LocationService from GPS page
+      await LocationService.insertLocation(location);
+      debugPrint('✅ Location saved to database');
+    } catch (e) {
+      debugPrint('❌ Error saving location to database: $e');
+    }
   }
 
   void _onSettingsChanged() {
@@ -834,6 +900,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
       await widget.p2pService.sendMessage(
         message: 'Test message from ${widget.p2pService.userName}',
         type: MessageType.text,
+        senderName: '',
       );
 
       if (mounted) {
@@ -2938,6 +3005,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                                   type: MessageType.location,
                                   latitude: _latestLocation!.latitude,
                                   longitude: _latestLocation!.longitude,
+                                  senderName: '',
                                 );
                                 if (!mounted) return;
 

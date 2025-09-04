@@ -417,37 +417,26 @@ class _GpsPageState extends State<GpsPage>
   void dispose() {
     print('🔧 GpsPage: Starting disposal...');
 
-    WidgetsBinding.instance.removeObserver(this);
+    if (mounted) {
+      WidgetsBinding.instance.removeObserver(this);
+    }
 
+    // Cancel timers safely
     _locationTimer?.cancel();
     _locationTimer = null;
-
-    _sosTimer?.cancel();
-    _sosTimer = null;
-
-    _batteryTimer?.cancel();
-    _batteryTimer = null;
 
     _positionStream?.cancel();
     _positionStream = null;
 
-    _downloadProgressSubscription?.cancel();
-    _downloadProgressSubscription = null;
-
-    _connectivitySubscription?.cancel();
-    _connectivitySubscription = null;
-
-    if (_pulseController.isAnimating) {
-      _pulseController.stop();
+    try {
+      if (_pulseController.isAnimating) {
+        _pulseController.stop();
+      }
+      _pulseController.dispose();
+    } catch (e) {
+      debugPrint('Error disposing pulse controller: $e');
     }
-    _pulseController.dispose();
 
-    if (_sosAnimationController.isAnimating) {
-      _sosAnimationController.stop();
-    }
-    _sosAnimationController.dispose();
-
-    print('✅ GpsPage: Disposal completed');
     super.dispose();
   }
 
@@ -1128,7 +1117,6 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _updateCurrentLocation(Position position) {
-    // Add mounted check at the very beginning
     if (!mounted) {
       print('⚠️ Skipping location update - widget not mounted');
       return;
@@ -1150,6 +1138,10 @@ class _GpsPageState extends State<GpsPage>
       _lastKnownLocation = locationModel;
       _errorMessage = '';
     });
+
+    if (widget.onLocationShare != null) {
+      widget.onLocationShare!(locationModel);
+    }
 
     if (_currentEmergencyLevel.index >= EmergencyLevel.warning.index ||
         _sosMode) {
