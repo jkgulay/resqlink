@@ -584,6 +584,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.5.0"
+  http_methods:
+    dependency: transitive
+    description:
+      name: http_methods
+      sha256: "6bccce8f1ec7b5d701e7921dca35e202d425b57e317ba1a37f2638590e29e566"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.1"
   http_parser:
     dependency: transitive
     description:
@@ -768,6 +776,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.0"
+  multicast_dns:
+    dependency: "direct main"
+    description:
+      name: multicast_dns
+      sha256: de72ada5c3db6fdd6ad4ae99452fe05fb403c4bb37c67ceb255ddd37d2b5b1eb
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.3"
   nested:
     dependency: transitive
     description:
@@ -776,6 +792,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.0"
+  network_info_plus:
+    dependency: "direct main"
+    description:
+      name: network_info_plus
+      sha256: f926b2ba86aa0086a0dfbb9e5072089bc213d854135c1712f1d29fc89ba3c877
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.1.4"
+  network_info_plus_platform_interface:
+    dependency: transitive
+    description:
+      name: network_info_plus_platform_interface
+      sha256: "7e7496a8a9d8136859b8881affc613c4a21304afeb6c324bcefc4bd0aff6b94b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.2"
   nm:
     dependency: transitive
     description:
@@ -1008,6 +1040,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.4.1"
+  shelf:
+    dependency: "direct main"
+    description:
+      name: shelf
+      sha256: e7dd780a7ffb623c57850b33f43309312fc863fb6aa3d276a754bb299839ef12
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.4.2"
+  shelf_router:
+    dependency: "direct main"
+    description:
+      name: shelf_router
+      sha256: f5e5d492440a7fb165fe1e2e1a623f31f734d3370900070b2b1e0d0428d59864
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.4"
   sky_engine:
     dependency: transitive
     description: flutter
@@ -1197,6 +1245,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.1"
+  web_socket:
+    dependency: transitive
+    description:
+      name: web_socket
+      sha256: "34d64019aa8e36bf9842ac014bb5d2f5586ca73df5e4d9bf5c936975cae6982c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.1"
+  web_socket_channel:
+    dependency: "direct main"
+    description:
+      name: web_socket_channel
+      sha256: d645757fb0f4773d602444000a8131ff5d48c9e47adfe9772652dd1a4f2d45c8
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.3"
   wifi_direct_plugin:
     dependency: "direct main"
     description:
@@ -1205,6 +1269,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.0.9"
+  wifi_iot:
+    dependency: "direct main"
+    description:
+      name: wifi_iot
+      sha256: "0861aed0c0afd6031b4337811d31cdd181c594a8a2c73e94826ea21d2cb4707b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.19+2"
   wifi_scan:
     dependency: "direct main"
     description:

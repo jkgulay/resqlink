@@ -275,7 +275,7 @@ class MessageSyncService {
         ),
         targetDeviceId: message.endpointId,
         latitude: message.latitude,
-        longitude: message.longitude,
+        longitude: message.longitude, senderName: '',
       );
       debugPrint('📡 Message sent via P2P: ${message.messageId}');
       return true;
