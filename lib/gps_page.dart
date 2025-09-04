@@ -344,7 +344,7 @@ class _GpsPageState extends State<GpsPage>
   final MapController _mapController = MapController();
   final Battery _battery = Battery();
   bool _isMapReady = false;
-
+  bool _isMoving = false;
   LocationModel? _lastKnownLocation;
   LatLng? _currentLocation;
   bool _isLocationServiceEnabled = false;
@@ -415,26 +415,35 @@ class _GpsPageState extends State<GpsPage>
 
   @override
   void dispose() {
-    print('🔧 GpsPage: Starting disposal...');
+    debugPrint('🔧 GpsPage: Starting disposal...');
 
-    if (mounted) {
-      WidgetsBinding.instance.removeObserver(this);
-    }
-
-    // Cancel timers safely
     _locationTimer?.cancel();
-    _locationTimer = null;
-
+    _sosTimer?.cancel();
+    _batteryTimer?.cancel();
+    _downloadProgressSubscription?.cancel();
+    _connectivitySubscription?.cancel();
     _positionStream?.cancel();
+
+    _locationTimer = null;
+    _sosTimer = null;
+    _batteryTimer = null;
+    _downloadProgressSubscription = null;
+    _connectivitySubscription = null;
     _positionStream = null;
 
     try {
-      if (_pulseController.isAnimating) {
-        _pulseController.stop();
-      }
-      _pulseController.dispose();
+      WidgetsBinding.instance.removeObserver(this);
     } catch (e) {
-      debugPrint('Error disposing pulse controller: $e');
+      debugPrint('Error removing WidgetsBindingObserver: $e');
+    }
+
+    try {
+      if (_pulseController.isAnimating) _pulseController.stop();
+      if (_sosAnimationController.isAnimating) _sosAnimationController.stop();
+      _pulseController.dispose();
+      _sosAnimationController.dispose();
+    } catch (e) {
+      debugPrint('Animation disposal error: $e');
     }
 
     super.dispose();
@@ -446,7 +455,52 @@ class _GpsPageState extends State<GpsPage>
       _checkLocationPermission();
       _checkBatteryLevel();
       _updateCacheInfo();
+      _optimizeLocationUpdates();
     }
+  }
+
+  void _optimizeLocationUpdates() {
+    final settings = LocationSettings(
+      accuracy: _batteryLevel < 20
+          ? LocationAccuracy.medium
+          : LocationAccuracy.high,
+      distanceFilter: _isMoving ? 5 : 20,
+      timeLimit: Duration(seconds: 10),
+    );
+
+    final updateInterval = _sosMode
+        ? Duration(seconds: 15)
+        : _isMoving
+        ? Duration(seconds: 30)
+        : Duration(minutes: 2);
+
+    _applyLocationSettings(settings, updateInterval);
+  }
+
+  void _applyLocationSettings(LocationSettings settings, Duration interval) {
+    _locationTimer?.cancel();
+    _positionStream?.cancel();
+
+    _positionStream = Geolocator.getPositionStream(locationSettings: settings)
+        .listen(
+          (Position position) {
+            if (mounted) {
+              _updateCurrentLocation(position);
+              _isMoving = position.speed > 1.0;
+            }
+          },
+          onError: (error) {
+            debugPrint('Position stream error: $error');
+          },
+        );
+
+    _locationTimer = Timer.periodic(interval, (timer) {
+      if (mounted && _isLocationServiceEnabled) {
+        _getCurrentLocation();
+      } else {
+        timer.cancel();
+      }
+    });
   }
 
   Future<void> _initializeApp() async {
@@ -979,11 +1033,14 @@ class _GpsPageState extends State<GpsPage>
     try {
       final level = await _battery.batteryLevel;
       if (mounted) {
+        final oldLevel = _batteryLevel;
         setState(() {
           _batteryLevel = level;
         });
-      } else {
-        print('⚠️ Skipping battery level update - widget not mounted');
+
+        if ((oldLevel - level).abs() >= 10) {
+          _optimizeLocationUpdates();
+        }
       }
     } catch (e) {
       debugPrint('Error checking battery level: $e');
@@ -998,7 +1055,7 @@ class _GpsPageState extends State<GpsPage>
 
     try {
       await _getCurrentLocation();
-
+      await _startLocationTracking();
       final distanceFilter = _batteryLevel < 20 ? 20 : 10;
       final accuracy = _batteryLevel < 20
           ? LocationAccuracy.medium
@@ -1162,6 +1219,7 @@ class _GpsPageState extends State<GpsPage>
 
     _sosAnimationController.repeat(reverse: true);
     _showMessage('SOS ACTIVATED! Broadcasting location...', isDanger: true);
+    _optimizeLocationUpdates();
 
     _sendSOSLocation();
 
@@ -1176,10 +1234,7 @@ class _GpsPageState extends State<GpsPage>
   }
 
   void _deactivateSOS() {
-    if (!mounted) {
-      print('⚠️ Skipping SOS deactivation - widget not mounted');
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
       _sosMode = false;
@@ -1191,6 +1246,7 @@ class _GpsPageState extends State<GpsPage>
     _sosAnimationController.stop();
     _sosAnimationController.reset();
 
+    _optimizeLocationUpdates();
     _showMessage('SOS deactivated', isSuccess: true);
   }
 

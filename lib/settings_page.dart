@@ -947,11 +947,15 @@ class SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _setConnectionMode(String mode) async {
+    setState(() => _isLoading = true);
+
     try {
       // Update settings service first
       await context.read<SettingsService>().setConnectionMode(mode);
 
       if (widget.p2pService != null) {
+        _showMessage('Switching to $mode mode...', isSuccess: false);
+
         switch (mode) {
           case 'wifi_direct':
             widget.p2pService!.setHotspotFallbackEnabled(false);

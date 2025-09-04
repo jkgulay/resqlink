@@ -147,6 +147,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   final SignalMonitoringService _signalService = SignalMonitoringService();
   final EmergencyRecoveryService _recoveryService = EmergencyRecoveryService();
 
+  final List<Map<String, dynamic>> _offlineMessageQueue = [];
+  Timer? _queueProcessingTimer;
+
   // State Variables
   List<MessageSummary> _conversations = [];
   List<MessageModel> _selectedConversationMessages = [];
@@ -182,6 +185,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initialize();
+    _initializeOfflineQueue();
   }
 
   void _initialize() async {
@@ -254,6 +258,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     _typingTimer?.cancel();
     _typingTimer = null;
 
+    _queueProcessingTimer?.cancel();
+    _queueProcessingTimer = null;
+
     try {
       _syncService.dispose();
       _signalService.dispose();
@@ -296,6 +303,49 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     if (!mounted) return;
     _loadConversations();
     setState(() {});
+  }
+
+  void _initializeOfflineQueue() {
+    _queueProcessingTimer = Timer.periodic(Duration(seconds: 30), (timer) {
+      if (widget.p2pService.isConnected && _offlineMessageQueue.isNotEmpty) {
+        _processOfflineQueue();
+      }
+    });
+  }
+
+  Future<void> _processOfflineQueue() async {
+    if (!mounted || _offlineMessageQueue.isEmpty) return;
+
+    debugPrint(
+      '📤 Processing ${_offlineMessageQueue.length} offline messages...',
+    );
+
+    final messagesToProcess = List.from(_offlineMessageQueue);
+    _offlineMessageQueue.clear();
+
+    for (final queuedMessage in messagesToProcess) {
+      try {
+        await widget.p2pService.sendMessage(
+          message: queuedMessage['text'],
+          type: MessageType.values.firstWhere(
+            (e) => e.name == queuedMessage['type'],
+            orElse: () => MessageType.text,
+          ),
+          targetDeviceId: queuedMessage['targetId'],
+          senderName: '',
+        );
+
+        debugPrint('✅ Offline message sent: ${queuedMessage['text']}');
+      } catch (e) {
+        debugPrint('❌ Failed to send offline message: $e');
+        // Re-queue the message
+        _offlineMessageQueue.add(queuedMessage);
+      }
+    }
+
+    if (mounted && _offlineMessageQueue.isEmpty) {
+      _showSuccessMessage('All offline messages sent!');
+    }
   }
 
   void _onDevicesDiscovered(List<Map<String, dynamic>> devices) {
@@ -1431,6 +1481,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       controller: _scrollController,
       padding: EdgeInsets.all(16),
       itemCount: _selectedConversationMessages.length,
+      itemExtent: null, 
+      cacheExtent: 200, 
       itemBuilder: (context, index) {
         final message = _selectedConversationMessages[index];
         final previousMessage = index > 0
@@ -1439,6 +1491,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         final showDateHeader = _shouldShowDateHeader(message, previousMessage);
 
         return Column(
+          key: ValueKey(message.messageId), 
           children: [
             if (showDateHeader) _buildDateHeader(message.dateTime),
             _buildMessageBubble(message),

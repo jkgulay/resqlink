@@ -14,6 +14,7 @@ class DatabaseService {
   static Database? _database;
   static bool _isInitializing = false;
   static final List<Completer<Database>> _pendingConnections = [];
+  static Timer? _healthCheckTimer;
 
   // Table names
   static const String _userTable = 'users';
@@ -22,9 +23,13 @@ class DatabaseService {
   static const String _pendingMessagesTable = 'pending_messages';
 
   static Future<Database> get database async {
-    if (_database != null && _database!.isOpen) return _database!;
+    if (_database != null && _database!.isOpen) {
+      // ✅ ADD: Periodic health check
+      _startHealthCheck();
+      return _database!;
+    }
 
-    // ✅ FIX: Handle concurrent access
+    // Your existing concurrent access handling is excellent
     if (_isInitializing) {
       final completer = Completer<Database>();
       _pendingConnections.add(completer);
@@ -37,13 +42,43 @@ class DatabaseService {
 
       // Complete all pending connections
       for (final completer in _pendingConnections) {
-        completer.complete(_database!);
+        if (!completer.isCompleted) {
+          completer.complete(_database!);
+        }
       }
       _pendingConnections.clear();
 
+      _startHealthCheck();
       return _database!;
     } finally {
       _isInitializing = false;
+    }
+  }
+
+  static void _startHealthCheck() {
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = Timer.periodic(Duration(minutes: 5), (timer) async {
+      try {
+        if (_database != null && _database!.isOpen) {
+          // Simple health check query
+          await _database!.rawQuery('SELECT 1');
+        }
+      } catch (e) {
+        debugPrint('❌ Database health check failed: $e');
+        // Reset database connection
+        _database = null;
+        timer.cancel();
+      }
+    });
+  }
+
+  static Future<void> dispose() async {
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = null;
+
+    if (_database != null && _database!.isOpen) {
+      await _database!.close();
+      _database = null;
     }
   }
 
@@ -213,6 +248,32 @@ class DatabaseService {
     } catch (e) {
       debugPrint('❌ Error getting failed messages: $e');
       return [];
+    }
+  }
+
+  static Future<void> insertMessagesBatch(List<MessageModel> messages) async {
+    if (messages.isEmpty) return;
+
+    final db = await database;
+    final batch = db.batch();
+
+    for (final message in messages) {
+      batch.insert(_messagesTable, message.toMap());
+    }
+
+    try {
+      await batch.commit(noResult: true);
+      debugPrint('✅ Batch inserted ${messages.length} messages');
+    } catch (e) {
+      debugPrint('❌ Batch insert failed: $e');
+      // Fallback to individual inserts
+      for (final message in messages) {
+        try {
+          await insertMessage(message);
+        } catch (e2) {
+          debugPrint('❌ Individual insert failed: $e2');
+        }
+      }
     }
   }
 

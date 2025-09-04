@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:async';
 import 'dart:convert';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:resqlink/gps_page.dart';
@@ -416,7 +417,6 @@ class P2PConnectionService with ChangeNotifier {
   void _startConnectionHealthMonitoring() {
     _connectionHealthTimer = Timer.periodic(Duration(seconds: 15), (timer) {
       if (_isConnected) {
-        // Check connection health
         _checkConnectionHealth();
       }
     });
@@ -447,7 +447,67 @@ class P2PConnectionService with ChangeNotifier {
   }
 
   void _checkConnectionHealth() {
-    // Implementation for connection health checking
+    if (_isDisposed) return;
+
+    try {
+      // Test all active connections
+      bool hasHealthyConnection = false;
+
+      // Test WebSocket connections
+      for (final deviceId in _webSocketConnections.keys.toList()) {
+        try {
+          _webSocketConnections[deviceId]!.sink.add('{"type":"ping"}');
+          hasHealthyConnection = true;
+        } catch (e) {
+          debugPrint('WebSocket health check failed for $deviceId: $e');
+          _webSocketConnections.remove(deviceId);
+          // ✅ USE: Handle connection failure
+          _handleConnectionFailure();
+        }
+      }
+
+      // Test TCP sockets
+      for (final deviceId in _deviceSockets.keys.toList()) {
+        try {
+          _deviceSockets[deviceId]!.write('ping');
+          hasHealthyConnection = true;
+        } catch (e) {
+          debugPrint('TCP health check failed for $deviceId: $e');
+          _deviceSockets.remove(deviceId);
+          // ✅ USE: Handle connection failure
+          _handleConnectionFailure();
+        }
+      }
+
+      // Check WiFi Direct connection
+      if (_currentConnectionMode == ConnectionMode.wifiDirect && _isConnected) {
+        try {
+          // Test by sending a ping
+          WifiDirectPlugin.sendText('{"type":"ping"}');
+          hasHealthyConnection = true;
+        } catch (e) {
+          debugPrint('WiFi Direct health check failed: $e');
+          // ✅ USE: Handle connection failure
+          _handleConnectionFailure();
+        }
+      }
+
+      // Update connection status
+      if (!hasHealthyConnection && _isConnected) {
+        debugPrint('❌ No healthy connections detected');
+        _isConnected = false;
+        notifyListeners();
+        // ✅ USE: Handle complete connection loss
+        _handleConnectionFailure();
+      } else if (hasHealthyConnection) {
+        _consecutiveFailures = 0; // Reset failure counter on success
+        _lastSuccessfulPing = DateTime.now();
+      }
+    } catch (e) {
+      debugPrint('Connection health check error: $e');
+      // ✅ USE: Handle check failure
+      _handleConnectionFailure();
+    }
   }
 
   String _generateMessageId() {
@@ -608,7 +668,6 @@ class P2PConnectionService with ChangeNotifier {
     });
   }
 
-  // Enhanced createEmergencyHotspot method with fallback:
   Future<bool> createEmergencyHotspot({String? deviceId}) async {
     try {
       await WiFiForIoTPlugin.setEnabled(true);
@@ -617,13 +676,25 @@ class P2PConnectionService with ChangeNotifier {
           "$resqlinkPrefix${deviceId ?? DateTime.now().millisecondsSinceEpoch}";
 
       bool configSuccess = false;
-      try {
-        await WiFiForIoTPlugin.setWiFiAPSSID(hotspotSSID);
-        await WiFiForIoTPlugin.setWiFiAPPreSharedKey(emergencyPassword);
-        configSuccess = true;
-        debugPrint('✅ WiFi AP configured using legacy methods');
-      } catch (e) {
-        debugPrint('⚠️ Legacy WiFi AP config failed (Android SDK 26+): $e');
+
+      if (Platform.isAndroid) {
+        try {
+          final androidInfo = await DeviceInfoPlugin().androidInfo;
+          if (androidInfo.version.sdkInt < 26) {
+            await WiFiForIoTPlugin.setWiFiAPSSID(hotspotSSID);
+            await WiFiForIoTPlugin.setWiFiAPPreSharedKey(emergencyPassword);
+            configSuccess = true;
+            debugPrint('✅ WiFi AP configured using legacy methods (SDK < 26)');
+          } else {
+            debugPrint(
+              '⚠️ Android SDK 26+: Using system defaults for hotspot config',
+            );
+            configSuccess = false; // Will use system defaults
+          }
+        } catch (e) {
+          debugPrint('⚠️ Legacy WiFi AP config failed (Android SDK 26+): $e');
+          configSuccess = false;
+        }
       }
 
       // Enable hotspot
@@ -654,6 +725,18 @@ class P2PConnectionService with ChangeNotifier {
     } catch (e) {
       debugPrint('❌ Error creating emergency hotspot: $e');
       return false;
+    }
+  }
+
+  Future<void> _handleConnectionFailure() async {
+    _consecutiveFailures++;
+
+    if (_consecutiveFailures >= 3) {
+      debugPrint(
+        '🔄 Multiple connection failures detected, starting recovery...',
+      );
+      await _enhancedConnectionRecovery();
+      _consecutiveFailures = 0;
     }
   }
 
@@ -1241,7 +1324,6 @@ class P2PConnectionService with ChangeNotifier {
       final deviceId = device['deviceAddress'] as String;
       final port = device['port'] as int? ?? defaultPort;
 
-      // Try to connect via HTTP/WebSocket first
       final wsUrl = Uri.parse('ws://${device['name']}:$port/ws');
       final wsChannel = WebSocketChannel.connect(wsUrl);
 
@@ -1250,10 +1332,21 @@ class P2PConnectionService with ChangeNotifier {
       _webSocketConnections[deviceId] = wsChannel;
 
       wsChannel.stream.listen(
-        (message) => _handleIncomingWebSocketMessage(message),
+        (message) {
+          _handleIncomingWebSocketMessage(message);
+          _consecutiveFailures = 0; // Reset on successful message
+        },
+        onError: (error) {
+          debugPrint('WebSocket error: $error');
+          // ✅ USE: Handle WebSocket error
+          _handleConnectionFailure();
+        },
         onDone: () {
+          debugPrint('WebSocket connection closed for $deviceId');
           _webSocketConnections.remove(deviceId);
           _connectedDevices.remove(deviceId);
+          // ✅ USE: Handle WebSocket disconnection
+          _handleConnectionFailure();
           notifyListeners();
         },
       );
@@ -1274,6 +1367,8 @@ class P2PConnectionService with ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint("❌ mDNS device connection failed: $e");
+      // ✅ USE: Handle mDNS connection failure
+      _handleConnectionFailure();
       rethrow;
     }
   }
@@ -1460,7 +1555,6 @@ class P2PConnectionService with ChangeNotifier {
 
       debugPrint("📡 Discovered ${peers.length} WiFi Direct peers");
 
-      // Add WiFi Direct peers to unified discovered devices
       for (var peer in peers) {
         final deviceData = {
           'deviceName': peer.deviceName,
@@ -1473,7 +1567,6 @@ class P2PConnectionService with ChangeNotifier {
         _discoveredDevices[peer.deviceAddress] = deviceData;
       }
 
-      // Combine with other discovered devices
       final allDevices = _discoveredDevices.values.toList();
       onDevicesDiscovered?.call(allDevices);
 
@@ -1502,6 +1595,8 @@ class P2PConnectionService with ChangeNotifier {
         _handleConnectionEstablished();
       } else if (!_isConnected && wasConnected) {
         _handleConnectionLost();
+        // ✅ USE: Handle WiFi Direct connection failure
+        _handleConnectionFailure();
       }
 
       _isConnecting = false;
@@ -1510,7 +1605,14 @@ class P2PConnectionService with ChangeNotifier {
 
     WifiDirectPlugin.onTextReceived = (text) {
       if (_isDisposed) return;
-      _handleIncomingText(text);
+      try {
+        _handleIncomingText(text);
+        _consecutiveFailures = 0; // Reset on successful message
+      } catch (e) {
+        debugPrint('Error handling incoming text: $e');
+        // ✅ USE: Handle message processing failure
+        _handleConnectionFailure();
+      }
     };
   }
 
@@ -1573,44 +1675,48 @@ class P2PConnectionService with ChangeNotifier {
 
   Future<void> _sendMessageViaAllChannels(P2PMessage message) async {
     final messageJson = jsonEncode(message.toJson());
+    bool sentSuccessfully = false;
 
     try {
       // Send via WiFi Direct
       if (_isConnected && _currentConnectionMode == ConnectionMode.wifiDirect) {
-        await WifiDirectPlugin.sendText(messageJson);
+        try {
+          await WifiDirectPlugin.sendText(messageJson);
+          sentSuccessfully = true;
+        } catch (e) {
+          debugPrint('WiFi Direct send failed: $e');
+          // ✅ USE: Handle send failure
+          _handleConnectionFailure();
+        }
       }
 
       // Send via WebSocket connections
-      for (final ws in _webSocketConnections.values) {
+      for (final deviceId in _webSocketConnections.keys.toList()) {
         try {
-          ws.sink.add(messageJson);
+          _webSocketConnections[deviceId]!.sink.add(messageJson);
+          sentSuccessfully = true;
         } catch (e) {
-          debugPrint('WebSocket send failed: $e');
+          debugPrint('WebSocket send failed to $deviceId: $e');
+          _webSocketConnections.remove(deviceId);
+          // ✅ USE: Handle WebSocket send failure
+          _handleConnectionFailure();
         }
       }
 
       // Send via TCP sockets
-      for (final socket in _deviceSockets.values) {
+      for (final deviceId in _deviceSockets.keys.toList()) {
         try {
-          socket.write(messageJson);
+          _deviceSockets[deviceId]!.write(messageJson);
+          sentSuccessfully = true;
         } catch (e) {
-          debugPrint('TCP send failed: $e');
+          debugPrint('TCP send failed to $deviceId: $e');
+          _deviceSockets.remove(deviceId);
+          // ✅ USE: Handle TCP send failure
+          _handleConnectionFailure();
         }
       }
 
-      // Send via hotspot TCP if available
-      if (_hotspotSocket != null) {
-        try {
-          _hotspotSocket!.write(messageJson);
-        } catch (e) {
-          debugPrint('Hotspot TCP send failed: $e');
-        }
-      }
-
-      // FIXED: Use message.targetDeviceId
-      if (_webSocketConnections.isEmpty &&
-          _deviceSockets.isEmpty &&
-          !_isConnected) {
+      if (!sentSuccessfully) {
         await _messageQueue.queueMessage(
           message,
           message.targetDeviceId ?? 'broadcast',
@@ -1618,7 +1724,8 @@ class P2PConnectionService with ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error sending message via all channels: $e');
-      // FIXED: Use message.targetDeviceId
+      // ✅ USE: Handle general send failure
+      _handleConnectionFailure();
       await _messageQueue.queueMessage(
         message,
         message.targetDeviceId ?? 'broadcast',
@@ -1626,7 +1733,56 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // Enhanced connection info
+  Future<void> _enhancedConnectionRecovery() async {
+    if (_isDisposed || !_emergencyMode) return;
+
+    try {
+      debugPrint('🔄 Starting enhanced connection recovery...');
+
+      final healthyConnections = <String>[];
+      for (final deviceId in _connectedDevices.keys) {
+        if (await _testConnectionHealth(deviceId)) {
+          healthyConnections.add(deviceId);
+        } else {
+          _connectedDevices.remove(deviceId);
+        }
+      }
+
+      if (healthyConnections.isEmpty) {
+        await _connectionFallbackManager.initiateConnection();
+
+        if (_connectedDevices.isEmpty) {
+          await createEmergencyHotspot();
+        }
+      }
+
+      debugPrint(
+        '✅ Connection recovery completed: ${_connectedDevices.length} active connections',
+      );
+    } catch (e) {
+      debugPrint('❌ Connection recovery failed: $e');
+    }
+  }
+
+  Future<bool> _testConnectionHealth(String deviceId) async {
+    try {
+      if (_webSocketConnections.containsKey(deviceId)) {
+        _webSocketConnections[deviceId]!.sink.add('{"type":"ping"}');
+        return true;
+      }
+
+      if (_deviceSockets.containsKey(deviceId)) {
+        _deviceSockets[deviceId]!.write('ping');
+        return true;
+      }
+
+      return false;
+    } catch (e) {
+      debugPrint('Connection health test failed for $deviceId: $e');
+      return false;
+    }
+  }
+
   Map<String, dynamic> getEnhancedConnectionInfo() {
     return {
       // Basic P2P info
@@ -1746,60 +1902,59 @@ class P2PConnectionService with ChangeNotifier {
   @override
   Future<void> dispose() async {
     if (_isDisposed) return;
-
     _isDisposed = true;
-    debugPrint("🗑️ Disposing Enhanced P2P service...");
 
-    // Cancel all timers
-    _hotspotScanTimer?.cancel();
-    _autoConnectTimer?.cancel();
-    _discoveryTimer?.cancel();
-    _heartbeatTimer?.cancel();
-    _messageCleanupTimer?.cancel();
-    _syncTimer?.cancel();
-    _reconnectTimer?.cancel();
-    _keepAliveTimer?.cancel();
-    _connectionWatchdog?.cancel();
-    _connectionHealthTimer?.cancel();
-    _roleDecisionTimer?.cancel();
-
-    // Dispose enhanced components
-    _emergencyConnectionManager.dispose();
-    _messageQueue.clearAllQueues();
-
-    // Close enhanced sockets and servers
-    await _localServer?.close();
-    await _hotspotServer?.close();
-    _wsChannel?.sink.close();
-
-    for (final ws in _webSocketConnections.values) {
-      ws.sink.close();
+    // Cancel all timers with null checks
+    for (var timer in [
+      _hotspotScanTimer,
+      _autoConnectTimer,
+      _discoveryTimer,
+      _heartbeatTimer,
+      _messageCleanupTimer,
+      _syncTimer,
+      _reconnectTimer,
+      _keepAliveTimer,
+      _connectionWatchdog,
+      _connectionHealthTimer,
+      _roleDecisionTimer,
+    ]) {
+      timer?.cancel();
     }
+
+    await Future.wait([
+      _localServer?.close() ?? Future.value(),
+      _hotspotServer?.close() ?? Future.value(),
+      // Close all WebSocket connections
+      ..._webSocketConnections.values.map((ws) async {
+        try {
+          ws.sink.close();
+        } catch (e) {
+          debugPrint('WS close error: $e');
+        }
+      }),
+    ]);
+
     _webSocketConnections.clear();
-
-    for (final socket in _deviceSockets.values) {
-      socket.close();
-    }
+    _deviceSockets.forEach((id, socket) {
+      try {
+        socket.close();
+      } catch (e) {
+        debugPrint('Socket close error: $e');
+      }
+    });
     _deviceSockets.clear();
 
-    // Stop mDNS
-    _mdnsClient?.stop();
-    _mdnsClient = null;
-
-    // Cancel subscriptions
-    await _peersChangeSubscription?.cancel();
-    await _connectionChangeSubscription?.cancel();
-    await _connectivitySubscription?.cancel();
-
-    // Stop WiFi Direct
     try {
-      await WifiDirectPlugin.disconnect();
-      WifiDirectPlugin.onTextReceived = null;
+      _mdnsClient?.stop();
+      await Future.wait([
+        _peersChangeSubscription?.cancel() ?? Future.value(),
+        _connectionChangeSubscription?.cancel() ?? Future.value(),
+        _connectivitySubscription?.cancel() ?? Future.value(),
+      ]);
     } catch (e) {
-      debugPrint("❌ Error during WiFi Direct cleanup: $e");
+      debugPrint('Cleanup error: $e');
     }
 
-    debugPrint("✅ Enhanced P2P service disposed");
     super.dispose();
   }
 }

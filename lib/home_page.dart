@@ -209,10 +209,17 @@ class _HomePageState extends State<HomePage>
   void _updateUI() {
     if (!mounted) return;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() {});
+    // ✅ OPTIMIZATION: Debounce rapid updates
+    if (_updateTimer?.isActive == true) return;
+
+    _updateTimer = Timer(Duration(milliseconds: 100), () {
+      if (mounted) {
+        setState(() {});
+      }
     });
   }
+
+  Timer? _updateTimer;
 
   void _shareLocationViaP2P(LocationModel location) async {
     if (!_isP2PInitialized) return;
@@ -398,6 +405,8 @@ class _HomePageState extends State<HomePage>
 
   @override
   void dispose() {
+    _updateTimer?.cancel();
+
     WidgetsBinding.instance.removeObserver(this);
 
     // Use the stored reference instead of context.read
