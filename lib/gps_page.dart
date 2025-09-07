@@ -1786,9 +1786,8 @@ class _GpsPageState extends State<GpsPage>
 
   Widget _buildTileLayer() {
     try {
-      // Get current zoom level safely
       int currentZoom = 13; // Default zoom
-      if (_isMapReady && _mapController.camera != null) {
+      if (_isMapReady) {
         currentZoom = _mapController.camera.zoom.round();
       }
 
