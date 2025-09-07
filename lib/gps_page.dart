@@ -1655,8 +1655,10 @@ class _GpsPageState extends State<GpsPage>
         minZoom: 5.0,
         onLongPress: (tapPos, latLng) => _showLocationTypeDialog(),
         onMapReady: () {
-          // Set the flag when map is ready
-          _isMapReady = true;
+          debugPrint('🗺️ Map is ready');
+          setState(() {
+            _isMapReady = true;
+          });
 
           // Now safely use MapController
           if (_currentLocation != null) {
@@ -1665,10 +1667,7 @@ class _GpsPageState extends State<GpsPage>
         },
       ),
       children: [
-        // Don't access MapController.camera before map is ready - use default zoom
-        PhilippinesMapService.instance.getTileLayer(
-          zoom: 13, // Use a default zoom level instead of accessing camera
-        ),
+        _buildTileLayer(),
 
         if (savedLocations.length > 1)
           PolylineLayer(
@@ -1783,6 +1782,34 @@ class _GpsPageState extends State<GpsPage>
         ),
       ],
     );
+  }
+
+  Widget _buildTileLayer() {
+    try {
+      // Get current zoom level safely
+      int currentZoom = 13; // Default zoom
+      if (_isMapReady && _mapController.camera != null) {
+        currentZoom = _mapController.camera.zoom.round();
+      }
+
+      // Get tile layer from map service with proper error handling
+      final tileLayer = PhilippinesMapService.instance.getTileLayer(
+        zoom: currentZoom,
+      );
+
+      debugPrint(
+        '🗺️ Using tile layer with zoom: $currentZoom, online: $_isConnected',
+      );
+      return tileLayer;
+    } catch (e) {
+      debugPrint('❌ Error getting tile layer: $e');
+      // Fallback to basic OpenStreetMap
+      return TileLayer(
+        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        userAgentPackageName: 'com.resqlink.app',
+        maxZoom: 19,
+      );
+    }
   }
 
   Widget _buildTopControls() {

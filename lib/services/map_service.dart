@@ -390,20 +390,33 @@ class PhilippinesMapService {
     }
   }
 
-  /// Get appropriate tile layer based on connectivity and zoom
   TileLayer getTileLayer({int? zoom}) {
     if (!_isInitialized) {
+      debugPrint('⚠️ Map service not initialized, using fallback');
       return _createFallbackTileLayer();
     }
 
-    if (_isOnline) {
-      return _onlineTileLayer;
-    } else {
-      // Use higher zoom cache if available, otherwise use base Philippines tiles
-      if (zoom != null && zoom > 12) {
-        return _userCacheTileLayer;
+    try {
+      if (_isOnline) {
+        debugPrint('🌐 Using online tile layer (zoom: ${zoom ?? "unknown"})');
+        return _onlineTileLayer;
+      } else {
+        // IMPROVED offline logic
+        debugPrint('📱 Using offline tile layer (zoom: ${zoom ?? "unknown"})');
+
+        if (zoom != null && zoom > 12) {
+          // Try user cache first for high zoom
+          debugPrint('🔍 High zoom requested, trying user cache first');
+          return _userCacheTileLayer;
+        } else {
+          // Use Philippines base for low zoom
+          debugPrint('🗺️ Low zoom, using Philippines base tiles');
+          return _offlineTileLayer;
+        }
       }
-      return _offlineTileLayer;
+    } catch (e) {
+      debugPrint('❌ Error in getTileLayer: $e');
+      return _createFallbackTileLayer();
     }
   }
 
