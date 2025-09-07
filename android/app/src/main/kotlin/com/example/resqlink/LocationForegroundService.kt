@@ -119,9 +119,6 @@ class LocationForegroundService : Service(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         Log.d("LocationForegroundService", "Location updated: ${location.latitude}, ${location.longitude}")
-        
-        // Send location update to your database or P2P service
-        // You can integrate this with your LocationHelper or DatabaseService
     }
 
     override fun onProviderEnabled(provider: String) {
@@ -132,6 +129,7 @@ class LocationForegroundService : Service(), LocationListener {
         Log.d("LocationForegroundService", "Location provider disabled: $provider")
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
         Log.d("LocationForegroundService", "Location provider status changed: $provider")
     }

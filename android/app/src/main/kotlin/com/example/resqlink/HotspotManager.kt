@@ -61,7 +61,7 @@ class HotspotManager(private val context: Context) {
                             "success" to true,
                             "ssid" to (config?.SSID ?: ssid),
                             "password" to (config?.preSharedKey ?: password),
-                            "frequency" to (config?.frequency ?: 0),
+                            "frequency" to 0,
                             "networkId" to (config?.networkId ?: -1)
                         )
                         
@@ -259,7 +259,7 @@ class HotspotManager(private val context: Context) {
                     val config = localOnlyHotspotReservation?.wifiConfiguration
                     hotspotInfo["ssid"] = config?.SSID ?: "Unknown"
                     hotspotInfo["password"] = config?.preSharedKey ?: "Unknown"
-                    hotspotInfo["frequency"] = config?.frequency ?: 0
+                    hotspotInfo["frequency"] = 0
                 } else {
                     // Legacy method to get configuration
                     try {

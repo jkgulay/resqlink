@@ -73,209 +73,226 @@ class DatabaseService {
     }
   }
 
-  static Future<void> _createDB(Database db, int version) async {
-    try {
-      // Enhanced Messages table
-      await db.execute('''
-        CREATE TABLE $_messagesTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          messageId TEXT UNIQUE NOT NULL,
-          endpointId TEXT NOT NULL,
-          fromUser TEXT NOT NULL,
-          message TEXT NOT NULL,
-          isMe INTEGER NOT NULL DEFAULT 0,
-          isEmergency INTEGER NOT NULL DEFAULT 0,
-          timestamp INTEGER NOT NULL,
-          latitude REAL,
-          longitude REAL,
-          type TEXT DEFAULT 'text',
-          status TEXT DEFAULT 'sent',
-          synced INTEGER NOT NULL DEFAULT 0,
-          syncedToFirebase INTEGER NOT NULL DEFAULT 0,
-          syncAttempts INTEGER DEFAULT 0,
-          routePath TEXT,
-          ttl INTEGER DEFAULT 5,
-          connectionType TEXT,
-          deviceInfo TEXT,
-          retryCount INTEGER DEFAULT 0,
-          lastRetryTime INTEGER DEFAULT 0,
-          priority INTEGER DEFAULT 0,
-          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
-          INDEX idx_timestamp (timestamp),
-          INDEX idx_synced (synced),
-          INDEX idx_emergency (isEmergency),
-          INDEX idx_status (status),
-          INDEX idx_endpoint (endpointId)
-        )
-      ''');
+static Future<void> _createDB(Database db, int version) async {
+  try {
+    // Enhanced Messages table (WITHOUT any inline indexes)
+    await db.execute('''
+      CREATE TABLE $_messagesTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        messageId TEXT UNIQUE NOT NULL,
+        endpointId TEXT NOT NULL,
+        fromUser TEXT NOT NULL,
+        message TEXT NOT NULL,
+        isMe INTEGER NOT NULL DEFAULT 0,
+        isEmergency INTEGER NOT NULL DEFAULT 0,
+        timestamp INTEGER NOT NULL,
+        latitude REAL,
+        longitude REAL,
+        type TEXT DEFAULT 'text',
+        status TEXT DEFAULT 'sent',
+        synced INTEGER NOT NULL DEFAULT 0,
+        syncedToFirebase INTEGER NOT NULL DEFAULT 0,
+        syncAttempts INTEGER DEFAULT 0,
+        routePath TEXT,
+        ttl INTEGER DEFAULT 5,
+        connectionType TEXT,
+        deviceInfo TEXT,
+        retryCount INTEGER DEFAULT 0,
+        lastRetryTime INTEGER DEFAULT 0,
+        priority INTEGER DEFAULT 0,
+        createdAt INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    ''');
 
-      // Enhanced Locations table
-      await db.execute('''
-        CREATE TABLE $_locationsTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          userId TEXT NOT NULL,
-          latitude REAL NOT NULL,
-          longitude REAL NOT NULL,
-          timestamp INTEGER NOT NULL,
-          type TEXT DEFAULT 'normal',
-          message TEXT,
-          synced INTEGER NOT NULL DEFAULT 0,
-          syncAttempts INTEGER DEFAULT 0,
-          accuracy REAL,
-          altitude REAL,
-          speed REAL,
-          heading REAL,
-          source TEXT DEFAULT 'gps',
-          batteryLevel INTEGER,
-          connectionType TEXT,
-          emergencyLevel INTEGER DEFAULT 0,
-          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
-          INDEX idx_user_timestamp (userId, timestamp),
-          INDEX idx_synced (synced),
-          INDEX idx_emergency (emergencyLevel)
-        )
-      ''');
+    // Create indexes for messages table separately
+    await db.execute('CREATE INDEX idx_messages_timestamp ON $_messagesTable (timestamp)');
+    await db.execute('CREATE INDEX idx_messages_synced ON $_messagesTable (synced)');
+    await db.execute('CREATE INDEX idx_messages_emergency ON $_messagesTable (isEmergency)');
+    await db.execute('CREATE INDEX idx_messages_status ON $_messagesTable (status)');
+    await db.execute('CREATE INDEX idx_messages_endpoint ON $_messagesTable (endpointId)');
 
-      // Enhanced Connected devices table
-      await db.execute('''
-        CREATE TABLE $_devicesTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          deviceId TEXT UNIQUE NOT NULL,
-          deviceName TEXT NOT NULL,
-          macAddress TEXT,
-          ipAddress TEXT,
-          lastSeen INTEGER NOT NULL,
-          connectionType TEXT DEFAULT 'unknown',
-          isHost INTEGER NOT NULL DEFAULT 0,
-          trustLevel INTEGER DEFAULT 0,
-          totalMessages INTEGER DEFAULT 0,
-          totalConnections INTEGER DEFAULT 1,
-          avgConnectionDuration INTEGER DEFAULT 0,
-          synced INTEGER NOT NULL DEFAULT 0,
-          androidVersion INTEGER,
-          deviceModel TEXT,
-          capabilities TEXT,
-          preferredConnectionMethod TEXT,
-          emergencyCapable INTEGER DEFAULT 1,
-          lastLatitude REAL,
-          lastLongitude REAL,
-          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
-          INDEX idx_last_seen (lastSeen),
-          INDEX idx_trust (trustLevel),
-          INDEX idx_device_id (deviceId)
-        )
-      ''');
+    // Enhanced Locations table
+    await db.execute('''
+      CREATE TABLE $_locationsTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId TEXT NOT NULL,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        timestamp INTEGER NOT NULL,
+        type TEXT DEFAULT 'normal',
+        message TEXT,
+        synced INTEGER NOT NULL DEFAULT 0,
+        syncAttempts INTEGER DEFAULT 0,
+        accuracy REAL,
+        altitude REAL,
+        speed REAL,
+        heading REAL,
+        source TEXT DEFAULT 'gps',
+        batteryLevel INTEGER,
+        connectionType TEXT,
+        emergencyLevel INTEGER DEFAULT 0,
+        createdAt INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    ''');
 
-      // Enhanced Sync queue table
-      await db.execute('''
-        CREATE TABLE $_syncQueueTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          tableName TEXT NOT NULL,
-          recordId INTEGER NOT NULL,
-          operation TEXT NOT NULL,
-          data TEXT NOT NULL,
-          priority INTEGER DEFAULT 0,
-          attempts INTEGER DEFAULT 0,
-          lastAttempt INTEGER,
-          error TEXT,
-          retryAfter INTEGER,
-          batchId TEXT,
-          dependencies TEXT,
-          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
-          INDEX idx_priority (priority, createdAt),
-          INDEX idx_table_record (tableName, recordId),
-          INDEX idx_batch (batchId)
-        )
-      ''');
+    // Create indexes for locations table
+    await db.execute('CREATE INDEX idx_locations_user_timestamp ON $_locationsTable (userId, timestamp)');
+    await db.execute('CREATE INDEX idx_locations_synced ON $_locationsTable (synced)');
+    await db.execute('CREATE INDEX idx_locations_emergency ON $_locationsTable (emergencyLevel)');
 
-      // Device compatibility tracking
-      await db.execute('''
-        CREATE TABLE $_compatibilityTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          deviceId TEXT UNIQUE NOT NULL,
-          androidVersion INTEGER,
-          deviceModel TEXT,
-          deviceManufacturer TEXT,
-          supportsWifiDirect INTEGER DEFAULT 0,
-          canCreateHotspot INTEGER DEFAULT 0,
-          supportedFeatures TEXT,
-          connectionSuccess TEXT,
-          lastUpdated INTEGER NOT NULL,
-          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
-          INDEX idx_device (deviceId),
-          INDEX idx_android_version (androidVersion)
-        )
-      ''');
+    // Enhanced Connected devices table
+    await db.execute('''
+      CREATE TABLE $_devicesTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        deviceId TEXT UNIQUE NOT NULL,
+        deviceName TEXT NOT NULL,
+        macAddress TEXT,
+        ipAddress TEXT,
+        lastSeen INTEGER NOT NULL,
+        connectionType TEXT DEFAULT 'unknown',
+        isHost INTEGER NOT NULL DEFAULT 0,
+        trustLevel INTEGER DEFAULT 0,
+        totalMessages INTEGER DEFAULT 0,
+        totalConnections INTEGER DEFAULT 1,
+        avgConnectionDuration INTEGER DEFAULT 0,
+        synced INTEGER NOT NULL DEFAULT 0,
+        androidVersion INTEGER,
+        deviceModel TEXT,
+        capabilities TEXT,
+        preferredConnectionMethod TEXT,
+        emergencyCapable INTEGER DEFAULT 1,
+        lastLatitude REAL,
+        lastLongitude REAL,
+        createdAt INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    ''');
 
-      // P2P session tracking
-      await db.execute('''
-        CREATE TABLE $_p2pSessionsTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          sessionId TEXT UNIQUE NOT NULL,
-          deviceId TEXT NOT NULL,
-          connectionType TEXT NOT NULL,
-          role TEXT NOT NULL,
-          startTime INTEGER NOT NULL,
-          endTime INTEGER,
-          duration INTEGER,
-          messagesSent INTEGER DEFAULT 0,
-          messagesReceived INTEGER DEFAULT 0,
-          emergencySession INTEGER DEFAULT 0,
-          connectionQuality INTEGER DEFAULT 0,
-          disconnectReason TEXT,
-          synced INTEGER DEFAULT 0,
-          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
-          INDEX idx_device_id (deviceId),
-          INDEX idx_session_id (sessionId),
-          INDEX idx_start_time (startTime)
-        )
-      ''');
+    // Create indexes for devices table
+    await db.execute('CREATE INDEX idx_devices_last_seen ON $_devicesTable (lastSeen)');
+    await db.execute('CREATE INDEX idx_devices_trust ON $_devicesTable (trustLevel)');
+    await db.execute('CREATE INDEX idx_devices_device_id ON $_devicesTable (deviceId)');
 
-      // Users table
-      await db.execute('''
-        CREATE TABLE $_userTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          email TEXT UNIQUE NOT NULL,
-          password_hash TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          last_login TEXT NOT NULL,
-          is_online_user INTEGER DEFAULT 0,
-          INDEX idx_email (email)
-        )
-      ''');
+    // Enhanced Sync queue table
+    await db.execute('''
+      CREATE TABLE $_syncQueueTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tableName TEXT NOT NULL,
+        recordId INTEGER NOT NULL,
+        operation TEXT NOT NULL,
+        data TEXT NOT NULL,
+        priority INTEGER DEFAULT 0,
+        attempts INTEGER DEFAULT 0,
+        lastAttempt INTEGER,
+        error TEXT,
+        retryAfter INTEGER,
+        batchId TEXT,
+        dependencies TEXT,
+        createdAt INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    ''');
 
-      // Known devices table
-      await db.execute('''
-        CREATE TABLE $_knownDevicesTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          deviceId TEXT UNIQUE NOT NULL,
-          ssid TEXT NOT NULL,
-          psk TEXT NOT NULL,
-          isHost INTEGER NOT NULL DEFAULT 0,
-          lastSeen INTEGER NOT NULL,
-          userName TEXT,
-          INDEX idx_device_id (deviceId)
-        )
-      ''');
+    // Create indexes for sync queue table
+    await db.execute('CREATE INDEX idx_sync_priority ON $_syncQueueTable (priority, createdAt)');
+    await db.execute('CREATE INDEX idx_sync_table_record ON $_syncQueueTable (tableName, recordId)');
+    await db.execute('CREATE INDEX idx_sync_batch ON $_syncQueueTable (batchId)');
 
-      // Pending messages table
-      await db.execute('''
-        CREATE TABLE $_pendingMessagesTable (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          deviceId TEXT NOT NULL,
-          messageData TEXT NOT NULL,
-          queuedAt INTEGER NOT NULL,
-          INDEX idx_device_id (deviceId)
-        )
-      ''');
+    // Device compatibility tracking
+    await db.execute('''
+      CREATE TABLE $_compatibilityTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        deviceId TEXT UNIQUE NOT NULL,
+        androidVersion INTEGER,
+        deviceModel TEXT,
+        deviceManufacturer TEXT,
+        supportsWifiDirect INTEGER DEFAULT 0,
+        canCreateHotspot INTEGER DEFAULT 0,
+        supportedFeatures TEXT,
+        connectionSuccess TEXT,
+        lastUpdated INTEGER NOT NULL,
+        createdAt INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    ''');
 
-      debugPrint('✅ Enhanced database tables created successfully');
-    } catch (e) {
-      debugPrint('❌ Error creating enhanced database tables: $e');
-      rethrow;
-    }
+    // Create indexes for compatibility table
+    await db.execute('CREATE INDEX idx_compatibility_device ON $_compatibilityTable (deviceId)');
+    await db.execute('CREATE INDEX idx_compatibility_android_version ON $_compatibilityTable (androidVersion)');
+
+    // P2P session tracking
+    await db.execute('''
+      CREATE TABLE $_p2pSessionsTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sessionId TEXT UNIQUE NOT NULL,
+        deviceId TEXT NOT NULL,
+        connectionType TEXT NOT NULL,
+        role TEXT NOT NULL,
+        startTime INTEGER NOT NULL,
+        endTime INTEGER,
+        duration INTEGER,
+        messagesSent INTEGER DEFAULT 0,
+        messagesReceived INTEGER DEFAULT 0,
+        emergencySession INTEGER DEFAULT 0,
+        connectionQuality INTEGER DEFAULT 0,
+        disconnectReason TEXT,
+        synced INTEGER DEFAULT 0,
+        createdAt INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    ''');
+
+    // Create indexes for P2P sessions table
+    await db.execute('CREATE INDEX idx_p2p_device_id ON $_p2pSessionsTable (deviceId)');
+    await db.execute('CREATE INDEX idx_p2p_session_id ON $_p2pSessionsTable (sessionId)');
+    await db.execute('CREATE INDEX idx_p2p_start_time ON $_p2pSessionsTable (startTime)');
+
+    // Users table - FIX: Remove display_name column
+    await db.execute('''
+      CREATE TABLE $_userTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_login TEXT NOT NULL,
+        is_online_user INTEGER DEFAULT 0
+      )
+    ''');
+
+    // Create indexes for users table
+    await db.execute('CREATE INDEX idx_users_email ON $_userTable (email)');
+
+    // Known devices table
+    await db.execute('''
+      CREATE TABLE $_knownDevicesTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        deviceId TEXT UNIQUE NOT NULL,
+        ssid TEXT NOT NULL,
+        psk TEXT NOT NULL,
+        isHost INTEGER NOT NULL DEFAULT 0,
+        lastSeen INTEGER NOT NULL,
+        userName TEXT
+      )
+    ''');
+
+    // Create indexes for known devices table
+    await db.execute('CREATE INDEX idx_known_devices_device_id ON $_knownDevicesTable (deviceId)');
+
+    // Pending messages table
+    await db.execute('''
+      CREATE TABLE $_pendingMessagesTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        deviceId TEXT NOT NULL,
+        messageData TEXT NOT NULL,
+        queuedAt INTEGER NOT NULL
+      )
+    ''');
+
+    // Create indexes for pending messages table
+    await db.execute('CREATE INDEX idx_pending_device_id ON $_pendingMessagesTable (deviceId)');
+
+    debugPrint('✅ Enhanced database tables created successfully');
+  } catch (e) {
+    debugPrint('❌ Error creating enhanced database tables: $e');
+    rethrow;
   }
-
+}
   static Future<void> _upgradeDB(
     Database db,
     int oldVersion,
@@ -287,62 +304,82 @@ class DatabaseService {
       if (oldVersion < 2) {
         // Add enhanced columns to existing tables
         try {
-          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN connectionType TEXT');
+          await db.execute(
+            'ALTER TABLE $_messagesTable ADD COLUMN connectionType TEXT',
+          );
         } catch (e) {
           debugPrint('Column connectionType already exists or error: $e');
         }
-        
+
         try {
-          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN deviceInfo TEXT');
+          await db.execute(
+            'ALTER TABLE $_messagesTable ADD COLUMN deviceInfo TEXT',
+          );
         } catch (e) {
           debugPrint('Column deviceInfo already exists or error: $e');
         }
-        
+
         try {
-          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN retryCount INTEGER DEFAULT 0');
+          await db.execute(
+            'ALTER TABLE $_messagesTable ADD COLUMN retryCount INTEGER DEFAULT 0',
+          );
         } catch (e) {
           debugPrint('Column retryCount already exists or error: $e');
         }
-        
+
         try {
-          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN lastRetryTime INTEGER DEFAULT 0');
+          await db.execute(
+            'ALTER TABLE $_messagesTable ADD COLUMN lastRetryTime INTEGER DEFAULT 0',
+          );
         } catch (e) {
           debugPrint('Column lastRetryTime already exists or error: $e');
         }
-        
+
         try {
-          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN priority INTEGER DEFAULT 0');
+          await db.execute(
+            'ALTER TABLE $_messagesTable ADD COLUMN priority INTEGER DEFAULT 0',
+          );
         } catch (e) {
           debugPrint('Column priority already exists or error: $e');
         }
-        
+
         try {
-          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN syncedToFirebase INTEGER DEFAULT 0');
+          await db.execute(
+            'ALTER TABLE $_messagesTable ADD COLUMN syncedToFirebase INTEGER DEFAULT 0',
+          );
         } catch (e) {
           debugPrint('Column syncedToFirebase already exists or error: $e');
         }
 
         // Location table enhancements
         try {
-          await db.execute('ALTER TABLE $_locationsTable ADD COLUMN source TEXT DEFAULT "gps"');
+          await db.execute(
+            'ALTER TABLE $_locationsTable ADD COLUMN source TEXT DEFAULT "gps"',
+          );
         } catch (e) {
           debugPrint('Column source already exists or error: $e');
         }
-        
+
         try {
-          await db.execute('ALTER TABLE $_locationsTable ADD COLUMN batteryLevel INTEGER');
+          await db.execute(
+            'ALTER TABLE $_locationsTable ADD COLUMN batteryLevel INTEGER',
+          );
         } catch (e) {
           debugPrint('Column batteryLevel already exists or error: $e');
         }
-        
+
         try {
-          await db.execute('ALTER TABLE $_locationsTable ADD COLUMN connectionType TEXT');
+          await db.execute(
+            'ALTER TABLE $_locationsTable ADD COLUMN connectionType TEXT',
+          );
         } catch (e) {
           debugPrint('Column connectionType already exists or error: $e');
         }
-        
+
         try {
-          await db.execute('ALTER TABLE $_locationsTable ADD COLUMN emergencyLevel INTEGER DEFAULT 0');
+          await db.execute(
+            'ALTER TABLE $_locationsTable ADD COLUMN emergencyLevel INTEGER DEFAULT 0',
+          );
         } catch (e) {
           debugPrint('Column emergencyLevel already exists or error: $e');
         }
@@ -974,7 +1011,8 @@ class DatabaseService {
       final db = await database;
 
       final messageMap = {
-        'messageId': message.messageId ?? 'msg_${DateTime.now().millisecondsSinceEpoch}',
+        'messageId':
+            message.messageId ?? 'msg_${DateTime.now().millisecondsSinceEpoch}',
         'endpointId': message.endpointId,
         'fromUser': message.fromUser,
         'message': message.message,
@@ -988,10 +1026,14 @@ class DatabaseService {
         'synced': 0,
         'syncedToFirebase': 0,
         'syncAttempts': 0,
-        'routePath': message.routePath != null ? jsonEncode(message.routePath!) : null,
+        'routePath': message.routePath != null
+            ? jsonEncode(message.routePath!)
+            : null,
         'ttl': message.ttl ?? 5,
         'connectionType': message.connectionType,
-        'deviceInfo': message.deviceInfo != null ? jsonEncode(message.deviceInfo!) : null,
+        'deviceInfo': message.deviceInfo != null
+            ? jsonEncode(message.deviceInfo!)
+            : null,
         'priority': message.isEmergency ? 1 : 0,
       };
 

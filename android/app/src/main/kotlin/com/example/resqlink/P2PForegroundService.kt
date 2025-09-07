@@ -7,42 +7,39 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.os.Build
-import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
-class LocationForegroundService : Service(), LocationListener {
-    companion object {
-        const val CHANNEL_ID = "LOCATION_SERVICE_CHANNEL"
-        const val NOTIFICATION_ID = 1002
-    }
+// Remove any duplicate LocationForegroundService class from this file
+// Keep only the P2PForegroundService class
 
-    private lateinit var locationManager: LocationManager
-    private var isTracking = false
+class P2PForegroundService : Service() {
+    companion object {
+        const val CHANNEL_ID = "P2P_SERVICE_CHANNEL"
+        const val NOTIFICATION_ID = 1001
+    }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        Log.d("LocationForegroundService", "Service created")
+        Log.d("P2PForegroundService", "Service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val isEmergencyMode = intent?.getBooleanExtra("emergency_mode", false) ?: false
+        val isAutoStart = intent?.getBooleanExtra("auto_start", false) ?: false
         
-        Log.d("LocationForegroundService", "Location service started - Emergency: $isEmergencyMode")
+        Log.d("P2PForegroundService", "Service started - Emergency: $isEmergencyMode, Auto: $isAutoStart")
         
         val notification = createNotification(isEmergencyMode)
         startForeground(NOTIFICATION_ID, notification)
         
-        startLocationTracking(isEmergencyMode)
+        // Start P2P operations here
+        startP2POperations(isEmergencyMode)
         
-        return START_STICKY
+        return START_STICKY // Restart if killed
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -51,10 +48,10 @@ class LocationForegroundService : Service(), LocationListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "ResQLink Location Service",
+                "ResQLink P2P Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Tracks location for emergency communication"
+                description = "Manages peer-to-peer connections and emergency communications"
             }
             
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -69,79 +66,40 @@ class LocationForegroundService : Service(), LocationListener {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = if (isEmergencyMode) "ResQLink - Emergency Location" else "ResQLink - Location Tracking"
+        val title = if (isEmergencyMode) "ResQLink - Emergency Mode" else "ResQLink - P2P Active"
         val text = if (isEmergencyMode) 
-            "Tracking location for emergency response" 
+            "Emergency communication active - Monitoring for nearby devices" 
         else 
-            "Background location tracking active"
+            "Peer-to-peer communication ready"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(if (isEmergencyMode) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
-    private fun startLocationTracking(isEmergencyMode: Boolean) {
-        try {
-            val minTime = if (isEmergencyMode) 10000L else 300000L // 10s vs 5min
-            val minDistance = if (isEmergencyMode) 5f else 50f     // 5m vs 50m
-
-            // GPS provider
-            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    minTime,
-                    minDistance,
-                    this
-                )
-            }
-
-            // Network provider as backup
-            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    minTime * 2,
-                    minDistance,
-                    this
-                )
-            }
-
-            isTracking = true
-            Log.d("LocationForegroundService", "Location tracking started")
-        } catch (e: SecurityException) {
-            Log.e("LocationForegroundService", "Security exception starting location tracking", e)
-        }
-    }
-
-    override fun onLocationChanged(location: Location) {
-        Log.d("LocationForegroundService", "Location updated: ${location.latitude}, ${location.longitude}")
+    private fun startP2POperations(isEmergencyMode: Boolean) {
+        Log.d("P2PForegroundService", "Starting P2P operations")
         
-        // Send location update to your database or P2P service
-        // You can integrate this with your LocationHelper or DatabaseService
-    }
-
-    override fun onProviderEnabled(provider: String) {
-        Log.d("LocationForegroundService", "Location provider enabled: $provider")
-    }
-
-    override fun onProviderDisabled(provider: String) {
-        Log.d("LocationForegroundService", "Location provider disabled: $provider")
-    }
-
-    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
-        Log.d("LocationForegroundService", "Location provider status changed: $provider")
+        // Save emergency state
+        val sharedPrefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+        sharedPrefs.edit()
+            .putBoolean("emergency_mode_active", isEmergencyMode)
+            .apply()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (isTracking) {
-            locationManager.removeUpdates(this)
-            isTracking = false
-        }
-        Log.d("LocationForegroundService", "Location service destroyed")
+        Log.d("P2PForegroundService", "Service destroyed")
+        
+        // Clear emergency state
+        val sharedPrefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+        sharedPrefs.edit()
+            .putBoolean("emergency_mode_active", false)
+            .apply()
     }
 }
