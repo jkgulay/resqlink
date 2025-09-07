@@ -39,6 +39,11 @@ class LocationModel {
   final String? message;
   final EmergencyLevel? emergencyLevel;
   final int? batteryLevel;
+  // Add these missing fields:
+  final double? accuracy;
+  final double? altitude;
+  final double? speed;
+  final double? heading;
 
   LocationModel({
     this.id,
@@ -51,6 +56,10 @@ class LocationModel {
     this.message,
     this.emergencyLevel,
     this.batteryLevel,
+    this.accuracy,
+    this.altitude,
+    this.speed,
+    this.heading,
   });
 
   Map<String, dynamic> toMap() {
@@ -65,6 +74,10 @@ class LocationModel {
       'message': message,
       'emergencyLevel': emergencyLevel?.index,
       'batteryLevel': batteryLevel,
+      'accuracy': accuracy,
+      'altitude': altitude,
+      'speed': speed,
+      'heading': heading,
     };
   }
 
@@ -82,6 +95,10 @@ class LocationModel {
           ? EmergencyLevel.values[map['emergencyLevel']]
           : null,
       batteryLevel: map['batteryLevel'],
+      accuracy: map['accuracy']?.toDouble(),
+      altitude: map['altitude']?.toDouble(),
+      speed: map['speed']?.toDouble(),
+      heading: map['heading']?.toDouble(),
     );
   }
 
@@ -95,6 +112,10 @@ class LocationModel {
       'message': message,
       'emergencyLevel': emergencyLevel?.name,
       'batteryLevel': batteryLevel,
+      'accuracy': accuracy,
+      'altitude': altitude,
+      'speed': speed,
+      'heading': heading,
     };
   }
 
@@ -1634,8 +1655,10 @@ class _GpsPageState extends State<GpsPage>
         minZoom: 5.0,
         onLongPress: (tapPos, latLng) => _showLocationTypeDialog(),
         onMapReady: () {
-          // Set the flag when map is ready
-          _isMapReady = true;
+          debugPrint('🗺️ Map is ready');
+          setState(() {
+            _isMapReady = true;
+          });
 
           // Now safely use MapController
           if (_currentLocation != null) {
@@ -1644,10 +1667,7 @@ class _GpsPageState extends State<GpsPage>
         },
       ),
       children: [
-        // Don't access MapController.camera before map is ready - use default zoom
-        PhilippinesMapService.instance.getTileLayer(
-          zoom: 13, // Use a default zoom level instead of accessing camera
-        ),
+        _buildTileLayer(),
 
         if (savedLocations.length > 1)
           PolylineLayer(
@@ -1762,6 +1782,33 @@ class _GpsPageState extends State<GpsPage>
         ),
       ],
     );
+  }
+
+  Widget _buildTileLayer() {
+    try {
+      int currentZoom = 13; // Default zoom
+      if (_isMapReady) {
+        currentZoom = _mapController.camera.zoom.round();
+      }
+
+      // Get tile layer from map service with proper error handling
+      final tileLayer = PhilippinesMapService.instance.getTileLayer(
+        zoom: currentZoom,
+      );
+
+      debugPrint(
+        '🗺️ Using tile layer with zoom: $currentZoom, online: $_isConnected',
+      );
+      return tileLayer;
+    } catch (e) {
+      debugPrint('❌ Error getting tile layer: $e');
+      // Fallback to basic OpenStreetMap
+      return TileLayer(
+        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        userAgentPackageName: 'com.resqlink.app',
+        maxZoom: 19,
+      );
+    }
   }
 
   Widget _buildTopControls() {

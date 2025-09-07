@@ -1,36 +1,314 @@
 package com.example.resqlink
 
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.os.Build
-import android.os.Bundle
+import android.provider.Settings
+import android.net.wifi.WifiManager
+import android.net.wifi.p2p.WifiP2pManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugins.GeneratedPluginRegistrant
 
-class MainActivity: FlutterActivity() {
-    private val VIBRATION_CHANNEL = "resqlink/vibration"
+class MainActivity : FlutterActivity() {
+    companion object {
+        const val WIFI_CHANNEL = "resqlink/wifi"
+        const val HOTSPOT_CHANNEL = "resqlink/hotspot"
+        const val PERMISSION_CHANNEL = "resqlink/permissions"
+        const val LOCATION_CHANNEL = "resqlink/location"
+        const val VIBRATION_CHANNEL = "resqlink/vibration"
+
+        const val REQUEST_CODE_LOCATION = 1001
+        const val REQUEST_CODE_WIFI = 1002
+        const val REQUEST_CODE_NEARBY_DEVICES = 1003
+    }
+
+    private lateinit var wifiMethodChannel: MethodChannel
+    private lateinit var hotspotMethodChannel: MethodChannel
+    private lateinit var permissionMethodChannel: MethodChannel
+    private lateinit var locationMethodChannel: MethodChannel
+    private lateinit var vibrationMethodChannel: MethodChannel
+
+    private lateinit var wifiManager: WifiManager
+    private lateinit var wifiP2pManager: WifiP2pManager
+    private lateinit var hotspotManager: HotspotManager
+    private lateinit var locationHelper: LocationHelper
+    private lateinit var permissionHelper: PermissionHelper
+
+    private var channel: WifiP2pManager.Channel? = null
+    private var wifiDirectReceiver: WifiDirectBroadcastReceiver? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        
-        // Register the WiFi plugin
-        flutterEngine.plugins.add(WiFiManagerPlugin())
-        
-        // Register vibration method channel
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VIBRATION_CHANNEL).setMethodCallHandler {
-            call, result ->
+        GeneratedPluginRegistrant.registerWith(flutterEngine)
+
+        // Managers
+        wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiP2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+        channel = wifiP2pManager.initialize(this, mainLooper, null)
+
+        hotspotManager = HotspotManager(this)
+        locationHelper = LocationHelper(this)
+        permissionHelper = PermissionHelper(this)
+
+        // Channels
+        setupMethodChannels(flutterEngine)
+    }
+
+    private fun setupMethodChannels(flutterEngine: FlutterEngine) {
+        // Vibrate
+        vibrationMethodChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VIBRATION_CHANNEL)
+        vibrationMethodChannel.setMethodCallHandler { call, result ->
             if (call.method == "vibrate") {
                 val vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createOneShot(1200, VibrationEffect.DEFAULT_AMPLITUDE))
+                    vibrator.vibrate(
+                        VibrationEffect.createOneShot(
+                            1200,
+                            VibrationEffect.DEFAULT_AMPLITUDE
+                        )
+                    )
                 } else {
                     @Suppress("DEPRECATION")
                     vibrator.vibrate(1200)
                 }
                 result.success(null)
-            } else {
-                result.notImplemented()
+            } else result.notImplemented()
+        }
+
+        // Wi-Fi Direct
+        wifiMethodChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, WIFI_CHANNEL)
+        wifiMethodChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "checkWifiDirectSupport" -> result.success(checkWifiDirectSupport())
+                "enableWifi" -> {
+                    enableWifi()
+                    result.success(true)
+                }
+
+                "startDiscovery" -> startWifiDirectDiscovery(result)
+                "stopDiscovery" -> stopWifiDirectDiscovery(result)
+                "connectToPeer" -> connectToWifiDirectPeer(
+                    call.argument("deviceAddress"),
+                    result
+                )
+
+                "createGroup" -> createWifiDirectGroup(result)
+                "removeGroup" -> removeWifiDirectGroup(result)
+                "getGroupInfo" -> getWifiDirectGroupInfo(result)
+                else -> result.notImplemented()
+            }
+        }
+
+        // Hotspot
+        hotspotMethodChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HOTSPOT_CHANNEL)
+        hotspotMethodChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "checkHotspotCapabilities" -> result.success(hotspotManager.checkHotspotCapabilities())
+                "createLocalOnlyHotspot" -> {
+                    val ssid = call.argument<String>("ssid") ?: "ResQLink_${System.currentTimeMillis()}"
+                    val password = call.argument<String>("password") ?: "RESQLINK911"
+                    hotspotManager.createLocalOnlyHotspot(ssid, password, result)
+                }
+
+                "createLegacyHotspot" -> {
+                    val ssid = call.argument<String>("ssid") ?: "ResQLink_${System.currentTimeMillis()}"
+                    val password = call.argument<String>("password") ?: "RESQLINK911"
+                    hotspotManager.createLegacyHotspot(ssid, password, result)
+                }
+
+                "stopHotspot" -> hotspotManager.stopHotspot(result)
+                "getConnectedClients" -> hotspotManager.getConnectedClients(result)
+                "getHotspotInfo" -> hotspotManager.getHotspotInfo(result)
+                else -> result.notImplemented()
+            }
+        }
+
+        // Permissions
+        permissionMethodChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PERMISSION_CHANNEL)
+        permissionMethodChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "checkWifiDirectSupport" -> result.success(permissionHelper.checkWifiDirectSupport())
+                "requestLocationPermission" -> {
+                    permissionHelper.requestLocationPermission()
+                    result.success(true)
+                }
+
+                "requestNearbyDevicesPermission" -> {
+                    permissionHelper.requestNearbyDevicesPermission()
+                    result.success(true)
+                }
+
+                "checkAllPermissions" -> result.success(permissionHelper.checkAllPermissions())
+                "openSettings" -> {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = android.net.Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                    result.success(true)
+                }
+
+                else -> result.notImplemented()
+            }
+        }
+
+        // Location
+        locationMethodChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, LOCATION_CHANNEL)
+        locationMethodChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startLocationTracking" -> {
+                    val isEmergency = call.argument<Boolean>("emergency") ?: false
+                    locationHelper.startLocationTracking(isEmergency, result)
+                }
+
+                "stopLocationTracking" -> locationHelper.stopLocationTracking(result)
+                "getCurrentLocation" -> locationHelper.getCurrentLocation(result)
+                "isLocationEnabled" -> result.success(locationHelper.isLocationEnabled())
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    // Wi-Fi Direct
+    private fun checkWifiDirectSupport(): Boolean {
+        return packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)
+    }
+
+    private fun enableWifi() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+        } else {
+            @Suppress("DEPRECATION")
+            wifiManager.isWifiEnabled = true
+        }
+    }
+
+    private fun startWifiDirectDiscovery(result: MethodChannel.Result) {
+        if (!checkWifiDirectSupport()) {
+            result.error("UNSUPPORTED", "WiFi Direct not supported", null); return
+        }
+        if (!permissionHelper.hasLocationPermission()) {
+            result.error("PERMISSION_DENIED", "Location permission required", null); return
+        }
+
+        channel?.let { ch ->
+            wifiP2pManager.discoverPeers(ch, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() = result.success(true)
+                override fun onFailure(reason: Int) =
+                    result.error("DISCOVERY_FAILED", "Error code $reason", null)
+            })
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun stopWifiDirectDiscovery(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            wifiP2pManager.stopPeerDiscovery(ch, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() = result.success(true)
+                override fun onFailure(reason: Int) =
+                    result.error("STOP_FAILED", "Error code $reason", null)
+            })
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun connectToWifiDirectPeer(deviceAddress: String?, result: MethodChannel.Result) {
+        if (deviceAddress == null) {
+            result.error("INVALID_ARGUMENT", "Device address is null", null); return
+        }
+        channel?.let { ch ->
+            val config = android.net.wifi.p2p.WifiP2pConfig().apply {
+                this.deviceAddress = deviceAddress
+            }
+            wifiP2pManager.connect(ch, config, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() = result.success(true)
+                override fun onFailure(reason: Int) =
+                    result.error("CONNECTION_FAILED", "Error code $reason", null)
+            })
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun createWifiDirectGroup(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            wifiP2pManager.createGroup(ch, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() = result.success(true)
+                override fun onFailure(reason: Int) =
+                    result.error("GROUP_FAILED", "Error code $reason", null)
+            })
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun removeWifiDirectGroup(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            wifiP2pManager.removeGroup(ch, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() = result.success(true)
+                override fun onFailure(reason: Int) =
+                    result.error("REMOVE_FAILED", "Error code $reason", null)
+            })
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun getWifiDirectGroupInfo(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            wifiP2pManager.requestGroupInfo(ch) { group ->
+                if (group != null) {
+                    val clients = group.clientList.map { client ->
+                        mapOf(
+                            "deviceName" to client.deviceName,
+                            "deviceAddress" to client.deviceAddress,
+                            "status" to client.status
+                        )
+                    }
+                    val info = mapOf(
+                        "networkName" to group.networkName,
+                        "passphrase" to group.passphrase,
+                        "owner" to mapOf(
+                            "deviceName" to group.owner.deviceName,
+                            "deviceAddress" to group.owner.deviceAddress
+                        ),
+                        "clients" to clients,
+                        "isGroupOwner" to group.isGroupOwner
+                    )
+                    result.success(info)
+                } else result.success(null)
+            }
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    // Receivers
+    override fun onResume() {
+        super.onResume()
+        val intentFilter = IntentFilter().apply {
+            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
+        }
+        wifiDirectReceiver = WifiDirectBroadcastReceiver(wifiP2pManager, channel, this)
+        registerReceiver(wifiDirectReceiver, intentFilter)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        wifiDirectReceiver?.let { unregisterReceiver(it) }
+    }
+
+    // Flutter callback
+    fun sendToFlutter(channel: String, method: String, data: Map<String, Any>) {
+        runOnUiThread {
+            when (channel) {
+                "wifi" -> wifiMethodChannel.invokeMethod(method, data)
+                "hotspot" -> hotspotMethodChannel.invokeMethod(method, data)
+                "permission" -> permissionMethodChannel.invokeMethod(method, data)
+                "location" -> locationMethodChannel.invokeMethod(method, data)
             }
         }
     }

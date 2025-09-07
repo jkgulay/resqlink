@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 enum MessageStatus { pending, sent, delivered, failed, synced }
 
 class MessageModel {
@@ -14,7 +18,11 @@ class MessageModel {
   final bool syncedToFirebase;
   final String? messageId;
   final String type;
-  final MessageStatus status; // Added status tracking
+  final MessageStatus status;
+  final List<String>? routePath;
+  final int? ttl;
+  final String? connectionType;
+  final Map<String, dynamic>? deviceInfo;
 
   MessageModel({
     this.id,
@@ -30,7 +38,11 @@ class MessageModel {
     this.syncedToFirebase = false,
     this.messageId,
     String? type,
-    this.status = MessageStatus.pending, // Default to pending
+    this.status = MessageStatus.pending,
+    this.routePath,
+    this.ttl,
+    this.connectionType,
+    this.deviceInfo,
   }) : type = type ?? (isEmergency ? 'emergency' : 'message');
 
   // DateTime getter for convenience
@@ -63,6 +75,10 @@ class MessageModel {
     String? messageId,
     String? type,
     MessageStatus? status,
+    List<String>? routePath,
+    int? ttl,
+    String? connectionType,
+    Map<String, dynamic>? deviceInfo,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -79,6 +95,10 @@ class MessageModel {
       messageId: messageId ?? this.messageId,
       type: type ?? this.type,
       status: status ?? this.status,
+      routePath: routePath ?? this.routePath,
+      ttl: ttl ?? this.ttl,
+      connectionType: connectionType ?? this.connectionType,
+      deviceInfo: deviceInfo ?? this.deviceInfo,
     );
   }
 
@@ -98,7 +118,11 @@ class MessageModel {
       'synced_to_firebase': syncedToFirebase ? 1 : 0,
       'message_id': messageId,
       'type': type,
-      'status': status.index, // Store status as integer
+      'status': status.index,
+      'route_path': routePath?.join(','),
+      'ttl': ttl,
+      'connection_type': connectionType,
+      'device_info': deviceInfo != null ? jsonEncode(deviceInfo!) : null,
     };
   }
 
@@ -121,6 +145,47 @@ class MessageModel {
       status: map['status'] != null
           ? MessageStatus.values[map['status']]
           : MessageStatus.pending,
+      routePath: map['route_path'] != null 
+          ? (map['route_path'] as String).split(',') 
+          : null,
+      ttl: map['ttl'],
+      connectionType: map['connection_type'],
+      deviceInfo: map['device_info'] != null 
+          ? jsonDecode(map['device_info']) 
+          : null,
+    );
+  }
+
+  // Create from enhanced database Map
+  factory MessageModel.fromDatabase(Map<String, dynamic> map) {
+    return MessageModel(
+      id: map['id'],
+      endpointId: map['endpointId'] ?? '',
+      fromUser: map['fromUser'] ?? '',
+      message: map['message'] ?? '',
+      isMe: map['isMe'] == 1,
+      isEmergency: map['isEmergency'] == 1,
+      timestamp: map['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
+      latitude: map['latitude']?.toDouble(),
+      longitude: map['longitude']?.toDouble(),
+      synced: map['synced'] == 1,
+      syncedToFirebase: map['syncedToFirebase'] == 1,
+      messageId: map['messageId'],
+      type: map['type'] ?? 'message',
+      status: map['status'] is String
+          ? MessageStatus.values.firstWhere(
+              (e) => e.name == map['status'],
+              orElse: () => MessageStatus.pending,
+            )
+          : MessageStatus.pending,
+      routePath: map['routePath'] != null 
+          ? List<String>.from(jsonDecode(map['routePath'])) 
+          : null,
+      ttl: map['ttl'],
+      connectionType: map['connectionType'],
+      deviceInfo: map['deviceInfo'] != null 
+          ? jsonDecode(map['deviceInfo']) 
+          : null,
     );
   }
 
@@ -137,6 +202,31 @@ class MessageModel {
       'type': type,
       'messageId': messageId ?? '${endpointId}_$timestamp',
       'status': status.name,
+      'routePath': routePath,
+      'ttl': ttl,
+      'connectionType': connectionType,
+      'deviceInfo': deviceInfo,
+    };
+  }
+
+  // Convert to Firebase document
+  Map<String, dynamic> toFirebase() {
+    return {
+      'endpointId': endpointId,
+      'fromUser': fromUser,
+      'message': message,
+      'isEmergency': isEmergency,
+      'timestamp': timestamp,
+      'latitude': latitude,
+      'longitude': longitude,
+      'type': type,
+      'messageId': messageId ?? '${endpointId}_$timestamp',
+      'status': status.name,
+      'routePath': routePath,
+      'ttl': ttl,
+      'connectionType': connectionType,
+      'deviceInfo': deviceInfo,
+      'createdAt': FieldValue.serverTimestamp(),
     };
   }
 
@@ -146,7 +236,8 @@ class MessageModel {
         'message: $message, isMe: $isMe, isEmergency: $isEmergency, '
         'timestamp: $timestamp, latitude: $latitude, longitude: $longitude, '
         'synced: $synced, syncedToFirebase: $syncedToFirebase, '
-        'messageId: $messageId, type: $type, status: $status)';
+        'messageId: $messageId, type: $type, status: $status, '
+        'routePath: $routePath, ttl: $ttl, connectionType: $connectionType)';
   }
 
   @override

@@ -18,6 +18,7 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart' as shelf_router;
 import 'package:multicast_dns/multicast_dns.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/message_model.dart';
 import '../services/database_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -36,10 +37,26 @@ class P2PConnectionService with ChangeNotifier {
   static const Duration messageExpiry = Duration(hours: 24);
   static const Duration autoConnectDelay = Duration(seconds: 5);
   static const int maxTtl = 5;
+
+  // Platform channels for native functionality
   static const MethodChannel _wifiChannel = MethodChannel('resqlink/wifi');
+  static const MethodChannel _hotspotChannel = MethodChannel(
+    'resqlink/hotspot',
+  );
+  static const MethodChannel _permissionChannel = MethodChannel(
+    'resqlink/permissions',
+  );
 
   // Singleton instance
   static P2PConnectionService? _instance;
+
+  // Android version compatibility
+  int? _androidSdkVersion;
+  bool _isModernAndroid = false; // API 26+
+  bool _supportsWifiDirect = false;
+  bool _canCreateProgrammaticHotspot = false;
+  String? _deviceModel;
+  String? _deviceManufacturer;
 
   // Network Manager Integration
   bool _isHotspotEnabled = false;
@@ -150,11 +167,13 @@ class P2PConnectionService with ChangeNotifier {
   List<ResQLinkDevice> get discoveredResQLinkDevices =>
       _discoveredResQLinkDevices;
   ConnectionMode get currentConnectionMode => _currentConnectionMode;
-
-  // Existing getters
   bool get hotspotFallbackEnabled => _hotspotFallbackEnabled;
   String? get connectedHotspotSSID => _connectedHotspotSSID;
   bool get emergencyMode => _emergencyMode;
+  bool get canCreateProgrammaticHotspot => _canCreateProgrammaticHotspot;
+  bool get isModernAndroid => _isModernAndroid;
+  int? get androidSdkVersion => _androidSdkVersion;
+  bool get supportsWifiDirect => _supportsWifiDirect;
 
   set emergencyMode(bool value) {
     if (_emergencyMode != value) {
@@ -200,17 +219,20 @@ class P2PConnectionService with ChangeNotifier {
       Map.from(_discoveredDevices);
   List<P2PMessage> get messageHistory => List.from(_messageHistory);
 
-  // Enhanced initialization
+  // Enhanced initialization with Android version compatibility
   Future<bool> initialize(String userName, {String? preferredRole}) async {
     try {
       _userName = userName;
       _deviceId = _generateDeviceId(userName);
       _preferredRole = preferredRole;
 
+      // Check Android version and capabilities first
+      await _checkAndroidCompatibility();
+
       // Initialize enhanced network manager features
       await _initializeNetworkManager();
 
-      // Initialize existing managers
+      // Initialize existing managers with compatibility info
       _messageQueue = EnhancedMessageQueue(sendToDevice: _sendToDevice);
 
       _hotspotManager = HotspotManager(
@@ -223,6 +245,8 @@ class P2PConnectionService with ChangeNotifier {
           _currentRole = role == 'host' ? P2PRole.host : P2PRole.client;
           notifyListeners();
         },
+        androidSdkVersion: _androidSdkVersion ?? 0,
+        canCreateProgrammaticHotspot: _canCreateProgrammaticHotspot,
       );
 
       _connectionFallbackManager = ConnectionFallbackManager(
@@ -251,23 +275,31 @@ class P2PConnectionService with ChangeNotifier {
             _connectionFallbackManager.initiateConnection(),
         createResQLinkHotspot: _createResQLinkHotspot,
         broadcastEmergencyBeacon: _broadcastEmergencyBeacon,
-        handleEmergencyConnectionLoss: () async =>
-            _handleTcpConnectionLoss(), // FIXED: Added async wrapper
+        handleEmergencyConnectionLoss: () async => _handleTcpConnectionLoss(),
       );
 
       // Load and setup
       await _messageQueue.loadPendingMessages();
       await _setupPlatformChannels();
 
-      // Initialize WiFi Direct
-      bool success = await WifiDirectPlugin.initialize();
-      if (!success) {
-        debugPrint("❌ Failed to initialize WiFi Direct");
-        return false;
+      // Initialize WiFi Direct based on compatibility
+      if (_supportsWifiDirect) {
+        bool success = await WifiDirectPlugin.initialize();
+        if (success) {
+          _setupWifiDirectListeners();
+          debugPrint("✅ WiFi Direct initialized successfully");
+        } else {
+          debugPrint(
+            "⚠️ WiFi Direct initialization failed, using fallback methods",
+          );
+        }
+      } else {
+        debugPrint(
+          "ℹ️ WiFi Direct not supported, using alternative connection methods",
+        );
       }
 
       // Setup listeners and monitoring
-      _setupWifiDirectListeners();
       _startMessageCleanup();
       _startHeartbeat();
       _startReconnectTimer();
@@ -277,9 +309,13 @@ class P2PConnectionService with ChangeNotifier {
       // Load data
       await _loadKnownDevices();
       await _loadPendingMessages();
+
       Timer(Duration(seconds: 2), () => _ensureConnection());
 
       debugPrint("✅ Enhanced P2P Service initialized successfully");
+      debugPrint(
+        "📱 Device Info: Android SDK $_androidSdkVersion, WiFi Direct: $_supportsWifiDirect, Hotspot: $_canCreateProgrammaticHotspot",
+      );
       return true;
     } catch (e) {
       debugPrint("❌ Enhanced P2P initialization error: $e");
@@ -287,7 +323,94 @@ class P2PConnectionService with ChangeNotifier {
     }
   }
 
-  // MISSING METHODS IMPLEMENTATION
+  Future<void> _checkAndroidCompatibility() async {
+    try {
+      if (Platform.isAndroid) {
+        final deviceInfo = DeviceInfoPlugin();
+        final androidInfo = await deviceInfo.androidInfo;
+        _androidSdkVersion = androidInfo.version.sdkInt;
+        _deviceModel = androidInfo.model;
+        _deviceManufacturer = androidInfo.manufacturer;
+        _isModernAndroid = _androidSdkVersion! >= 26; // Android 8.0+
+
+        // Check WiFi Direct support
+        _supportsWifiDirect = await _checkWifiDirectSupport();
+
+        // Check hotspot capabilities
+        _canCreateProgrammaticHotspot = await _checkHotspotCapabilities();
+
+        // Save device compatibility info
+        await _saveCompatibilityInfo();
+
+        debugPrint("📱 Device: $_deviceManufacturer $_deviceModel");
+        debugPrint("📱 Android SDK: $_androidSdkVersion");
+        debugPrint("📱 Modern Android: $_isModernAndroid");
+        debugPrint("📱 WiFi Direct Support: $_supportsWifiDirect");
+        debugPrint("📱 Programmatic Hotspot: $_canCreateProgrammaticHotspot");
+      } else {
+        // iOS handling - limited functionality
+        _androidSdkVersion = 0;
+        _isModernAndroid = false;
+        _supportsWifiDirect = false;
+        _canCreateProgrammaticHotspot = false;
+        debugPrint("🍎 iOS detected - limited P2P functionality");
+      }
+    } catch (e) {
+      debugPrint("❌ Error checking Android compatibility: $e");
+      // Fallback to conservative assumptions
+      _androidSdkVersion = 30;
+      _isModernAndroid = true;
+      _supportsWifiDirect = false;
+      _canCreateProgrammaticHotspot = false;
+    }
+  }
+
+  Future<bool> _checkWifiDirectSupport() async {
+    try {
+      // Use method channel to check native WiFi Direct support
+      final result = await _permissionChannel.invokeMethod(
+        'checkWifiDirectSupport',
+      );
+      return result == true;
+    } catch (e) {
+      debugPrint("❌ Error checking WiFi Direct support: $e");
+      // Fallback: assume older devices support WiFi Direct
+      return (_androidSdkVersion ?? 0) >= 16 && (_androidSdkVersion ?? 0) < 29;
+    }
+  }
+
+  Future<bool> _checkHotspotCapabilities() async {
+    try {
+      // Use method channel to check hotspot capabilities on modern Android
+      final result = await _hotspotChannel.invokeMethod(
+        'checkHotspotCapabilities',
+      );
+      return result == true;
+    } catch (e) {
+      debugPrint("❌ Error checking hotspot capabilities: $e");
+      // Fallback: assume older Android can create hotspots programmatically
+      return (_androidSdkVersion ?? 0) < 26;
+    }
+  }
+
+  Future<void> _saveCompatibilityInfo() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('androidSdkVersion', _androidSdkVersion ?? 0);
+      await prefs.setBool('supportsWifiDirect', _supportsWifiDirect);
+      await prefs.setBool(
+        'canCreateProgrammaticHotspot',
+        _canCreateProgrammaticHotspot,
+      );
+      await prefs.setString('deviceModel', _deviceModel ?? 'Unknown');
+      await prefs.setString(
+        'deviceManufacturer',
+        _deviceManufacturer ?? 'Unknown',
+      );
+    } catch (e) {
+      debugPrint("❌ Error saving compatibility info: $e");
+    }
+  }
 
   Future<void> _sendToDevice(String deviceId, String message) async {
     try {
@@ -383,10 +506,6 @@ class P2PConnectionService with ChangeNotifier {
     debugPrint("❌ TCP connection lost");
     _isConnected = false;
     notifyListeners();
-  }
-
-  Future<void> _setupPlatformChannels() async {
-    // Platform channel setup for native functionality
   }
 
   void _startMessageCleanup() {
@@ -675,57 +794,171 @@ class P2PConnectionService with ChangeNotifier {
       final hotspotSSID =
           "$resqlinkPrefix${deviceId ?? DateTime.now().millisecondsSinceEpoch}";
 
-      bool configSuccess = false;
-
-      if (Platform.isAndroid) {
-        try {
-          final androidInfo = await DeviceInfoPlugin().androidInfo;
-          if (androidInfo.version.sdkInt < 26) {
-            await WiFiForIoTPlugin.setWiFiAPSSID(hotspotSSID);
-            await WiFiForIoTPlugin.setWiFiAPPreSharedKey(emergencyPassword);
-            configSuccess = true;
-            debugPrint('✅ WiFi AP configured using legacy methods (SDK < 26)');
-          } else {
-            debugPrint(
-              '⚠️ Android SDK 26+: Using system defaults for hotspot config',
-            );
-            configSuccess = false; // Will use system defaults
-          }
-        } catch (e) {
-          debugPrint('⚠️ Legacy WiFi AP config failed (Android SDK 26+): $e');
-          configSuccess = false;
-        }
-      }
-
-      // Enable hotspot
-      final result = await WiFiForIoTPlugin.setWiFiAPEnabled(true);
-
-      if (result) {
-        _isHotspotEnabled = true;
-        _currentRole = P2PRole.host;
-        _currentConnectionMode = ConnectionMode.hotspot;
-
-        // Start both HTTP server and TCP server
-        await _startLocalServer();
-        await _startHotspotTcpServer();
-        await _advertiseMDNSService();
-
-        if (configSuccess) {
-          debugPrint("✅ Emergency hotspot created: $hotspotSSID");
-        } else {
-          debugPrint("✅ Emergency hotspot created with system defaults");
-        }
-
-        notifyListeners();
+      if (_canCreateProgrammaticHotspot) {
+        // Try programmatic configuration for older Android
+        return await _createProgrammaticHotspot(hotspotSSID);
+      } else if (_isModernAndroid) {
+        // Use modern Android APIs
+        return await _createModernAndroidHotspot(hotspotSSID);
       } else {
-        throw Exception("Failed to enable hotspot");
+        // Fallback for unsupported devices
+        return await _createFallbackHotspot(hotspotSSID);
       }
-
-      return result;
     } catch (e) {
       debugPrint('❌ Error creating emergency hotspot: $e');
       return false;
     }
+  }
+
+  Future<bool> _createProgrammaticHotspot(String ssid) async {
+    try {
+      debugPrint("🔧 Creating legacy hotspot: $ssid");
+
+      // Use alternative method for older Android versions
+      if (_androidSdkVersion != null && _androidSdkVersion! < 26) {
+        // For very old Android versions, try direct WiFi configuration
+        try {
+          final result = await _hotspotChannel.invokeMethod(
+            'createLegacyHotspot',
+            {'ssid': ssid, 'password': emergencyPassword},
+          );
+
+          if (result['success'] == true) {
+            await _setupHotspotServices();
+            debugPrint("✅ Legacy hotspot created via native method: $ssid");
+            return true;
+          }
+        } catch (e) {
+          debugPrint("⚠️ Native legacy hotspot failed: $e");
+        }
+
+        // Fallback to manual configuration guidance
+        await _showHotspotInstructions(ssid);
+        await _setupHotspotServices();
+        debugPrint("✅ Legacy hotspot setup guided: $ssid");
+        return true;
+      } else {
+        // For newer versions, use modern method
+        return await _createModernAndroidHotspot(ssid);
+      }
+    } catch (e) {
+      debugPrint("❌ Legacy hotspot creation failed: $e");
+      return false;
+    }
+  }
+
+  Future<bool> _createModernAndroidHotspot(String ssid) async {
+    try {
+      debugPrint("🔧 Creating modern Android hotspot: $ssid");
+
+      // Use native method channel for modern Android
+      final result = await _hotspotChannel.invokeMethod(
+        'createLocalOnlyHotspot',
+        {'ssid': ssid, 'password': emergencyPassword},
+      );
+
+      if (result['success'] == true) {
+        await _setupHotspotServices();
+        debugPrint("✅ Modern Android hotspot created: $ssid");
+        return true;
+      }
+
+      return false;
+    } catch (e) {
+      debugPrint("❌ Modern Android hotspot creation failed: $e");
+      return false;
+    }
+  }
+
+  Future<bool> _createFallbackHotspot(String ssid) async {
+    try {
+      debugPrint("🔧 Creating fallback hotspot: $ssid");
+
+      // Guide user to create hotspot manually
+      await _showHotspotInstructions(ssid);
+
+      // Wait for user to set up hotspot, then start services
+      await Future.delayed(Duration(seconds: 5));
+      await _setupHotspotServices();
+
+      debugPrint("✅ Fallback hotspot setup initiated: $ssid");
+      return true;
+    } catch (e) {
+      debugPrint("❌ Fallback hotspot setup failed: $e");
+      return false;
+    }
+  }
+
+  Future<void> _showHotspotInstructions(String ssid) async {
+    // This would show UI instructions to user
+    debugPrint(
+      "📱 Please manually create hotspot with SSID: $ssid and password: $emergencyPassword",
+    );
+  }
+
+  Future<void> _setupHotspotServices() async {
+    _isHotspotEnabled = true;
+    _currentRole = P2PRole.host;
+    _currentConnectionMode = ConnectionMode.hotspot;
+
+    // Start both HTTP server and TCP server
+    await _startLocalServer();
+    await _startHotspotTcpServer();
+    await _advertiseMDNSService();
+
+    notifyListeners();
+  }
+
+  Map<String, dynamic> getDeviceCompatibilityInfo() {
+    return {
+      'platform': Platform.operatingSystem,
+      'androidSdkVersion': _androidSdkVersion,
+      'deviceModel': _deviceModel,
+      'deviceManufacturer': _deviceManufacturer,
+      'isModernAndroid': _isModernAndroid,
+      'supportsWifiDirect': _supportsWifiDirect,
+      'canCreateProgrammaticHotspot': _canCreateProgrammaticHotspot,
+      'supportedFeatures': _getSupportedFeatures(),
+      'recommendedConnectionMethods': _getRecommendedConnectionMethods(),
+    };
+  }
+
+  List<String> _getSupportedFeatures() {
+    final features = <String>[];
+
+    if (_supportsWifiDirect) features.add('wifi_direct');
+    if (_canCreateProgrammaticHotspot) features.add('programmatic_hotspot');
+    if (_isModernAndroid) features.add('modern_android_apis');
+
+    features.addAll([
+      'websocket',
+      'http_api',
+      'mdns_discovery',
+      'tcp_sockets',
+      'offline_messaging',
+    ]);
+
+    return features;
+  }
+
+  List<String> _getRecommendedConnectionMethods() {
+    final methods = <String>[];
+
+    if (_supportsWifiDirect) {
+      methods.add('wifi_direct');
+    }
+
+    if (_canCreateProgrammaticHotspot) {
+      methods.add('programmatic_hotspot');
+    } else if (_isModernAndroid) {
+      methods.add('local_only_hotspot');
+    } else {
+      methods.add('manual_hotspot_setup');
+    }
+
+    methods.addAll(['websocket', 'mdns']);
+
+    return methods;
   }
 
   Future<void> _handleConnectionFailure() async {
@@ -744,29 +977,164 @@ class P2PConnectionService with ChangeNotifier {
     try {
       debugPrint("🔐 Checking and requesting permissions...");
 
-      // Request location permission (required for WiFi Direct)
-      final locationStatus = await Permission.location.request();
-      if (locationStatus != PermissionStatus.granted) {
-        debugPrint("❌ Location permission denied");
-      }
+      // Base permissions needed for all versions
+      final permissions = <Permission>[Permission.location, Permission.storage];
 
-      // Request nearby WiFi devices permission (Android 13+)
-      if (Platform.isAndroid) {
-        final nearbyStatus = await Permission.nearbyWifiDevices.request();
-        if (nearbyStatus != PermissionStatus.granted) {
-          debugPrint("❌ Nearby WiFi devices permission denied");
+      // Add version-specific permissions
+      if (Platform.isAndroid && _androidSdkVersion != null) {
+        if (_androidSdkVersion! >= 33) {
+          // Android 13+
+          permissions.addAll([
+            Permission.nearbyWifiDevices,
+            Permission.notification,
+          ]);
+        }
+
+        if (_androidSdkVersion! >= 29) {
+          // Android 10+
+          permissions.add(Permission.accessMediaLocation);
+        }
+
+        if (_androidSdkVersion! >= 23) {
+          // Android 6.0+
+          permissions.addAll([Permission.locationWhenInUse]);
         }
       }
 
-      // Request storage permission for message saving
-      final storageStatus = await Permission.storage.request();
-      if (storageStatus != PermissionStatus.granted) {
-        debugPrint("❌ Storage permission denied");
+      // Request all permissions
+      Map<Permission, PermissionStatus> statuses = await permissions.request();
+
+      // Check results and log
+      for (var entry in statuses.entries) {
+        if (entry.value != PermissionStatus.granted) {
+          debugPrint("❌ Permission ${entry.key} denied");
+        } else {
+          debugPrint("✅ Permission ${entry.key} granted");
+        }
+      }
+
+      // Special handling for critical permissions
+      if (statuses[Permission.location] != PermissionStatus.granted) {
+        await _showPermissionDialog(
+          'Location access is required for device discovery',
+        );
       }
 
       debugPrint("✅ Permission check completed");
     } catch (e) {
       debugPrint("❌ Error checking permissions: $e");
+    }
+  }
+
+  Future<void> _showPermissionDialog(String message) async {
+    // This would need to be connected to your UI layer
+    debugPrint("⚠️ Permission dialog needed: $message");
+  }
+
+  // Enhanced platform channel setup
+  Future<void> _setupPlatformChannels() async {
+    try {
+      // Set up method call handlers
+      _wifiChannel.setMethodCallHandler(_handleWifiMethodCall);
+      _hotspotChannel.setMethodCallHandler(_handleHotspotMethodCall);
+      _permissionChannel.setMethodCallHandler(_handlePermissionMethodCall);
+
+      debugPrint("✅ Platform channels configured");
+    } catch (e) {
+      debugPrint("❌ Error setting up platform channels: $e");
+    }
+  }
+
+  Future<dynamic> _handleWifiMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onWifiStateChanged':
+        _isWiFiEnabled = call.arguments['enabled'] == true;
+        notifyListeners();
+      case 'onWifiDirectPeersChanged':
+        _handleWifiDirectPeersChanged(call.arguments);
+      default:
+        debugPrint("❓ Unknown WiFi method call: ${call.method}");
+    }
+  }
+
+  Future<dynamic> _handleHotspotMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onHotspotStateChanged':
+        _isHotspotEnabled = call.arguments['enabled'] == true;
+        notifyListeners();
+      case 'onHotspotClientsChanged':
+        _handleHotspotClientsChanged(call.arguments);
+      default:
+        debugPrint("❓ Unknown Hotspot method call: ${call.method}");
+    }
+  }
+
+  Future<dynamic> _handlePermissionMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onPermissionResult':
+        _handlePermissionResult(call.arguments);
+      default:
+        debugPrint("❓ Unknown Permission method call: ${call.method}");
+    }
+  }
+
+  void _handleWifiDirectPeersChanged(Map<String, dynamic> data) {
+    final peers = data['peers'] as List<dynamic>;
+    debugPrint("📡 WiFi Direct peers changed: ${peers.length} peers");
+
+    for (var peer in peers) {
+      final deviceData = {
+        'deviceName': peer['deviceName'],
+        'deviceAddress': peer['deviceAddress'],
+        'status': peer['status'],
+        'isAvailable': peer['status'] == 0,
+        'discoveredAt': DateTime.now().millisecondsSinceEpoch,
+        'connectionType': 'wifi_direct_native',
+      };
+      _discoveredDevices[peer['deviceAddress']] = deviceData;
+    }
+
+    final allDevices = _discoveredDevices.values.toList();
+    onDevicesDiscovered?.call(allDevices);
+    notifyListeners();
+  }
+
+  void _handleHotspotClientsChanged(Map<String, dynamic> data) {
+    final clients = data['clients'] as List<dynamic>;
+    debugPrint("🔥 Hotspot clients changed: ${clients.length} clients");
+
+    // Update connected devices based on hotspot clients
+    for (var client in clients) {
+      final deviceId = client['macAddress'];
+      _connectedDevices[deviceId] = ConnectedDevice(
+        id: deviceId,
+        name: client['deviceName'] ?? 'Unknown Device',
+        isHost: false,
+        connectedAt: DateTime.now(),
+      );
+
+      // Log to database
+      DatabaseService.insertOrUpdateDevice(
+        deviceId: deviceId,
+        deviceName: client['deviceName'] ?? 'Unknown Device',
+        macAddress: client['macAddress'],
+        ipAddress: client['ipAddress'],
+        connectionType: 'hotspot_client',
+        isHost: false,
+      );
+    }
+    notifyListeners();
+  }
+
+  void _handlePermissionResult(Map<String, dynamic> data) {
+    final permission = data['permission'];
+    final granted = data['granted'] == true;
+    debugPrint("🔐 Permission result: $permission = $granted");
+
+    if (!granted) {
+      _showPermissionDialog(
+        "Permission '$permission' is required for this feature.",
+      );
     }
   }
 

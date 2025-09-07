@@ -162,7 +162,7 @@ class _HomePageState extends State<HomePage>
 
     if (success) {
       setState(() {
-        _isP2PInitialized = true;
+        _isP2PInitialized = true; // ✅ SET THE VARIABLE HERE
       });
 
       _p2pService.onMessageReceived = (message) {
@@ -202,6 +202,10 @@ class _HomePageState extends State<HomePage>
       // Enable emergency mode by default
       _p2pService.emergencyMode = true;
     } else {
+      // ✅ SET TO FALSE ON FAILURE
+      setState(() {
+        _isP2PInitialized = false;
+      });
       debugPrint("❌ Failed to initialize P2P service");
     }
   }
@@ -772,6 +776,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
   int _unsyncedCount = 0;
   List<Map<String, dynamic>> _discoveredDevices = [];
   bool _isScanning = false;
+  bool _isP2PInitialized = false;
 
   // Animation controller for emergency pulse
   late AnimationController _pulseController;
@@ -1292,7 +1297,7 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header with status indicator and scan control - Responsive
+              // Header with status indicator and dual controls
               LayoutBuilder(
                 builder: (context, constraints) {
                   final isNarrow = constraints.maxWidth < 400;
@@ -1313,36 +1318,25 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                         ),
                         child: Row(
                           children: [
-                            // Status icon with enhanced styling
                             Container(
-                              padding: EdgeInsets.all(isNarrow ? 14 : 16),
+                              padding: EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: isConnected
+                                color: _isP2PInitialized && isConnected
                                     ? Colors.green.withValues(alpha: 0.15)
-                                    : Colors.grey.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(16),
+                                    : Colors.orange.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: isConnected
-                                      ? Colors.green
-                                      : Colors.grey,
-                                  width: 2.5,
+                                  color: _isP2PInitialized && isConnected
+                                      ? Colors.green.withValues(alpha: 0.4)
+                                      : Colors.orange.withValues(alpha: 0.4),
                                 ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color:
-                                        (isConnected
-                                                ? Colors.green
-                                                : Colors.grey)
-                                            .withValues(alpha: 0.2),
-                                    blurRadius: 8,
-                                    spreadRadius: 1,
-                                  ),
-                                ],
                               ),
                               child: Icon(
-                                Icons.wifi_tethering,
-                                color: isConnected ? Colors.green : Colors.grey,
-                                size: isNarrow ? 26 : 30,
+                                Icons.network_wifi,
+                                color: _isP2PInitialized && isConnected
+                                    ? Colors.green
+                                    : Colors.orange,
+                                size: isNarrow ? 24 : 28,
                               ),
                             ),
                             SizedBox(width: isNarrow ? 14 : 18),
@@ -1351,54 +1345,24 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Network & Devices',
+                                    'Network Connection',
                                     style: TextStyle(
-                                      fontWeight: FontWeight.w700,
                                       fontSize: isNarrow ? 18 : 20,
-                                      color: Color.fromARGB(255, 252, 254, 255),
-                                      letterSpacing: -0.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
                                     ),
                                   ),
-                                  SizedBox(height: 6),
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 10,
-                                        height: 10,
-                                        decoration: BoxDecoration(
-                                          color: isConnected
-                                              ? Colors.green
-                                              : Colors.orange,
-                                          shape: BoxShape.circle,
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color:
-                                                  (isConnected
-                                                          ? Colors.green
-                                                          : Colors.orange)
-                                                      .withValues(alpha: 0.4),
-                                              blurRadius: 6,
-                                              spreadRadius: 1,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      SizedBox(width: 10),
-                                      Expanded(
-                                        child: Text(
-                                          isConnected
-                                              ? 'Connected & Ready'
-                                              : 'Searching for devices...',
-                                          style: TextStyle(
-                                            color: isConnected
-                                                ? Colors.green
-                                                : Colors.orange,
-                                            fontSize: isNarrow ? 13 : 15,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                                  SizedBox(height: 4),
+                                  Text(
+                                    _isP2PInitialized && isConnected
+                                        ? 'Connected to ${widget.p2pService.connectedDevices.length} device(s)'
+                                        : _isScanning
+                                        ? 'Scanning for devices...'
+                                        : 'Ready to connect',
+                                    style: TextStyle(
+                                      fontSize: isNarrow ? 13 : 14,
+                                      color: Colors.white70,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -1409,110 +1373,223 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
 
                       SizedBox(height: isNarrow ? 18 : 22),
 
-                      // Unified scan button with enhanced styling
-                      Container(
-                        width: double.infinity,
-                        height: isNarrow ? 50 : 56,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          gradient: _isScanning
-                              ? LinearGradient(
-                                  colors: [Colors.grey, Colors.grey.shade600],
-                                )
-                              : LinearGradient(
-                                  colors: [
-                                    Color(0xFFFF6500),
-                                    Color(0xFFFF8533),
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
+                      // Enhanced dual action buttons - Side by side
+                      Row(
+                        children: [
+                          // Scan for devices button
+                          Expanded(
+                            child: Container(
+                              height: isNarrow ? 50 : 56,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: _isScanning
+                                      ? [Colors.orange, Colors.orange.shade700]
+                                      : [Colors.blue, Colors.blue.shade700],
                                 ),
-                          boxShadow: _isScanning
-                              ? []
-                              : [
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
                                   BoxShadow(
-                                    color: Color(
-                                      0xFFFF6500,
-                                    ).withValues(alpha: 0.4),
-                                    blurRadius: 12,
-                                    offset: Offset(0, 4),
-                                    spreadRadius: 1,
+                                    color:
+                                        (_isScanning
+                                                ? Colors.orange
+                                                : Colors.blue)
+                                            .withValues(alpha: 0.3),
+                                    blurRadius: 8,
+                                    offset: Offset(0, 3),
                                   ),
                                 ],
-                        ),
-                        child: ElevatedButton.icon(
-                          onPressed: _isScanning ? null : _startUnifiedScan,
-                          icon: _isScanning
-                              ? SizedBox(
-                                  width: isNarrow ? 18 : 20,
-                                  height: isNarrow ? 18 : 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
-                                    ),
+                              ),
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.transparent,
+                                  shadowColor: Colors.transparent,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
                                   ),
-                                )
-                              : Icon(
-                                  widget.p2pService.isDiscovering
-                                      ? Icons.refresh
-                                      : Icons.radar,
-                                  size: isNarrow ? 18 : 20,
                                 ),
-                          label: Text(
-                            _isScanning
-                                ? 'Scanning...'
-                                : widget.p2pService.isDiscovering
-                                ? 'Refresh Network'
-                                : 'Scan for Devices',
-                            style: TextStyle(
-                              fontSize: isNarrow ? 14 : 16,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.3,
+                                onPressed: _isScanning
+                                    ? null
+                                    : _startUnifiedScan,
+                                icon: _isScanning
+                                    ? SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.search,
+                                        size: isNarrow ? 18 : 20,
+                                      ),
+                                label: Text(
+                                  _isScanning ? 'Scanning...' : 'Find Devices',
+                                  style: TextStyle(
+                                    fontSize: isNarrow ? 13 : 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.transparent,
-                            foregroundColor: Colors.white,
-                            shadowColor: Colors.transparent,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+
+                          SizedBox(width: 12),
+
+                          // Create network button
+                          Expanded(
+                            child: Container(
+                              height: isNarrow ? 50 : 56,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors:
+                                      widget.p2pService.currentRole ==
+                                          P2PRole.host
+                                      ? [Colors.green, Colors.green.shade700]
+                                      : [Colors.purple, Colors.purple.shade700],
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color:
+                                        (widget.p2pService.currentRole ==
+                                                    P2PRole.host
+                                                ? Colors.green
+                                                : Colors.purple)
+                                            .withValues(alpha: 0.3),
+                                    blurRadius: 8,
+                                    offset: Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.transparent,
+                                  shadowColor: Colors.transparent,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                                onPressed:
+                                    widget.p2pService.currentRole ==
+                                        P2PRole.host
+                                    ? null
+                                    : () => _showCreateNetworkDialog(),
+                                icon:
+                                    widget.p2pService.currentRole ==
+                                        P2PRole.host
+                                    ? Icon(
+                                        Icons.check_circle,
+                                        size: isNarrow ? 18 : 20,
+                                      )
+                                    : Icon(
+                                        Icons.add_circle,
+                                        size: isNarrow ? 18 : 20,
+                                      ),
+                                label: Text(
+                                  widget.p2pService.currentRole == P2PRole.host
+                                      ? 'Hosting'
+                                      : 'Create Network',
+                                  style: TextStyle(
+                                    fontSize: isNarrow ? 13 : 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
                             ),
+                          ),
+                        ],
+                      ),
+
+                      // Show network creation stats if hosting
+                      if (widget.p2pService.currentRole == P2PRole.host) ...[
+                        SizedBox(height: 14),
+                        Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.green.withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.wifi_tethering,
+                                color: Colors.green,
+                                size: 20,
+                              ),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Network Active',
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${widget.p2pService.connectedDevices.length} device(s) connected',
+                                      style: TextStyle(
+                                        color: Colors.green.shade300,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _stopHosting,
+                                child: Text(
+                                  'Stop',
+                                  style: TextStyle(
+                                    color: Colors.red.shade300,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
+                      ],
 
                       // Show scan stats with improved design
                       if (_discoveredDevices.isNotEmpty ||
                           widget.p2pService.connectedDevices.isNotEmpty) ...[
                         SizedBox(height: 14),
                         Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
+                          padding: EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: Colors.blue.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
+                            color: Colors.blue.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: Colors.blue.withValues(alpha: 0.25),
+                              color: Colors.blue.withValues(alpha: 0.35),
                             ),
                           ),
                           child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
                             children: [
-                              Icon(
-                                Icons.analytics,
-                                size: isNarrow ? 16 : 18,
-                                color: Colors.blue,
+                              _buildNetworkStat(
+                                'Discovered',
+                                '${_discoveredDevices.length}',
+                                Icons.radar,
+                                Colors.blue,
                               ),
-                              SizedBox(width: 8),
-                              Text(
-                                'Found: ${_discoveredDevices.length} nearby • Connected: ${widget.p2pService.connectedDevices.length}',
-                                style: TextStyle(
-                                  fontSize: isNarrow ? 12 : 13,
-                                  color: Colors.blue,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                              Container(
+                                width: 1,
+                                height: 30,
+                                color: Colors.blue.withValues(alpha: 0.3),
+                              ),
+                              _buildNetworkStat(
+                                'Connected',
+                                '${widget.p2pService.connectedDevices.length}',
+                                Icons.link,
+                                Colors.green,
                               ),
                             ],
                           ),
@@ -1995,6 +2072,372 @@ class _EmergencyHomePageState extends State<EmergencyHomePage>
         ),
       ),
     );
+  }
+
+  Widget _buildNetworkStat(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Column(
+      children: [
+        Icon(icon, color: color, size: 20),
+        SizedBox(height: 4),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+        Text(
+          label,
+          style: TextStyle(color: color.withValues(alpha: 0.8), fontSize: 11),
+        ),
+      ],
+    );
+  }
+
+  void _showCreateNetworkDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: ResQLinkTheme.cardDark,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.add_circle, color: ResQLinkTheme.primaryRed),
+              SizedBox(width: 8),
+              Text('Create Network', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Choose how to create your emergency network:',
+                style: TextStyle(color: Colors.white70),
+              ),
+              SizedBox(height: 20),
+
+              // WiFi Direct option
+              ListTile(
+                leading: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.wifi, color: Colors.blue),
+                ),
+                title: Text(
+                  'WiFi Direct Group',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: Text(
+                  'Direct device-to-device connection',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _createWiFiDirectGroup();
+                },
+              ),
+
+              SizedBox(height: 8),
+
+              // Hotspot option
+              ListTile(
+                leading: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.wifi_tethering, color: Colors.orange),
+                ),
+                title: Text(
+                  'Emergency Hotspot',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: Text(
+                  'Create a WiFi network for multiple devices',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _createEmergencyHotspot();
+                },
+              ),
+
+              SizedBox(height: 8),
+
+              // Auto/Smart option
+              ListTile(
+                leading: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.auto_awesome, color: Colors.green),
+                ),
+                title: Text(
+                  'Smart Network (Recommended)',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: Text(
+                  'Automatically choose the best method',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _createSmartNetwork();
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel', style: TextStyle(color: Colors.white70)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _createWiFiDirectGroup() async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+              SizedBox(width: 16),
+              Text('Creating WiFi Direct group...'),
+            ],
+          ),
+          backgroundColor: Colors.blue,
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      await widget.p2pService.forceHostRole();
+
+      // Start a P2P session
+      await DatabaseService.startP2PSession(
+        sessionId: 'session_${DateTime.now().millisecondsSinceEpoch}',
+        deviceId: widget.p2pService.deviceId ?? 'unknown',
+        connectionType: 'wifi_direct_group',
+        role: 'host',
+        emergencySession: widget.p2pService.emergencyMode,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Text(
+                  'WiFi Direct group created! Other devices can now find you.',
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to create WiFi Direct group: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _createEmergencyHotspot() async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+              SizedBox(width: 16),
+              Text('Creating emergency hotspot...'),
+            ],
+          ),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      final success = await widget.p2pService.createEmergencyHotspot();
+
+      if (success) {
+        // Start a P2P session
+        await DatabaseService.startP2PSession(
+          sessionId: 'session_${DateTime.now().millisecondsSinceEpoch}',
+          deviceId: widget.p2pService.deviceId ?? 'unknown',
+          connectionType: 'emergency_hotspot',
+          role: 'host',
+          emergencySession: true,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text('Emergency hotspot created!'),
+                    ],
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Network: ResQLink_Emergency\nPassword: RESQLINK911',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 6),
+            ),
+          );
+        }
+      } else {
+        throw Exception('Hotspot creation failed');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to create emergency hotspot: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _createSmartNetwork() async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+              SizedBox(width: 16),
+              Text('Creating smart network...'),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      // Use the connection fallback manager to create the best network
+      await widget.p2pService.connectionFallbackManager.initiateConnection();
+
+      // Force host role to ensure we become the network creator
+      await widget.p2pService.forceHostRole();
+
+      // Start a P2P session
+      await DatabaseService.startP2PSession(
+        sessionId: 'session_${DateTime.now().millisecondsSinceEpoch}',
+        deviceId: widget.p2pService.deviceId ?? 'unknown',
+        connectionType: 'smart_network',
+        role: 'host',
+        emergencySession: widget.p2pService.emergencyMode,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Smart network created! Using optimal connection method.',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to create smart network: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _stopHosting() async {
+    try {
+      await widget.p2pService.disconnect();
+      await widget.p2pService.clearForcedRole();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Text('Network hosting stopped'),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to stop hosting: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   // Reusable scanning state widget

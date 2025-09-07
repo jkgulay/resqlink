@@ -219,13 +219,24 @@ Future<void> main() async {
 
   // Initialize other services
   await NotificationService.initialize();
-
   await SettingsService.instance.loadSettings();
 
-  if (kDebugMode) {
+  // FORCE database recreation to fix schema issues
+  try {
+    debugPrint('🗑️ Deleting old database to fix schema...');
     await DatabaseService.deleteDatabaseFile();
+    debugPrint('✅ Old database deleted');
+  } catch (e) {
+    debugPrint('⚠️ Could not delete old database: $e');
   }
-  await DatabaseService.database;
+
+  // Initialize database with new schema
+  try {
+    await DatabaseService.database;
+    debugPrint('✅ New database initialized successfully');
+  } catch (e) {
+    debugPrint('❌ Database initialization failed: $e');
+  }
 
   runApp(const MyApp());
 }
