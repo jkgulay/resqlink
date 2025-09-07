@@ -39,6 +39,11 @@ class LocationModel {
   final String? message;
   final EmergencyLevel? emergencyLevel;
   final int? batteryLevel;
+  // Add these missing fields:
+  final double? accuracy;
+  final double? altitude;
+  final double? speed;
+  final double? heading;
 
   LocationModel({
     this.id,
@@ -51,6 +56,10 @@ class LocationModel {
     this.message,
     this.emergencyLevel,
     this.batteryLevel,
+    this.accuracy,
+    this.altitude,
+    this.speed,
+    this.heading,
   });
 
   Map<String, dynamic> toMap() {
@@ -65,6 +74,10 @@ class LocationModel {
       'message': message,
       'emergencyLevel': emergencyLevel?.index,
       'batteryLevel': batteryLevel,
+      'accuracy': accuracy,
+      'altitude': altitude,
+      'speed': speed,
+      'heading': heading,
     };
   }
 
@@ -82,6 +95,10 @@ class LocationModel {
           ? EmergencyLevel.values[map['emergencyLevel']]
           : null,
       batteryLevel: map['batteryLevel'],
+      accuracy: map['accuracy']?.toDouble(),
+      altitude: map['altitude']?.toDouble(),
+      speed: map['speed']?.toDouble(),
+      heading: map['heading']?.toDouble(),
     );
   }
 
@@ -95,6 +112,10 @@ class LocationModel {
       'message': message,
       'emergencyLevel': emergencyLevel?.name,
       'batteryLevel': batteryLevel,
+      'accuracy': accuracy,
+      'altitude': altitude,
+      'speed': speed,
+      'heading': heading,
     };
   }
 

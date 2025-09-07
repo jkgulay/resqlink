@@ -17,7 +17,7 @@ class HotspotManager {
     required String? deviceId,
     Future<void> Function()? startHotspotTcpServer, // Fixed: Future<void>
     Future<void> Function(String)? connectToHotspotTcpServer, // Fixed: Future<void>
-    Function(String role)? setCurrentRole,
+    Function(String role)? setCurrentRole, required int androidSdkVersion, required bool canCreateProgrammaticHotspot,
   }) : _wifiChannel = wifiChannel,
        _deviceId = deviceId,
        _startHotspotTcpServer = startHotspotTcpServer,

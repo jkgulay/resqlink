@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:resqlink/gps_page.dart';
 import 'package:sqflite/sqflite.dart';
@@ -7,51 +6,690 @@ import 'package:path/path.dart';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
 import '../models/user_model.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/message_model.dart';
 import 'p2p_service.dart';
 
 class DatabaseService {
   static Database? _database;
-  static bool _isInitializing = false;
-  static final List<Completer<Database>> _pendingConnections = [];
-  static Timer? _healthCheckTimer;
+  static const String _dbName = 'resqlink_enhanced.db';
+  static const int _dbVersion = 3;
 
   // Table names
-  static const String _userTable = 'users';
   static const String _messagesTable = 'messages';
+  static const String _locationsTable = 'locations';
+  static const String _devicesTable = 'devices';
+  static const String _syncQueueTable = 'sync_queue';
+  static const String _compatibilityTable = 'device_compatibility';
+  static const String _p2pSessionsTable = 'p2p_sessions';
+  static const String _userTable = 'users';
   static const String _knownDevicesTable = 'known_devices';
   static const String _pendingMessagesTable = 'pending_messages';
 
+  // Singleton
+  static DatabaseService? _instance;
+  factory DatabaseService() => _instance ??= DatabaseService._internal();
+  DatabaseService._internal();
+
+  // Firebase integration
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static StreamSubscription? _connectivitySubscription;
+  static bool _isOnline = false;
+  static bool _syncInProgress = false;
+  static Timer? _syncTimer;
+  static Timer? _healthCheckTimer;
+
+  // Database initialization
   static Future<Database> get database async {
     if (_database != null && _database!.isOpen) {
-      // ✅ ADD: Periodic health check
       _startHealthCheck();
       return _database!;
     }
 
-    // Your existing concurrent access handling is excellent
-    if (_isInitializing) {
-      final completer = Completer<Database>();
-      _pendingConnections.add(completer);
-      return completer.future;
-    }
+    _database = await _initDB();
+    await _startConnectivityMonitoring();
+    _startPeriodicSync();
+    return _database!;
+  }
 
-    _isInitializing = true;
+  static Future<Database> _initDB() async {
     try {
-      _database = await _initDB();
+      final dbPath = await getDatabasesPath();
+      final path = join(dbPath, _dbName);
 
-      // Complete all pending connections
-      for (final completer in _pendingConnections) {
-        if (!completer.isCompleted) {
-          completer.complete(_database!);
+      return await openDatabase(
+        path,
+        version: _dbVersion,
+        onCreate: _createDB,
+        onUpgrade: _upgradeDB,
+        onOpen: (db) {
+          debugPrint('📂 Enhanced database opened successfully');
+        },
+      );
+    } catch (e) {
+      debugPrint('❌ Database initialization error: $e');
+      rethrow;
+    }
+  }
+
+  static Future<void> _createDB(Database db, int version) async {
+    try {
+      // Enhanced Messages table
+      await db.execute('''
+        CREATE TABLE $_messagesTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          messageId TEXT UNIQUE NOT NULL,
+          endpointId TEXT NOT NULL,
+          fromUser TEXT NOT NULL,
+          message TEXT NOT NULL,
+          isMe INTEGER NOT NULL DEFAULT 0,
+          isEmergency INTEGER NOT NULL DEFAULT 0,
+          timestamp INTEGER NOT NULL,
+          latitude REAL,
+          longitude REAL,
+          type TEXT DEFAULT 'text',
+          status TEXT DEFAULT 'sent',
+          synced INTEGER NOT NULL DEFAULT 0,
+          syncedToFirebase INTEGER NOT NULL DEFAULT 0,
+          syncAttempts INTEGER DEFAULT 0,
+          routePath TEXT,
+          ttl INTEGER DEFAULT 5,
+          connectionType TEXT,
+          deviceInfo TEXT,
+          retryCount INTEGER DEFAULT 0,
+          lastRetryTime INTEGER DEFAULT 0,
+          priority INTEGER DEFAULT 0,
+          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
+          INDEX idx_timestamp (timestamp),
+          INDEX idx_synced (synced),
+          INDEX idx_emergency (isEmergency),
+          INDEX idx_status (status),
+          INDEX idx_endpoint (endpointId)
+        )
+      ''');
+
+      // Enhanced Locations table
+      await db.execute('''
+        CREATE TABLE $_locationsTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          userId TEXT NOT NULL,
+          latitude REAL NOT NULL,
+          longitude REAL NOT NULL,
+          timestamp INTEGER NOT NULL,
+          type TEXT DEFAULT 'normal',
+          message TEXT,
+          synced INTEGER NOT NULL DEFAULT 0,
+          syncAttempts INTEGER DEFAULT 0,
+          accuracy REAL,
+          altitude REAL,
+          speed REAL,
+          heading REAL,
+          source TEXT DEFAULT 'gps',
+          batteryLevel INTEGER,
+          connectionType TEXT,
+          emergencyLevel INTEGER DEFAULT 0,
+          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
+          INDEX idx_user_timestamp (userId, timestamp),
+          INDEX idx_synced (synced),
+          INDEX idx_emergency (emergencyLevel)
+        )
+      ''');
+
+      // Enhanced Connected devices table
+      await db.execute('''
+        CREATE TABLE $_devicesTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deviceId TEXT UNIQUE NOT NULL,
+          deviceName TEXT NOT NULL,
+          macAddress TEXT,
+          ipAddress TEXT,
+          lastSeen INTEGER NOT NULL,
+          connectionType TEXT DEFAULT 'unknown',
+          isHost INTEGER NOT NULL DEFAULT 0,
+          trustLevel INTEGER DEFAULT 0,
+          totalMessages INTEGER DEFAULT 0,
+          totalConnections INTEGER DEFAULT 1,
+          avgConnectionDuration INTEGER DEFAULT 0,
+          synced INTEGER NOT NULL DEFAULT 0,
+          androidVersion INTEGER,
+          deviceModel TEXT,
+          capabilities TEXT,
+          preferredConnectionMethod TEXT,
+          emergencyCapable INTEGER DEFAULT 1,
+          lastLatitude REAL,
+          lastLongitude REAL,
+          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
+          INDEX idx_last_seen (lastSeen),
+          INDEX idx_trust (trustLevel),
+          INDEX idx_device_id (deviceId)
+        )
+      ''');
+
+      // Enhanced Sync queue table
+      await db.execute('''
+        CREATE TABLE $_syncQueueTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tableName TEXT NOT NULL,
+          recordId INTEGER NOT NULL,
+          operation TEXT NOT NULL,
+          data TEXT NOT NULL,
+          priority INTEGER DEFAULT 0,
+          attempts INTEGER DEFAULT 0,
+          lastAttempt INTEGER,
+          error TEXT,
+          retryAfter INTEGER,
+          batchId TEXT,
+          dependencies TEXT,
+          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
+          INDEX idx_priority (priority, createdAt),
+          INDEX idx_table_record (tableName, recordId),
+          INDEX idx_batch (batchId)
+        )
+      ''');
+
+      // Device compatibility tracking
+      await db.execute('''
+        CREATE TABLE $_compatibilityTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deviceId TEXT UNIQUE NOT NULL,
+          androidVersion INTEGER,
+          deviceModel TEXT,
+          deviceManufacturer TEXT,
+          supportsWifiDirect INTEGER DEFAULT 0,
+          canCreateHotspot INTEGER DEFAULT 0,
+          supportedFeatures TEXT,
+          connectionSuccess TEXT,
+          lastUpdated INTEGER NOT NULL,
+          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
+          INDEX idx_device (deviceId),
+          INDEX idx_android_version (androidVersion)
+        )
+      ''');
+
+      // P2P session tracking
+      await db.execute('''
+        CREATE TABLE $_p2pSessionsTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sessionId TEXT UNIQUE NOT NULL,
+          deviceId TEXT NOT NULL,
+          connectionType TEXT NOT NULL,
+          role TEXT NOT NULL,
+          startTime INTEGER NOT NULL,
+          endTime INTEGER,
+          duration INTEGER,
+          messagesSent INTEGER DEFAULT 0,
+          messagesReceived INTEGER DEFAULT 0,
+          emergencySession INTEGER DEFAULT 0,
+          connectionQuality INTEGER DEFAULT 0,
+          disconnectReason TEXT,
+          synced INTEGER DEFAULT 0,
+          createdAt INTEGER DEFAULT (strftime('%s', 'now')),
+          INDEX idx_device_id (deviceId),
+          INDEX idx_session_id (sessionId),
+          INDEX idx_start_time (startTime)
+        )
+      ''');
+
+      // Users table
+      await db.execute('''
+        CREATE TABLE $_userTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          email TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_login TEXT NOT NULL,
+          is_online_user INTEGER DEFAULT 0,
+          INDEX idx_email (email)
+        )
+      ''');
+
+      // Known devices table
+      await db.execute('''
+        CREATE TABLE $_knownDevicesTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deviceId TEXT UNIQUE NOT NULL,
+          ssid TEXT NOT NULL,
+          psk TEXT NOT NULL,
+          isHost INTEGER NOT NULL DEFAULT 0,
+          lastSeen INTEGER NOT NULL,
+          userName TEXT,
+          INDEX idx_device_id (deviceId)
+        )
+      ''');
+
+      // Pending messages table
+      await db.execute('''
+        CREATE TABLE $_pendingMessagesTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deviceId TEXT NOT NULL,
+          messageData TEXT NOT NULL,
+          queuedAt INTEGER NOT NULL,
+          INDEX idx_device_id (deviceId)
+        )
+      ''');
+
+      debugPrint('✅ Enhanced database tables created successfully');
+    } catch (e) {
+      debugPrint('❌ Error creating enhanced database tables: $e');
+      rethrow;
+    }
+  }
+
+  static Future<void> _upgradeDB(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    try {
+      debugPrint('🔄 Upgrading database from v$oldVersion to v$newVersion');
+
+      if (oldVersion < 2) {
+        // Add enhanced columns to existing tables
+        try {
+          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN connectionType TEXT');
+        } catch (e) {
+          debugPrint('Column connectionType already exists or error: $e');
+        }
+        
+        try {
+          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN deviceInfo TEXT');
+        } catch (e) {
+          debugPrint('Column deviceInfo already exists or error: $e');
+        }
+        
+        try {
+          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN retryCount INTEGER DEFAULT 0');
+        } catch (e) {
+          debugPrint('Column retryCount already exists or error: $e');
+        }
+        
+        try {
+          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN lastRetryTime INTEGER DEFAULT 0');
+        } catch (e) {
+          debugPrint('Column lastRetryTime already exists or error: $e');
+        }
+        
+        try {
+          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN priority INTEGER DEFAULT 0');
+        } catch (e) {
+          debugPrint('Column priority already exists or error: $e');
+        }
+        
+        try {
+          await db.execute('ALTER TABLE $_messagesTable ADD COLUMN syncedToFirebase INTEGER DEFAULT 0');
+        } catch (e) {
+          debugPrint('Column syncedToFirebase already exists or error: $e');
+        }
+
+        // Location table enhancements
+        try {
+          await db.execute('ALTER TABLE $_locationsTable ADD COLUMN source TEXT DEFAULT "gps"');
+        } catch (e) {
+          debugPrint('Column source already exists or error: $e');
+        }
+        
+        try {
+          await db.execute('ALTER TABLE $_locationsTable ADD COLUMN batteryLevel INTEGER');
+        } catch (e) {
+          debugPrint('Column batteryLevel already exists or error: $e');
+        }
+        
+        try {
+          await db.execute('ALTER TABLE $_locationsTable ADD COLUMN connectionType TEXT');
+        } catch (e) {
+          debugPrint('Column connectionType already exists or error: $e');
+        }
+        
+        try {
+          await db.execute('ALTER TABLE $_locationsTable ADD COLUMN emergencyLevel INTEGER DEFAULT 0');
+        } catch (e) {
+          debugPrint('Column emergencyLevel already exists or error: $e');
         }
       }
-      _pendingConnections.clear();
 
-      _startHealthCheck();
-      return _database!;
+      if (oldVersion < 3) {
+        // Create new tables for version 3
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS $_compatibilityTable (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deviceId TEXT UNIQUE NOT NULL,
+            androidVersion INTEGER,
+            deviceModel TEXT,
+            deviceManufacturer TEXT,
+            supportsWifiDirect INTEGER DEFAULT 0,
+            canCreateHotspot INTEGER DEFAULT 0,
+            supportedFeatures TEXT,
+            connectionSuccess TEXT,
+            lastUpdated INTEGER NOT NULL,
+            createdAt INTEGER DEFAULT (strftime('%s', 'now'))
+          )
+        ''');
+
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS $_p2pSessionsTable (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sessionId TEXT UNIQUE NOT NULL,
+            deviceId TEXT NOT NULL,
+            connectionType TEXT NOT NULL,
+            role TEXT NOT NULL,
+            startTime INTEGER NOT NULL,
+            endTime INTEGER,
+            duration INTEGER,
+            messagesSent INTEGER DEFAULT 0,
+            messagesReceived INTEGER DEFAULT 0,
+            emergencySession INTEGER DEFAULT 0,
+            connectionQuality INTEGER DEFAULT 0,
+            disconnectReason TEXT,
+            synced INTEGER DEFAULT 0,
+            createdAt INTEGER DEFAULT (strftime('%s', 'now'))
+          )
+        ''');
+
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS $_userTable (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_login TEXT NOT NULL,
+            is_online_user INTEGER DEFAULT 0
+          )
+        ''');
+
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS $_knownDevicesTable (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deviceId TEXT UNIQUE NOT NULL,
+            ssid TEXT NOT NULL,
+            psk TEXT NOT NULL,
+            isHost INTEGER NOT NULL DEFAULT 0,
+            lastSeen INTEGER NOT NULL,
+            userName TEXT
+          )
+        ''');
+
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS $_pendingMessagesTable (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deviceId TEXT NOT NULL,
+            messageData TEXT NOT NULL,
+            queuedAt INTEGER NOT NULL
+          )
+        ''');
+
+        // Add enhanced device tracking columns
+        final deviceColumns = [
+          'androidVersion INTEGER',
+          'deviceModel TEXT',
+          'capabilities TEXT',
+          'preferredConnectionMethod TEXT',
+          'emergencyCapable INTEGER DEFAULT 1',
+          'lastLatitude REAL',
+          'lastLongitude REAL',
+        ];
+
+        for (final column in deviceColumns) {
+          try {
+            await db.execute('ALTER TABLE $_devicesTable ADD COLUMN $column');
+          } catch (e) {
+            debugPrint('Column $column already exists or error: $e');
+          }
+        }
+      }
+
+      debugPrint('✅ Database upgrade completed successfully');
+    } catch (e) {
+      debugPrint('❌ Error upgrading database: $e');
+      rethrow;
+    }
+  }
+
+  // Connectivity monitoring for automatic sync
+  static Future<void> _startConnectivityMonitoring() async {
+    try {
+      _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+        results,
+      ) {
+        final wasOnline = _isOnline;
+        _isOnline = !results.contains(ConnectivityResult.none);
+
+        if (!wasOnline && _isOnline) {
+          debugPrint('🌐 Connection restored - starting sync');
+          _triggerSync();
+        } else if (wasOnline && !_isOnline) {
+          debugPrint('📵 Connection lost - sync disabled');
+        }
+      });
+
+      // Check initial connectivity
+      final results = await Connectivity().checkConnectivity();
+      _isOnline = !results.contains(ConnectivityResult.none);
+
+      if (_isOnline) {
+        _triggerSync();
+      }
+    } catch (e) {
+      debugPrint('❌ Error setting up connectivity monitoring: $e');
+    }
+  }
+
+  static void _startPeriodicSync() {
+    _syncTimer?.cancel();
+    _syncTimer = Timer.periodic(Duration(minutes: 5), (timer) {
+      if (_isOnline && !_syncInProgress) {
+        _triggerSync();
+      }
+    });
+  }
+
+  static void _triggerSync() {
+    if (!_syncInProgress) {
+      syncToFirebase();
+    }
+  }
+
+  // Sync queue operations
+  static Future<int> _addToSyncQueue(
+    String tableName,
+    int recordId,
+    String operation,
+    Map<String, dynamic> data,
+  ) async {
+    try {
+      final db = await database;
+
+      return await db.insert(_syncQueueTable, {
+        'tableName': tableName,
+        'recordId': recordId,
+        'operation': operation,
+        'data': jsonEncode(data),
+        'priority': operation == 'insert' ? 1 : 0,
+        'attempts': 0,
+      });
+    } catch (e) {
+      debugPrint('❌ Error adding to sync queue: $e');
+      return -1;
+    }
+  }
+
+  // Firebase synchronization
+  static Future<void> syncToFirebase() async {
+    if (_syncInProgress || !_isOnline) {
+      debugPrint('🔄 Sync already in progress or offline');
+      return;
+    }
+
+    try {
+      _syncInProgress = true;
+      debugPrint('🔄 Starting Firebase synchronization...');
+
+      await _syncMessages();
+      await _syncLocations();
+      await _processSyncQueue();
+
+      debugPrint('✅ Firebase synchronization completed');
+    } catch (e) {
+      debugPrint('❌ Error during Firebase sync: $e');
     } finally {
-      _isInitializing = false;
+      _syncInProgress = false;
+    }
+  }
+
+  static Future<void> _syncMessages() async {
+    try {
+      final unsyncedMessages = await getUnsyncedMessages();
+      debugPrint('📤 Syncing ${unsyncedMessages.length} messages to Firebase');
+
+      for (final message in unsyncedMessages) {
+        try {
+          await _firestore
+              .collection('messages')
+              .doc(message.messageId)
+              .set(message.toFirebaseJson());
+
+          await markMessageSynced(message.messageId ?? '');
+          debugPrint('✅ Message ${message.messageId} synced successfully');
+        } catch (e) {
+          debugPrint('❌ Error syncing message ${message.messageId}: $e');
+          await _incrementSyncAttempts(_messagesTable, message.messageId ?? '');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error in message sync: $e');
+    }
+  }
+
+  static Future<void> _syncLocations() async {
+    try {
+      final unsyncedLocations = await getUnsyncedLocations();
+      debugPrint(
+        '📤 Syncing ${unsyncedLocations.length} locations to Firebase',
+      );
+
+      for (final location in unsyncedLocations) {
+        try {
+          // Convert LocationModel to Firebase format
+          final locationData = {
+            'userId': location.userId,
+            'latitude': location.latitude,
+            'longitude': location.longitude,
+            'timestamp': location.timestamp.millisecondsSinceEpoch,
+            'type': location.type.toString(),
+            'message': location.message,
+            'accuracy': location.accuracy ?? 0.0,
+            'altitude': location.altitude ?? 0.0,
+            'speed': location.speed ?? 0.0,
+            'heading': location.heading ?? 0.0,
+            'source': 'gps',
+            'batteryLevel': location.batteryLevel ?? 0.0,
+            'emergencyLevel': location.type == LocationType.emergency ? 1 : 0,
+            'createdAt': FieldValue.serverTimestamp(),
+          };
+
+          await _firestore.collection('locations').add(locationData);
+
+          await _markLocationSynced(location.timestamp);
+          debugPrint('✅ Location synced successfully');
+        } catch (e) {
+          debugPrint('❌ Error syncing location: $e');
+          await _incrementLocationSyncAttempts(location.timestamp);
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error in location sync: $e');
+    }
+  }
+
+  static Future<void> _processSyncQueue() async {
+    try {
+      final db = await database;
+      final queueItems = await db.query(
+        _syncQueueTable,
+        where: 'attempts < 3',
+        orderBy: 'priority DESC, createdAt ASC',
+        limit: 50,
+      );
+
+      for (final item in queueItems) {
+        try {
+          await _processSyncItem(item);
+          await db.delete(
+            _syncQueueTable,
+            where: 'id = ?',
+            whereArgs: [item['id']],
+          );
+        } catch (e) {
+          debugPrint('❌ Error processing sync item ${item['id']}: $e');
+          await db.update(
+            _syncQueueTable,
+            {
+              'attempts': (item['attempts'] as int) + 1,
+              'lastAttempt': DateTime.now().millisecondsSinceEpoch,
+              'error': e.toString(),
+            },
+            where: 'id = ?',
+            whereArgs: [item['id']],
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error processing sync queue: $e');
+    }
+  }
+
+  static Future<void> _processSyncItem(Map<String, dynamic> item) async {
+    final tableName = item['tableName'] as String;
+    final data = jsonDecode(item['data'] as String);
+
+    switch (tableName) {
+      case 'messages':
+        await _firestore.collection('messages').add(data);
+      case 'locations':
+        await _firestore.collection('locations').add(data);
+      case 'devices':
+        await _firestore.collection('devices').add(data);
+    }
+  }
+
+  static Future<void> _incrementSyncAttempts(
+    String table,
+    String messageId,
+  ) async {
+    try {
+      final db = await database;
+      await db.rawUpdate(
+        'UPDATE $table SET syncAttempts = syncAttempts + 1 WHERE messageId = ?',
+        [messageId],
+      );
+    } catch (e) {
+      debugPrint('❌ Error incrementing sync attempts: $e');
+    }
+  }
+
+  static Future<void> _markLocationSynced(DateTime timestamp) async {
+    try {
+      final db = await database;
+      await db.update(
+        _locationsTable,
+        {'synced': 1},
+        where: 'timestamp = ?',
+        whereArgs: [timestamp.millisecondsSinceEpoch],
+      );
+    } catch (e) {
+      debugPrint('❌ Error marking location synced: $e');
+    }
+  }
+
+  static Future<void> _incrementLocationSyncAttempts(DateTime timestamp) async {
+    try {
+      final db = await database;
+      await db.rawUpdate(
+        'UPDATE $_locationsTable SET syncAttempts = syncAttempts + 1 WHERE timestamp = ?',
+        [timestamp.millisecondsSinceEpoch],
+      );
+    } catch (e) {
+      debugPrint('❌ Error incrementing location sync attempts: $e');
     }
   }
 
@@ -72,148 +710,371 @@ class DatabaseService {
     });
   }
 
-  static Future<void> dispose() async {
-    _healthCheckTimer?.cancel();
-    _healthCheckTimer = null;
+  // Get database stats
+  static Future<Map<String, int>> getDatabaseStats() async {
+    try {
+      final db = await database;
 
-    if (_database != null && _database!.isOpen) {
-      await _database!.close();
-      _database = null;
+      final messagesCount =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM $_messagesTable'),
+          ) ??
+          0;
+
+      final locationsCount =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM $_locationsTable'),
+          ) ??
+          0;
+
+      final devicesCount =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM $_devicesTable'),
+          ) ??
+          0;
+
+      final unsyncedMessages =
+          Sqflite.firstIntValue(
+            await db.rawQuery(
+              'SELECT COUNT(*) FROM $_messagesTable WHERE synced = 0',
+            ),
+          ) ??
+          0;
+
+      final unsyncedLocations =
+          Sqflite.firstIntValue(
+            await db.rawQuery(
+              'SELECT COUNT(*) FROM $_locationsTable WHERE synced = 0',
+            ),
+          ) ??
+          0;
+
+      return {
+        'totalMessages': messagesCount,
+        'totalLocations': locationsCount,
+        'totalDevices': devicesCount,
+        'unsyncedMessages': unsyncedMessages,
+        'unsyncedLocations': unsyncedLocations,
+        'isOnline': _isOnline ? 1 : 0,
+        'syncInProgress': _syncInProgress ? 1 : 0,
+      };
+    } catch (e) {
+      debugPrint('❌ Error getting database stats: $e');
+      return {};
     }
   }
 
-  static Future<Database> _initDB() async {
-    final path = join(await getDatabasesPath(), 'resqlink_combined.db');
-    return await openDatabase(
-      path,
-      version: 4, // Increased version for schema fixes
-      onCreate: _createDB,
-      onUpgrade: _upgradeDB,
-    );
+  // Get unsynced locations
+  static Future<List<LocationModel>> getUnsyncedLocations() async {
+    try {
+      final db = await database;
+      final List<Map<String, dynamic>> maps = await db.query(
+        _locationsTable,
+        where: 'synced = 0 AND syncAttempts < 3',
+        orderBy: 'timestamp ASC',
+      );
+
+      return maps.map((map) => LocationModel.fromMap(map)).toList();
+    } catch (e) {
+      debugPrint('❌ Error getting unsynced locations: $e');
+      return [];
+    }
   }
 
-  static Future<void> _createDB(Database db, int version) async {
-    // Create user table
-    await db.execute('''
-      CREATE TABLE $_userTable (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        display_name TEXT,
-        created_at TEXT NOT NULL,
-        last_login TEXT NOT NULL,
-        is_online_user INTEGER DEFAULT 0
-      )
-    ''');
+  // Enhanced device compatibility tracking
+  static Future<int> saveDeviceCompatibility({
+    required String deviceId,
+    int? androidVersion,
+    String? deviceModel,
+    String? deviceManufacturer,
+    bool supportsWifiDirect = false,
+    bool canCreateHotspot = false,
+    List<String>? supportedFeatures,
+    Map<String, bool>? connectionSuccess,
+  }) async {
+    try {
+      final db = await database;
 
-    // Fixed messages table with consistent column names
-    await db.execute('''
-      CREATE TABLE $_messagesTable (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        messageId TEXT UNIQUE,
-        endpointId TEXT NOT NULL,
-        fromUser TEXT NOT NULL,
-        message TEXT NOT NULL,
-        isMe INTEGER NOT NULL,
-        isEmergency INTEGER DEFAULT 0,
-        timestamp INTEGER NOT NULL,
-        latitude REAL,
-        longitude REAL,
-        type TEXT DEFAULT 'text',
-        status TEXT DEFAULT 'pending',
-        synced INTEGER DEFAULT 0,
-        syncedToFirebase INTEGER DEFAULT 0,
-        retryCount INTEGER DEFAULT 0,
-        lastRetryTime INTEGER DEFAULT 0
-      )
-    ''');
+      final compatibilityMap = {
+        'deviceId': deviceId,
+        'androidVersion': androidVersion,
+        'deviceModel': deviceModel,
+        'deviceManufacturer': deviceManufacturer,
+        'supportsWifiDirect': supportsWifiDirect ? 1 : 0,
+        'canCreateHotspot': canCreateHotspot ? 1 : 0,
+        'supportedFeatures': supportedFeatures != null
+            ? jsonEncode(supportedFeatures)
+            : null,
+        'connectionSuccess': connectionSuccess != null
+            ? jsonEncode(connectionSuccess)
+            : null,
+        'lastUpdated': DateTime.now().millisecondsSinceEpoch,
+      };
 
-    // Add indexes for better performance
-    await db.execute(
-      'CREATE INDEX idx_messages_endpoint ON $_messagesTable(endpointId)',
-    );
-    await db.execute(
-      'CREATE INDEX idx_messages_status ON $_messagesTable(status)',
-    );
-    await db.execute(
-      'CREATE INDEX idx_messages_timestamp ON $_messagesTable(timestamp)',
-    );
-    await db.execute(
-      'CREATE INDEX idx_messages_synced ON $_messagesTable(synced)',
-    );
-    await db.execute(
-      'CREATE INDEX idx_messages_id ON $_messagesTable(messageId)',
-    );
+      final id = await db.insert(
+        _compatibilityTable,
+        compatibilityMap,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
 
-    // Create known devices table
-    await db.execute('''
-      CREATE TABLE $_knownDevicesTable (
-        deviceId TEXT PRIMARY KEY,
-        ssid TEXT NOT NULL,
-        psk TEXT NOT NULL,
-        isHost INTEGER NOT NULL,
-        lastSeen INTEGER NOT NULL,
-        userName TEXT
-      )
-    ''');
-
-    // Create pending messages table
-    await db.execute('''
-      CREATE TABLE $_pendingMessagesTable (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        deviceId TEXT NOT NULL,
-        messageData TEXT NOT NULL,
-        queuedAt INTEGER NOT NULL,
-        attempts INTEGER DEFAULT 0
-      )
-    ''');
-
-    // Index for pending messages
-    await db.execute(
-      'CREATE INDEX idx_pending_device ON $_pendingMessagesTable(deviceId)',
-    );
+      debugPrint('✅ Device compatibility saved: $deviceId');
+      return id;
+    } catch (e) {
+      debugPrint('❌ Error saving device compatibility: $e');
+      return -1;
+    }
   }
 
-  static Future<void> _upgradeDB(
-    Database db,
-    int oldVersion,
-    int newVersion,
+  static Future<Map<String, dynamic>?> getDeviceCompatibility(
+    String deviceId,
   ) async {
-    if (oldVersion < 2) {
-      await db.execute(
-        'ALTER TABLE $_messagesTable ADD COLUMN type TEXT DEFAULT "text"',
-      );
-      await db.execute('ALTER TABLE $_messagesTable ADD COLUMN latitude REAL');
-      await db.execute('ALTER TABLE $_messagesTable ADD COLUMN longitude REAL');
-    }
-    if (oldVersion < 3) {
-      await db.execute(
-        'ALTER TABLE $_messagesTable ADD COLUMN synced INTEGER DEFAULT 0',
-      );
-      await db.execute('ALTER TABLE $_messagesTable ADD COLUMN messageId TEXT');
-      await db.execute(
-        'ALTER TABLE $_messagesTable ADD COLUMN retryCount INTEGER DEFAULT 0',
-      );
-      await db.execute(
-        'ALTER TABLE $_messagesTable ADD COLUMN lastRetryTime INTEGER DEFAULT 0',
-      );
-    }
-    if (oldVersion < 4) {
-      // Fix column naming consistency
-      await db.execute(
-        'ALTER TABLE $_messagesTable ADD COLUMN syncedToFirebase INTEGER DEFAULT 0',
+    try {
+      final db = await database;
+      final results = await db.query(
+        _compatibilityTable,
+        where: 'deviceId = ?',
+        whereArgs: [deviceId],
+        limit: 1,
       );
 
-      // Update existing data if any
-      await db.execute(
-        'UPDATE $_messagesTable SET status = "pending" WHERE status IS NULL',
-      );
+      if (results.isNotEmpty) {
+        final data = Map<String, dynamic>.from(results.first);
+
+        // Parse JSON fields
+        if (data['supportedFeatures'] != null) {
+          data['supportedFeatures'] = jsonDecode(data['supportedFeatures']);
+        }
+        if (data['connectionSuccess'] != null) {
+          data['connectionSuccess'] = jsonDecode(data['connectionSuccess']);
+        }
+
+        return data;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error getting device compatibility: $e');
+      return null;
     }
   }
 
-  // **FIXED MISSING METHODS WITH CORRECT COLUMN NAMES**
+  // Enhanced P2P session tracking
+  static Future<int> startP2PSession({
+    required String sessionId,
+    required String deviceId,
+    required String connectionType,
+    required String role,
+    bool emergencySession = false,
+  }) async {
+    try {
+      final db = await database;
 
-  // Get message by ID
+      final sessionMap = {
+        'sessionId': sessionId,
+        'deviceId': deviceId,
+        'connectionType': connectionType,
+        'role': role,
+        'startTime': DateTime.now().millisecondsSinceEpoch,
+        'emergencySession': emergencySession ? 1 : 0,
+        'connectionQuality': 5, // Default good quality
+      };
+
+      final id = await db.insert(_p2pSessionsTable, sessionMap);
+      debugPrint('📊 P2P session started: $sessionId');
+      return id;
+    } catch (e) {
+      debugPrint('❌ Error starting P2P session: $e');
+      return -1;
+    }
+  }
+
+  static Future<bool> endP2PSession({
+    required String sessionId,
+    String? disconnectReason,
+    int? connectionQuality,
+  }) async {
+    try {
+      final db = await database;
+      final endTime = DateTime.now().millisecondsSinceEpoch;
+
+      // Get start time to calculate duration
+      final session = await db.query(
+        _p2pSessionsTable,
+        where: 'sessionId = ?',
+        whereArgs: [sessionId],
+        limit: 1,
+      );
+
+      if (session.isEmpty) return false;
+
+      final startTime = session.first['startTime'] as int;
+      final duration = endTime - startTime;
+
+      final updateMap = {
+        'endTime': endTime,
+        'duration': duration,
+        'disconnectReason': disconnectReason,
+      };
+
+      if (connectionQuality != null) {
+        updateMap['connectionQuality'] = connectionQuality;
+      }
+
+      final count = await db.update(
+        _p2pSessionsTable,
+        updateMap,
+        where: 'sessionId = ?',
+        whereArgs: [sessionId],
+      );
+
+      debugPrint('📊 P2P session ended: $sessionId (${duration}ms)');
+      return count > 0;
+    } catch (e) {
+      debugPrint('❌ Error ending P2P session: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> updateP2PSessionStats({
+    required String sessionId,
+    int? messagesSent,
+    int? messagesReceived,
+    int? connectionQuality,
+  }) async {
+    try {
+      final db = await database;
+      final updateMap = <String, dynamic>{};
+
+      if (messagesSent != null) updateMap['messagesSent'] = messagesSent;
+      if (messagesReceived != null) {
+        updateMap['messagesReceived'] = messagesReceived;
+      }
+      if (connectionQuality != null) {
+        updateMap['connectionQuality'] = connectionQuality;
+      }
+
+      if (updateMap.isEmpty) return false;
+
+      final count = await db.update(
+        _p2pSessionsTable,
+        updateMap,
+        where: 'sessionId = ?',
+        whereArgs: [sessionId],
+      );
+
+      return count > 0;
+    } catch (e) {
+      debugPrint('❌ Error updating P2P session stats: $e');
+      return false;
+    }
+  }
+
+  // Enhanced message operations
+  static Future<int> insertMessage(MessageModel message) async {
+    try {
+      final db = await database;
+
+      final messageMap = {
+        'messageId': message.messageId ?? 'msg_${DateTime.now().millisecondsSinceEpoch}',
+        'endpointId': message.endpointId,
+        'fromUser': message.fromUser,
+        'message': message.message,
+        'isMe': message.isMe ? 1 : 0,
+        'isEmergency': message.isEmergency ? 1 : 0,
+        'timestamp': message.timestamp,
+        'latitude': message.latitude,
+        'longitude': message.longitude,
+        'type': message.type,
+        'status': message.status.name,
+        'synced': 0,
+        'syncedToFirebase': 0,
+        'syncAttempts': 0,
+        'routePath': message.routePath != null ? jsonEncode(message.routePath!) : null,
+        'ttl': message.ttl ?? 5,
+        'connectionType': message.connectionType,
+        'deviceInfo': message.deviceInfo != null ? jsonEncode(message.deviceInfo!) : null,
+        'priority': message.isEmergency ? 1 : 0,
+      };
+
+      final id = await db.insert(
+        _messagesTable,
+        messageMap,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+
+      // Add to sync queue if online
+      if (_isOnline) {
+        await _addToSyncQueue(_messagesTable, id, 'insert', messageMap);
+      }
+
+      debugPrint('💬 Message inserted with ID: $id');
+      return id;
+    } catch (e) {
+      debugPrint('❌ Error inserting message: $e');
+      return -1;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getEnhancedDatabaseStats() async {
+    try {
+      final db = await database;
+
+      final stats = await getDatabaseStats();
+
+      // Add P2P-specific stats
+      final p2pSessions =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM $_p2pSessionsTable'),
+          ) ??
+          0;
+
+      final emergencySessions =
+          Sqflite.firstIntValue(
+            await db.rawQuery(
+              'SELECT COUNT(*) FROM $_p2pSessionsTable WHERE emergencySession = 1',
+            ),
+          ) ??
+          0;
+
+      final avgSessionDuration =
+          Sqflite.firstIntValue(
+            await db.rawQuery(
+              'SELECT AVG(duration) FROM $_p2pSessionsTable WHERE duration IS NOT NULL',
+            ),
+          ) ??
+          0;
+
+      final compatibilityEntries =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM $_compatibilityTable'),
+          ) ??
+          0;
+
+      // Connection type distribution
+      final connectionTypes = await db.rawQuery('''
+        SELECT connectionType, COUNT(*) as count 
+        FROM $_devicesTable 
+        WHERE connectionType IS NOT NULL 
+        GROUP BY connectionType
+      ''');
+
+      final enhancedStats = Map<String, dynamic>.from(stats);
+      enhancedStats.addAll({
+        'totalP2PSessions': p2pSessions,
+        'emergencySessions': emergencySessions,
+        'avgSessionDuration': avgSessionDuration,
+        'compatibilityEntries': compatibilityEntries,
+        'connectionTypeStats': connectionTypes,
+        'databaseVersion': _dbVersion,
+      });
+
+      return enhancedStats;
+    } catch (e) {
+      debugPrint('❌ Error getting enhanced database stats: $e');
+      return {};
+    }
+  }
+
+  // Continue with all other existing methods...
   static Future<MessageModel?> getMessageById(String messageId) async {
     try {
       final db = await database;
@@ -234,7 +1095,6 @@ class DatabaseService {
     }
   }
 
-  // Get failed messages
   static Future<List<MessageModel>> getFailedMessages() async {
     try {
       final db = await database;
@@ -313,7 +1173,7 @@ class DatabaseService {
     }
   }
 
-  // Get retry count
+  // Continue with remaining methods...
   static Future<int> getRetryCount(String messageId) async {
     try {
       final db = await database;
@@ -335,7 +1195,6 @@ class DatabaseService {
     }
   }
 
-  // Get last retry time
   static Future<int> getLastRetryTime(String messageId) async {
     try {
       final db = await database;
@@ -357,7 +1216,6 @@ class DatabaseService {
     }
   }
 
-  // Update last retry time
   static Future<void> updateLastRetryTime(
     String messageId,
     int timestamp,
@@ -375,7 +1233,6 @@ class DatabaseService {
     }
   }
 
-  // Increment retry count
   static Future<void> incrementRetryCount(String messageId) async {
     try {
       final db = await database;
@@ -394,7 +1251,6 @@ class DatabaseService {
     }
   }
 
-  // Get pending messages
   static Future<List<MessageModel>> getPendingMessages() async {
     try {
       final db = await database;
@@ -470,7 +1326,6 @@ class DatabaseService {
 
   static Future<List<LocationModel>> getLocationsByUserId(String userId) async {
     try {
-      // Since you already have LocationService, let's integrate with your message system
       final db = await database;
 
       // Query messages with location data
@@ -500,7 +1355,6 @@ class DatabaseService {
     }
   }
 
-  // Save location as message for P2P sharing
   static Future<void> saveLocationAsMessage(
     LocationModel location,
     String endpointId,
@@ -550,13 +1404,74 @@ class DatabaseService {
     }
   }
 
-  // Message operations with fixed column names
-  static Future<int> insertMessage(MessageModel message) async {
+  static Future<int> insertOrUpdateDevice({
+    required String deviceId,
+    required String deviceName,
+    String? macAddress,
+    String? ipAddress,
+    required String connectionType,
+    bool isHost = false,
+    int trustLevel = 0,
+    int? androidVersion,
+    String? deviceModel,
+    List<String>? capabilities,
+    String? preferredConnectionMethod,
+    bool emergencyCapable = true,
+    double? latitude,
+    double? longitude,
+  }) async {
     try {
       final db = await database;
-      return await db.insert(_messagesTable, message.toMap());
+
+      // Get existing device to preserve stats
+      final existing = await db.query(
+        _devicesTable,
+        where: 'deviceId = ?',
+        whereArgs: [deviceId],
+        limit: 1,
+      );
+
+      final deviceMap = {
+        'deviceId': deviceId,
+        'deviceName': deviceName,
+        'macAddress': macAddress,
+        'ipAddress': ipAddress,
+        'lastSeen': DateTime.now().millisecondsSinceEpoch,
+        'connectionType': connectionType,
+        'isHost': isHost ? 1 : 0,
+        'trustLevel': trustLevel,
+        'androidVersion': androidVersion,
+        'deviceModel': deviceModel,
+        'capabilities': capabilities != null ? jsonEncode(capabilities) : null,
+        'preferredConnectionMethod': preferredConnectionMethod,
+        'emergencyCapable': emergencyCapable ? 1 : 0,
+        'lastLatitude': latitude,
+        'lastLongitude': longitude,
+        'synced': 0,
+      };
+
+      // Preserve existing stats
+      if (existing.isNotEmpty) {
+        final existingData = existing.first;
+        deviceMap['totalMessages'] = existingData['totalMessages'];
+        deviceMap['totalConnections'] =
+            (existingData['totalConnections'] as int) + 1;
+      } else {
+        deviceMap['totalMessages'] = 0;
+        deviceMap['totalConnections'] = 1;
+        deviceMap['avgConnectionDuration'] = 0;
+      }
+
+      final id = await db.insert(
+        _devicesTable,
+        deviceMap,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+
+      debugPrint('📱 Device updated: $deviceId');
+      return id;
     } catch (e) {
-      debugPrint('❌ Error inserting message: $e');
+      debugPrint('❌ Error inserting/updating device: $e');
       return -1;
     }
   }
@@ -607,7 +1522,6 @@ class DatabaseService {
     }
   }
 
-  // Device operations with fixed column names
   static Future<void> saveDeviceCredentials(
     DeviceCredentials credentials, {
     String? userName,
@@ -651,7 +1565,6 @@ class DatabaseService {
     }
   }
 
-  // Pending messages operations with fixed column names
   static Future<void> savePendingMessages(
     Map<String, List<PendingMessage>> pendingMessages,
   ) async {
@@ -705,7 +1618,6 @@ class DatabaseService {
     }
   }
 
-  // Firebase sync operations
   static Future<void> markFirebaseSynced(String messageId) async {
     try {
       final db = await database;
@@ -753,7 +1665,6 @@ class DatabaseService {
     }
   }
 
-  // Utility operations
   static Future<void> cleanupOldData() async {
     try {
       final db = await database;
@@ -788,7 +1699,6 @@ class DatabaseService {
     }
   }
 
-  // Additional helper methods for other services
   static Future<UserModel?> getUserByEmail(String email) async {
     try {
       final db = await database;
@@ -843,10 +1753,24 @@ class DatabaseService {
 
   static Future<void> deleteDatabaseFile() async {
     try {
-      final path = join(await getDatabasesPath(), 'resqlink_combined.db');
+      final path = join(await getDatabasesPath(), _dbName);
       await deleteDatabase(path);
     } catch (e) {
       debugPrint('❌ Error deleting database file: $e');
+    }
+  }
+
+  static Future<void> dispose() async {
+    try {
+      _syncTimer?.cancel();
+      _healthCheckTimer?.cancel();
+      await _connectivitySubscription?.cancel();
+      await _database?.close();
+      _database = null;
+      _instance = null;
+      debugPrint('✅ Database service disposed');
+    } catch (e) {
+      debugPrint('❌ Error disposing database service: $e');
     }
   }
 }
