@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -73,40 +74,42 @@ class LocationModel {
       'latitude': latitude,
       'longitude': longitude,
       'timestamp': timestamp.millisecondsSinceEpoch,
-      'synced': synced ? 1 : 0,
       'userId': userId,
-      'type': type.index,
+      'type': type.toString(),
       'message': message,
-      'emergencyLevel': emergencyLevel?.index,
-      'batteryLevel': batteryLevel,
+      'synced': synced ? 1 : 0,
       'accuracy': accuracy,
       'altitude': altitude,
       'speed': speed,
       'heading': heading,
+      'batteryLevel': batteryLevel,
+      'emergencyLevel': emergencyLevel?.index,
     };
   }
 
   factory LocationModel.fromMap(Map<String, dynamic> map) {
     return LocationModel(
       id: map['id'],
-      latitude: map['latitude'],
-      longitude: map['longitude'],
+      latitude: map['latitude']?.toDouble() ?? 0.0,
+      longitude: map['longitude']?.toDouble() ?? 0.0,
       timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp']),
-      synced: map['synced'] == 1,
       userId: map['userId'],
-      type: LocationType.values[map['type'] ?? 0],
+      type: LocationType.values.firstWhere(
+        (e) => e.toString() == map['type'],
+        orElse: () => LocationType.normal,
+      ),
       message: map['message'],
-      emergencyLevel: map['emergencyLevel'] != null
-          ? EmergencyLevel.values[map['emergencyLevel']]
-          : null,
-      batteryLevel: map['batteryLevel'],
+      synced: (map['synced'] ?? 0) == 1,
       accuracy: map['accuracy']?.toDouble(),
       altitude: map['altitude']?.toDouble(),
       speed: map['speed']?.toDouble(),
       heading: map['heading']?.toDouble(),
+      batteryLevel: map['batteryLevel']?.toInt(),
+      emergencyLevel: map['emergencyLevel'] != null
+          ? EmergencyLevel.values[map['emergencyLevel']]
+          : null,
     );
   }
-
   Map<String, dynamic> toFirestore() {
     return {
       'latitude': latitude,
@@ -175,7 +178,6 @@ class LocationModel {
   }
 }
 
-// Location Service (same as your existing one)
 class LocationService {
   static Database? _database;
   static const String _tableName = 'locations';
@@ -234,18 +236,52 @@ class LocationService {
     );
   }
 
-  static Future<int> insertLocation(LocationModel location) async {
-    final db = await database;
-    return await db.insert(_tableName, location.toMap());
+  static Future<int?> insertLocation(LocationModel location) async {
+    try {
+      final db = _database;
+
+      final locationMap = {
+        'userId': location.userId,
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'timestamp': location.timestamp.millisecondsSinceEpoch,
+        'type': location.type.toString(),
+        'message': location.message,
+        'synced': location.synced ? 1 : 0,
+        'syncAttempts': 0,
+        'accuracy': location.accuracy,
+        'altitude': location.altitude,
+        'speed': location.speed,
+        'heading': location.heading,
+        'source': 'gps',
+        'batteryLevel': location.batteryLevel,
+        'connectionType': null,
+        'emergencyLevel': location.emergencyLevel?.index ?? 0,
+      };
+
+      final id = await db?.insert(_tableName, locationMap);
+      return id;
+    } catch (e) {
+      print('❌ Error inserting location: $e');
+      return -1;
+    }
   }
 
   static Future<List<LocationModel>> getLocations() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      _tableName,
-      orderBy: 'timestamp DESC',
-    );
-    return List.generate(maps.length, (i) => LocationModel.fromMap(maps[i]));
+    try {
+      final db = await database;
+
+      final List<Map<String, dynamic>> maps = await db.query(
+        _tableName,
+        orderBy: 'timestamp DESC',
+        limit: 100,
+      );
+
+      return maps.map((map) => LocationModel.fromMap(map)).toList();
+    } catch (e) {
+      print('❌ Error getting locations: $e');
+      return [];
+    }
   }
 
   static Future<List<LocationModel>> getUnsyncedLocations() async {
@@ -259,34 +295,82 @@ class LocationService {
   }
 
   static Future<void> markLocationSynced(int id) async {
-    final db = await database;
-    await db.update(
-      _tableName,
-      {'synced': 1},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    try {
+      final db = await database;
+
+      await db.update(
+        _tableName,
+        {'synced': 1},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } catch (e) {
+      print('❌ Error marking location synced: $e');
+    }
+  }
+
+  static Future<void> cleanupOldLocations() async {
+    try {
+      final db = await database;
+
+      // Keep only last 1000 locations
+      final count =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM $_tableName'),
+          ) ??
+          0;
+
+      if (count > 1000) {
+        await db.rawDelete('''
+          DELETE FROM $_tableName 
+          WHERE id NOT IN (
+            SELECT id FROM $_tableName 
+            ORDER BY timestamp DESC 
+            LIMIT 1000
+          )
+        ''');
+
+        print('🧹 Cleaned old locations, kept last 1000 entries');
+      }
+    } catch (e) {
+      print('❌ Error cleaning old locations: $e');
+    }
   }
 
   static Future<LocationModel?> getLastKnownLocation() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      _tableName,
-      orderBy: 'timestamp DESC',
-      limit: 1,
-    );
-    if (maps.isNotEmpty) {
-      return LocationModel.fromMap(maps.first);
+    try {
+      final db = _database;
+
+      final List<Map<String, Object?>>? maps = await db?.query(
+        _tableName,
+        orderBy: 'timestamp DESC',
+        limit: 1,
+      );
+
+      if (maps!.isNotEmpty) {
+        return LocationModel.fromMap(maps.first);
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting last known location: $e');
+      return null;
     }
-    return null;
   }
 
   static Future<int> getUnsyncedCount() async {
-    final db = await database;
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as count FROM $_tableName WHERE synced = 0',
-    );
-    return Sqflite.firstIntValue(result) ?? 0;
+    try {
+      final db = await database;
+
+      final result = await db.rawQuery(
+        'SELECT COUNT(*) FROM $_tableName WHERE synced = 0',
+      );
+      final count = Sqflite.firstIntValue(result);
+
+      return count ?? 0;
+    } catch (e) {
+      print('❌ Error getting unsynced count: $e');
+      return 0;
+    }
   }
 
   static Future<void> clearAllLocations() async {
@@ -295,50 +379,111 @@ class LocationService {
   }
 }
 
-// Firebase Location Service (same as your existing one)
 class FirebaseLocationService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  static const String _collection = 'emergency_locations';
 
   static Future<void> syncLocation(LocationModel location) async {
     try {
-      debugPrint(
-        '🔄 Syncing location to Firebase: ${location.latitude}, ${location.longitude}',
+      // Check connectivity first
+      final connectivityResults = await Connectivity().checkConnectivity();
+      final isConnected = !connectivityResults.contains(
+        ConnectivityResult.none,
       );
 
-      final docRef = await _firestore
-          .collection(_collection)
-          .add(location.toFirestore());
-      debugPrint('✅ Location synced to Firebase with ID: ${docRef.id}');
+      if (!isConnected) {
+        print('📵 No internet connection - location queued for later sync');
+        return;
+      }
 
+      print(
+        '📤 Syncing location to Firebase: ${location.latitude}, ${location.longitude}',
+      );
+
+      // Prepare location data for Firebase
+      final locationData = {
+        'userId': location.userId ?? 'anonymous',
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'timestamp': FieldValue.serverTimestamp(),
+        'localTimestamp': location.timestamp.millisecondsSinceEpoch,
+        'type': location.type.toString().split('.').last, // Remove enum prefix
+        'message': location.message,
+        'accuracy': location.accuracy,
+        'altitude': location.altitude,
+        'speed': location.speed,
+        'heading': location.heading,
+        'batteryLevel': location.batteryLevel,
+        'emergencyLevel': location.emergencyLevel?.toString().split('.').last,
+        'source': 'resqlink_app',
+        'deviceInfo': await _getDeviceInfo(),
+        'syncedAt': FieldValue.serverTimestamp(),
+      };
+
+      // Add to Firebase with auto-generated ID
+      final docRef = await _firestore.collection('locations').add(locationData);
+
+      print('✅ Location synced to Firebase with ID: ${docRef.id}');
+
+      // Mark as synced locally if it has an ID
       if (location.id != null) {
         await LocationService.markLocationSynced(location.id!);
-        debugPrint('✅ Local location marked as synced');
+        print('✅ Local location marked as synced');
       }
     } catch (e) {
-      debugPrint('❌ Error syncing location to Firebase: $e');
+      print('❌ Firebase sync error: $e');
+      // Don't mark as synced if Firebase sync failed
       rethrow;
     }
   }
 
   static Future<void> syncAllUnsyncedLocations() async {
     try {
-      debugPrint('🔄 Starting bulk sync of unsynced locations...');
+      // Check connectivity
+      final connectivityResults = await Connectivity().checkConnectivity();
+      final isConnected = !connectivityResults.contains(
+        ConnectivityResult.none,
+      );
+
+      if (!isConnected) {
+        print('📵 No connection - skipping Firebase sync');
+        return;
+      }
+
       final unsyncedLocations = await LocationService.getUnsyncedLocations();
-      debugPrint('📊 Found ${unsyncedLocations.length} unsynced locations');
+
+      if (unsyncedLocations.isEmpty) {
+        print('✅ No unsynced locations found');
+        return;
+      }
+
+      print(
+        '🔄 Syncing ${unsyncedLocations.length} unsynced locations to Firebase...',
+      );
+
+      int successCount = 0;
+      int failCount = 0;
 
       for (final location in unsyncedLocations) {
         try {
           await syncLocation(location);
-          debugPrint('✅ Synced location ${location.id}');
+          successCount++;
+
+          // Add small delay to prevent overwhelming Firebase
+          await Future.delayed(Duration(milliseconds: 100));
         } catch (e) {
-          debugPrint('❌ Failed to sync location ${location.id}: $e');
+          failCount++;
+          print('❌ Failed to sync location ${location.id}: $e');
+
+          // Continue with other locations even if one fails
+          continue;
         }
       }
 
-      debugPrint('✅ Bulk sync completed');
+      print(
+        '✅ Firebase sync completed: $successCount synced, $failCount failed',
+      );
     } catch (e) {
-      debugPrint('❌ Error during bulk sync: $e');
+      print('❌ Batch Firebase sync error: $e');
       rethrow;
     }
   }
@@ -348,12 +493,127 @@ class FirebaseLocationService {
       await _firestore.collection('test').doc('connection').set({
         'timestamp': FieldValue.serverTimestamp(),
         'test': true,
+        'source': 'resqlink_app',
       });
-      debugPrint('✅ Firebase connection test successful');
+
+      print('✅ Firebase connection test successful');
       return true;
     } catch (e) {
-      debugPrint('❌ Firebase connection test failed: $e');
+      print('❌ Firebase connection test failed: $e');
       return false;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getRecentLocations({
+    String? userId,
+    int limit = 50,
+  }) async {
+    try {
+      Query query = _firestore
+          .collection('locations')
+          .orderBy('localTimestamp', descending: true)
+          .limit(limit);
+
+      if (userId != null) {
+        query = query.where('userId', isEqualTo: userId);
+      }
+
+      final snapshot = await query.get();
+
+      return snapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        data['firebaseId'] = doc.id;
+        return data;
+      }).toList();
+    } catch (e) {
+      print('❌ Error getting recent locations from Firebase: $e');
+      return [];
+    }
+  }
+
+  static Future<void> syncEmergencyLocation(LocationModel location) async {
+    try {
+      print('🚨 EMERGENCY SYNC: ${location.latitude}, ${location.longitude}');
+
+      // Prepare emergency location data
+      final emergencyData = {
+        'userId': location.userId ?? 'emergency_user',
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'timestamp': FieldValue.serverTimestamp(),
+        'localTimestamp': location.timestamp.millisecondsSinceEpoch,
+        'type': location.type.toString().split('.').last,
+        'message': location.message ?? 'EMERGENCY LOCATION',
+        'accuracy': location.accuracy,
+        'batteryLevel': location.batteryLevel,
+        'emergencyLevel':
+            location.emergencyLevel?.toString().split('.').last ?? 'critical',
+        'source': 'resqlink_emergency',
+        'priority': 'HIGH',
+        'deviceInfo': await _getDeviceInfo(),
+        'syncedAt': FieldValue.serverTimestamp(),
+      };
+
+      // Sync to both regular locations and emergency collection
+      await Future.wait([
+        _firestore.collection('locations').add(emergencyData),
+        _firestore.collection('emergency_locations').add(emergencyData),
+      ]);
+
+      print('🚨 Emergency location synced to Firebase');
+
+      // Mark as synced locally
+      if (location.id != null) {
+        await LocationService.markLocationSynced(location.id!);
+      }
+    } catch (e) {
+      print('❌ Emergency Firebase sync error: $e');
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> _getDeviceInfo() async {
+    try {
+      // You can expand this with actual device info
+      return {
+        'platform': 'android',
+        'appVersion': '1.0.0',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+    } catch (e) {
+      return {'error': 'Could not get device info'};
+    }
+  }
+
+  /// Clean up old Firebase data (optional)
+  static Future<void> cleanupOldFirebaseLocations({
+    String? userId,
+    int daysToKeep = 30,
+  }) async {
+    try {
+      final cutoffTime = DateTime.now()
+          .subtract(Duration(days: daysToKeep))
+          .millisecondsSinceEpoch;
+
+      Query query = _firestore
+          .collection('locations')
+          .where('localTimestamp', isLessThan: cutoffTime);
+
+      if (userId != null) {
+        query = query.where('userId', isEqualTo: userId);
+      }
+
+      final snapshot = await query.get();
+
+      final batch = _firestore.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+
+      await batch.commit();
+      print('🧹 Cleaned up ${snapshot.docs.length} old Firebase locations');
+    } catch (e) {
+      print('❌ Error cleaning up Firebase locations: $e');
     }
   }
 }

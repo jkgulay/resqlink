@@ -173,7 +173,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                     )
                   : Icon(Icons.search, size: isNarrow ? 18 : 20),
               label: Text(
-                controller.isScanning ? 'Scanning' : 'Find Devices',
+                controller.isScanning ? 'Scanning...' : 'Find Devices',
                 style: TextStyle(
                   fontSize: isNarrow ? 13 : 14,
                   fontWeight: FontWeight.w600,
@@ -188,18 +188,13 @@ class ConnectionDiscoveryCard extends StatelessWidget {
             height: isNarrow ? 50 : 56,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: controller.p2pService.currentRole == P2PRole.host
-                    ? [Colors.green, Colors.green.shade700]
-                    : [Colors.purple, Colors.purple.shade700],
+                // ✅ FIX: Better role-based color logic
+                colors: _getRoleButtonColors(controller),
               ),
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color:
-                      (controller.p2pService.currentRole == P2PRole.host
-                              ? Colors.green
-                              : Colors.purple)
-                          .withValues(alpha: 0.3),
+                  color: _getRoleButtonColor(controller).withValues(alpha: 0.3),
                   blurRadius: 8,
                   offset: Offset(0, 3),
                 ),
@@ -213,16 +208,10 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(16),
                 ),
               ),
-              onPressed: controller.p2pService.currentRole == P2PRole.host
-                  ? null
-                  : () => _showCreateNetworkDialog(context),
-              icon: controller.p2pService.currentRole == P2PRole.host
-                  ? Icon(Icons.check_circle, size: isNarrow ? 18 : 20)
-                  : Icon(Icons.add_circle, size: isNarrow ? 18 : 20),
+              onPressed: _getRoleButtonAction(controller, context),
+              icon: _getRoleButtonIcon(controller, isNarrow),
               label: Text(
-                controller.p2pService.currentRole == P2PRole.host
-                    ? 'Hosting'
-                    : 'Create Network',
+                _getRoleButtonText(controller),
                 style: TextStyle(
                   fontSize: isNarrow ? 13 : 14,
                   fontWeight: FontWeight.w600,
@@ -232,6 +221,107 @@ class ConnectionDiscoveryCard extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  // ✅ NEW: Helper methods for role button
+  List<Color> _getRoleButtonColors(HomeController controller) {
+    switch (controller.p2pService.currentRole) {
+      case P2PRole.host:
+        return [Colors.green, Colors.green.shade700];
+      case P2PRole.client:
+        return [Colors.blue, Colors.blue.shade700];
+      case P2PRole.none:
+        return [Colors.purple, Colors.purple.shade700];
+    }
+  }
+
+  Color _getRoleButtonColor(HomeController controller) {
+    switch (controller.p2pService.currentRole) {
+      case P2PRole.host:
+        return Colors.green;
+      case P2PRole.client:
+        return Colors.blue;
+      case P2PRole.none:
+        return Colors.purple;
+    }
+  }
+
+  String _getRoleButtonText(HomeController controller) {
+    switch (controller.p2pService.currentRole) {
+      case P2PRole.host:
+        return 'Hosting';
+      case P2PRole.client:
+        return 'Connected';
+      case P2PRole.none:
+        return 'Create Network';
+    }
+  }
+
+  Widget _getRoleButtonIcon(HomeController controller, bool isNarrow) {
+    IconData iconData;
+    switch (controller.p2pService.currentRole) {
+      case P2PRole.host:
+        iconData = Icons.wifi_tethering;
+      case P2PRole.client:
+        iconData = Icons.wifi;
+      case P2PRole.none:
+        iconData = Icons.add_circle;
+    }
+
+    return Icon(iconData, size: isNarrow ? 18 : 20);
+  }
+
+  VoidCallback? _getRoleButtonAction(
+    HomeController controller,
+    BuildContext context,
+  ) {
+    switch (controller.p2pService.currentRole) {
+      case P2PRole.host:
+        return null; // Disable when already hosting
+      case P2PRole.client:
+        return () => _showConnectionDetails(context, controller);
+      case P2PRole.none:
+        return () => _showCreateNetworkDialog(context);
+    }
+  }
+
+  void _showConnectionDetails(BuildContext context, HomeController controller) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Connection Details'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Role: ${controller.p2pService.currentRole.name.toUpperCase()}',
+            ),
+            Text(
+              'Connected Devices: ${controller.p2pService.connectedDevices.length}',
+            ),
+            Text(
+              'Connection Mode: ${controller.p2pService.currentConnectionMode.name}',
+            ),
+            if (controller.p2pService.connectedHotspotSSID != null)
+              Text('Network: ${controller.p2pService.connectedHotspotSSID}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              controller.p2pService.disconnect();
+            },
+            child: Text('Disconnect'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -711,22 +801,21 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     );
   }
 
+  Future<void> _createWiFiDirectNetwork() async {
+    try {
+      debugPrint('🔗 Creating WiFi Direct network...');
 
-Future<void> _createWiFiDirectNetwork() async {
-  try {
-    debugPrint('🔗 Creating WiFi Direct network...');
+      controller.p2pService.setHotspotFallbackEnabled(false);
 
-    controller.p2pService.setHotspotFallbackEnabled(false);
+      await controller.p2pService.checkAndRequestPermissions();
 
-    await controller.p2pService.checkAndRequestPermissions();
-    
-    await controller.startScan();
+      await controller.startScan();
 
-    debugPrint('✅ WiFi Direct network created successfully');
-  } catch (e) {
-    debugPrint('❌ Failed to create WiFi Direct network: $e');
+      debugPrint('✅ WiFi Direct network created successfully');
+    } catch (e) {
+      debugPrint('❌ Failed to create WiFi Direct network: $e');
+    }
   }
-}
 
   Future<void> _createHotspotNetwork() async {
     try {

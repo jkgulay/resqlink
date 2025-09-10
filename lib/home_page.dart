@@ -78,62 +78,67 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Widget _buildHomePage() {
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider.value(value: _homeController),
-        ChangeNotifierProvider.value(value: LocationStateService()),
-      ],
-      child: Consumer2<HomeController, LocationStateService>(
-        builder: (context, controller, locationState, child) {
-          return RefreshIndicator(
-            onRefresh: () async {
-              await controller.refreshLocation();
-              await locationState.refreshLocation();
-            },
-            child: SingleChildScrollView(
-              physics: AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  // Emergency Mode Card
-                  EmergencyModeCard(
+  return MultiProvider(
+    providers: [
+      ChangeNotifierProvider.value(value: _homeController),
+      ChangeNotifierProvider.value(value: LocationStateService()),
+      ChangeNotifierProvider.value(value: _gpsController), // Add GPS controller
+    ],
+    child: Consumer3<HomeController, LocationStateService, GpsController>(
+      builder: (context, controller, locationState, gpsController, child) {
+        return RefreshIndicator(
+          onRefresh: () async {
+            await controller.refreshLocation();
+            await locationState.refreshLocation();
+            await gpsController.getCurrentLocation(); // Also refresh GPS location
+          },
+          child: SingleChildScrollView(
+            physics: AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                // Emergency Mode Card
+                EmergencyModeCard(
+                  p2pService: _p2pService,
+                  onToggle: controller.toggleEmergencyMode,
+                ),
+                SizedBox(height: 16),
+
+                // Connection & Discovery Card
+                ConnectionDiscoveryCard(controller: controller),
+                SizedBox(height: 16),
+
+                // Emergency Actions (only when connected)
+                if (controller.isConnected) ...[
+                  EmergencyActionsCard(
                     p2pService: _p2pService,
-                    onToggle: controller.toggleEmergencyMode,
+                    onEmergencyMessage: _sendEmergencyMessage,
                   ),
                   SizedBox(height: 16),
-
-                  // Connection & Discovery Card
-                  ConnectionDiscoveryCard(controller: controller),
-                  SizedBox(height: 16),
-
-                  // Emergency Actions (only when connected)
-                  if (controller.isConnected) ...[
-                    EmergencyActionsCard(
-                      p2pService: _p2pService,
-                      onEmergencyMessage: _sendEmergencyMessage,
-                    ),
-                    SizedBox(height: 16),
-                  ],
-
-                  // Location Status Card - Now using shared state
-                  LocationStatusCard(
-                    location: locationState.currentLocation,
-                    isLoading: locationState.isLoadingLocation,
-                    unsyncedCount: locationState.unsyncedCount,
-                    onRefresh: locationState.refreshLocation,
-                    onShare: locationState.shareLocation,
-                  ),
-                  SizedBox(height: 16),
-
-                  // Instructions Card
-                  InstructionsCard(),
                 ],
-              ),
+
+                // Location Status Card - Now properly connected
+                LocationStatusCard(
+                  location: locationState.currentLocation,
+                  isLoading: locationState.isLoadingLocation,
+                  unsyncedCount: locationState.unsyncedCount,
+                  onRefresh: () async {
+                    await locationState.refreshLocation();
+                    await gpsController.getCurrentLocation();
+                  },
+                  onShare: locationState.shareLocation,
+                ),
+                SizedBox(height: 16),
+
+                // Instructions Card
+                InstructionsCard(),
+              ],
             ),
-          );
-        },
-      ),
-    );
+          ),
+        );
+      },
+    ),
+  );
   }
 
   @override

@@ -5,7 +5,8 @@ import '../gps_page.dart';
 import '../services/p2p_service.dart';
 
 class LocationStateService extends ChangeNotifier {
-  static final LocationStateService _instance = LocationStateService._internal();
+  static final LocationStateService _instance =
+      LocationStateService._internal();
   factory LocationStateService() => _instance;
   LocationStateService._internal();
 
@@ -50,11 +51,11 @@ class LocationStateService extends ChangeNotifier {
   Future<void> refreshLocation() async {
     _isLoadingLocation = true;
     notifyListeners();
-    
+
     try {
       final lastLocation = await LocationService.getLastKnownLocation();
       final unsyncedCount = await LocationService.getUnsyncedCount();
-      
+
       _currentLocation = lastLocation;
       _unsyncedCount = unsyncedCount;
     } catch (e) {
@@ -73,63 +74,59 @@ class LocationStateService extends ChangeNotifier {
 
     try {
       // 1. Copy coordinates to clipboard
-      final locationText = '${_currentLocation!.latitude.toStringAsFixed(6)}, ${_currentLocation!.longitude.toStringAsFixed(6)}';
+      final locationText =
+          '${_currentLocation!.latitude.toStringAsFixed(6)}, ${_currentLocation!.longitude.toStringAsFixed(6)}';
       await Clipboard.setData(ClipboardData(text: locationText));
       debugPrint('📋 Location copied to clipboard: $locationText');
 
       // 2. Share via P2P if service is available and connected
       if (_p2pService != null && _p2pService!.connectedDevices.isNotEmpty) {
-        // Fix: Use named parameters to match P2PConnectionService.sendMessage signature
         await _p2pService!.sendMessage(
           message: _getLocationShareMessage(),
-          type: _currentLocation!.type == LocationType.emergency || 
-                _currentLocation!.type == LocationType.sos
+          type:
+              _currentLocation!.type == LocationType.emergency ||
+                  _currentLocation!.type == LocationType.sos
               ? MessageType.emergency
               : MessageType.location,
           senderName: _p2pService!.userName ?? 'Unknown User',
           id: DateTime.now().millisecondsSinceEpoch.toString(),
-          ttl: 3600, // 1 hour
+          ttl: 3600,
           routePath: [_p2pService!.deviceId ?? 'unknown_device'],
           latitude: _currentLocation!.latitude,
           longitude: _currentLocation!.longitude,
         );
-        
-        debugPrint('📡 Location shared via P2P to ${_p2pService!.connectedDevices.length} devices');
+
+        debugPrint(
+          '📡 Location shared via P2P to ${_p2pService!.connectedDevices.length} devices',
+        );
       }
 
-      // 3. Save to Firebase if possible
+      // 3. REAL Firebase sync
       try {
-        await FirebaseLocationService.syncLocation(_currentLocation!);
-        debugPrint('☁️ Location synced to Firebase');
+        if (_currentLocation!.type == LocationType.emergency ||
+            _currentLocation!.type == LocationType.sos) {
+          // High priority emergency sync
+          await FirebaseLocationService.syncEmergencyLocation(
+            _currentLocation!,
+          );
+          debugPrint('🚨 Emergency location synced to Firebase');
+        } else {
+          // Regular sync
+          await FirebaseLocationService.syncLocation(_currentLocation!);
+          debugPrint('☁️ Location synced to Firebase');
+        }
       } catch (e) {
         debugPrint('⚠️ Firebase sync failed: $e');
+        // Don't fail the whole operation if Firebase sync fails
       }
 
-      // 4. Mark as shared locally (add sharing timestamp)
-      final sharedLocation = LocationModel(
-        id: _currentLocation!.id,
-        latitude: _currentLocation!.latitude,
-        longitude: _currentLocation!.longitude,
-        timestamp: _currentLocation!.timestamp,
-        synced: true, // Mark as synced since we shared it
-        userId: _currentLocation!.userId,
-        type: _currentLocation!.type,
-        message: '${_currentLocation!.message ?? ''} [SHARED ${DateTime.now().toIso8601String()}]',
-        emergencyLevel: _currentLocation!.emergencyLevel,
-        batteryLevel: _currentLocation!.batteryLevel,
-        accuracy: _currentLocation!.accuracy,
-        altitude: _currentLocation!.altitude,
-        speed: _currentLocation!.speed,
-        heading: _currentLocation!.heading,
-      );
-
-      // Update local database
-      if (sharedLocation.id != null) {
-        await LocationService.markLocationSynced(sharedLocation.id!);
+      // 4. Mark as shared locally
+      if (_currentLocation!.id != null) {
+        await LocationService.markLocationSynced(_currentLocation!.id!);
+        await refreshLocation(); // Refresh to update unsynced count
       }
 
       debugPrint('✅ Location sharing completed successfully');
-      
     } catch (e) {
       debugPrint('❌ Error sharing location: $e');
       rethrow;
@@ -147,8 +144,9 @@ class LocationStateService extends ChangeNotifier {
       // Fix: Use named parameters for sendMessage call
       await _p2pService!.sendMessage(
         message: _getLocationShareMessage(),
-        type: _currentLocation!.type == LocationType.emergency || 
-              _currentLocation!.type == LocationType.sos
+        type:
+            _currentLocation!.type == LocationType.emergency ||
+                _currentLocation!.type == LocationType.sos
             ? MessageType.emergency
             : MessageType.location,
         senderName: _p2pService!.userName ?? 'Emergency User',
@@ -159,7 +157,9 @@ class LocationStateService extends ChangeNotifier {
         longitude: _currentLocation!.longitude,
       );
 
-      debugPrint('✅ Location broadcast completed to ${_p2pService!.connectedDevices.length} devices');
+      debugPrint(
+        '✅ Location broadcast completed to ${_p2pService!.connectedDevices.length} devices',
+      );
     } catch (e) {
       debugPrint('❌ Error broadcasting location: $e');
       rethrow;
@@ -171,13 +171,13 @@ class LocationStateService extends ChangeNotifier {
 
     final locationTypeText = _getLocationTypeText(_currentLocation!.type);
     final timestamp = _formatTimestamp(_currentLocation!.timestamp);
-    final accuracy = _currentLocation!.accuracy != null 
-        ? '±${_currentLocation!.accuracy!.toStringAsFixed(1)}m' 
+    final accuracy = _currentLocation!.accuracy != null
+        ? '±${_currentLocation!.accuracy!.toStringAsFixed(1)}m'
         : 'Unknown accuracy';
 
     String message = '$locationTypeText shared at $timestamp';
-    
-    if (_currentLocation!.emergencyLevel != null && 
+
+    if (_currentLocation!.emergencyLevel != null &&
         _currentLocation!.emergencyLevel != EmergencyLevel.safe) {
       message += ' [${_currentLocation!.emergencyLevel!.name.toUpperCase()}]';
     }
@@ -188,7 +188,8 @@ class LocationStateService extends ChangeNotifier {
 
     message += ' Accuracy: $accuracy';
 
-    if (_currentLocation!.message != null && _currentLocation!.message!.isNotEmpty) {
+    if (_currentLocation!.message != null &&
+        _currentLocation!.message!.isNotEmpty) {
       message += ' Note: ${_currentLocation!.message}';
     }
 
@@ -197,14 +198,22 @@ class LocationStateService extends ChangeNotifier {
 
   String _getLocationTypeText(LocationType type) {
     switch (type) {
-      case LocationType.normal: return 'Current location';
-      case LocationType.emergency: return '🚨 EMERGENCY LOCATION';
-      case LocationType.sos: return '🆘 SOS LOCATION';
-      case LocationType.safezone: return '🛡️ Safe zone';
-      case LocationType.hazard: return '⚠️ Hazard area';
-      case LocationType.evacuationPoint: return '🚪 Evacuation point';
-      case LocationType.medicalAid: return '🏥 Medical aid';
-      case LocationType.supplies: return '📦 Supplies';
+      case LocationType.normal:
+        return 'Current location';
+      case LocationType.emergency:
+        return '🚨 EMERGENCY LOCATION';
+      case LocationType.sos:
+        return '🆘 SOS LOCATION';
+      case LocationType.safezone:
+        return '🛡️ Safe zone';
+      case LocationType.hazard:
+        return '⚠️ Hazard area';
+      case LocationType.evacuationPoint:
+        return '🚪 Evacuation point';
+      case LocationType.medicalAid:
+        return '🏥 Medical aid';
+      case LocationType.supplies:
+        return '📦 Supplies';
     }
   }
 
@@ -223,26 +232,23 @@ class LocationStateService extends ChangeNotifier {
     }
   }
 
-  // Get coordinates for external sharing (Google Maps, etc.)
   String getGoogleMapsUrl() {
     if (_currentLocation == null) return '';
     return 'https://maps.google.com/?q=${_currentLocation!.latitude},${_currentLocation!.longitude}';
   }
 
-  // Get shareable text with all details
   String getShareableText() {
     if (_currentLocation == null) return 'No location available';
-    
-    final coords = '${_currentLocation!.latitude.toStringAsFixed(6)}, ${_currentLocation!.longitude.toStringAsFixed(6)}';
-    final mapsUrl = getGoogleMapsUrl();
+
+    final coords =
+        '${_currentLocation!.latitude.toStringAsFixed(6)}, ${_currentLocation!.longitude.toStringAsFixed(6)}';
     final timestamp = _formatTimestamp(_currentLocation!.timestamp);
     final locationTypeText = _getLocationTypeText(_currentLocation!.type);
-    
+
     return '''
 $locationTypeText
 📍 Coordinates: $coords
 🕒 Time: $timestamp
-🗺️ View on map: $mapsUrl
 
 Shared via ResQLink Emergency App
 ''';

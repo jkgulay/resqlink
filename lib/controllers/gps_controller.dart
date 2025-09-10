@@ -6,7 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:latlong2/latlong.dart';
-import '../gps_page.dart';
+import 'package:resqlink/gps_page.dart';
 import '../services/p2p_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';
@@ -27,10 +27,10 @@ class GpsController extends ChangeNotifier {
     Function(LocationModel)? onLocationShare,
   }) {
     _instance ??= GpsController._internal(
-        p2pService,
-        userId: userId,
-        onLocationShare: onLocationShare,
-      );
+      p2pService,
+      userId: userId,
+      onLocationShare: onLocationShare,
+    );
     return _instance!;
   }
 
@@ -177,8 +177,24 @@ class GpsController extends ChangeNotifier {
   }
 
   Future<void> shareCurrentLocation() async {
-    if (currentLocation != null && lastKnownLocation != null) {
-      await shareLocation(lastKnownLocation!);
+    if (_lastKnownLocation == null) {
+      _errorMessage = 'No location to share';
+      notifyListeners();
+      return;
+    }
+
+    try {
+      // Update the shared location service
+      _locationStateService.updateCurrentLocation(_lastKnownLocation);
+
+      // Use the shared service to handle sharing
+      await _locationStateService.shareLocation();
+
+      debugPrint('✅ Location shared via LocationStateService');
+    } catch (e) {
+      debugPrint('❌ Error sharing location: $e');
+      _errorMessage = 'Failed to share location: $e';
+      notifyListeners();
     }
   }
 
@@ -198,8 +214,18 @@ class GpsController extends ChangeNotifier {
     await _loadSavedLocations();
   }
 
-  void downloadOfflineMap() async {
-    await downloadOfflineMaps({'radius': 5.0, 'minZoom': 10, 'maxZoom': 16});
+  Future<void> downloadOfflineMap() async {
+    if (_currentLocation == null) {
+      _errorMessage = 'No location available for map download';
+      notifyListeners();
+      return;
+    }
+
+    await downloadOfflineMaps({
+      'radius': 5.0, // 5km radius
+      'minZoom': 8,
+      'maxZoom': 16,
+    });
   }
 
   void toggleLocationService() async {
@@ -690,14 +716,16 @@ class GpsController extends ChangeNotifier {
     await _loadSavedLocations();
   }
 
-  Future<void> _syncLocationsToFirebase() async {
-    try {
-      await FirebaseLocationService.syncAllUnsyncedLocations();
-      await _loadSavedLocations();
-    } catch (e) {
-      debugPrint('Sync error: $e');
-    }
+Future<void> _syncLocationsToFirebase() async {
+  try {
+    await FirebaseLocationService.syncAllUnsyncedLocations();
+    await _loadSavedLocations(); // Refresh local data
+    
+    debugPrint('✅ All locations synced to Firebase');
+  } catch (e) {
+    debugPrint('❌ Firebase sync error: $e');
   }
+}
 
   Future<void> downloadOfflineMaps(Map<String, dynamic> params) async {
     if (_currentLocation == null) return;
@@ -870,7 +898,7 @@ class GpsController extends ChangeNotifier {
       );
 
       final locationId = await LocationService.insertLocation(testLocation);
-      results['sqlite'] = locationId > 0;
+      results['sqlite'] = (locationId! > 0);
 
       // Test Firebase
       final firebaseConnected =

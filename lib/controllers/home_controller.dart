@@ -6,7 +6,7 @@ import '../gps_page.dart';
 
 class HomeController extends ChangeNotifier {
   final P2PConnectionService p2pService;
-  
+
   HomeController(this.p2pService) {
     _initialize();
   }
@@ -33,10 +33,7 @@ class HomeController extends ChangeNotifier {
   }
 
   Future<void> _loadData() async {
-    await Future.wait([
-      _loadLatestLocation(),
-      _checkUnsyncedLocations(),
-    ]);
+    await Future.wait([_loadLatestLocation(), _checkUnsyncedLocations()]);
   }
 
   Future<void> _loadLatestLocation() async {
@@ -88,17 +85,33 @@ class HomeController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await p2pService.checkAndRequestPermissions();
-      await p2pService.connectionFallbackManager.initiateConnection();
+      debugPrint("🔍 Starting enhanced device scan...");
 
-      // Auto-stop after 15 seconds
-      Timer(Duration(seconds: 15), () {
+      // Check permissions first
+      await p2pService.checkAndRequestPermissions();
+
+      // Start discovery with all methods
+      await p2pService.discoverDevices(force: true);
+
+      // Auto-stop after 20 seconds with results check
+      Timer(Duration(seconds: 20), () {
         if (_isScanning) {
           _isScanning = false;
+          debugPrint("⏰ Scan timeout reached");
+
+          if (_discoveredDevices.isEmpty) {
+            debugPrint("📭 No devices found during scan");
+          } else {
+            debugPrint(
+              "✅ Scan completed - found ${_discoveredDevices.length} devices",
+            );
+          }
+
           notifyListeners();
         }
       });
     } catch (e) {
+      debugPrint("❌ Scan error: $e");
       _isScanning = false;
       notifyListeners();
       rethrow;

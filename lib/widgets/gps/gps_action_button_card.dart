@@ -4,52 +4,113 @@ import '../../controllers/gps_controller.dart';
 import '../../gps_page.dart';
 import '../../utils/resqlink_theme.dart';
 
-class GpsActionButtons extends StatelessWidget {
-  final Function() onLocationDetailsRequest;
+class GpsActionButtons extends StatefulWidget {
   final Function() onCenterCurrentLocation;
 
   const GpsActionButtons({
     super.key,
-    required this.onLocationDetailsRequest,
     required this.onCenterCurrentLocation,
   });
+
+  @override
+  State<GpsActionButtons> createState() => _GpsActionButtonsState();
+}
+
+class _GpsActionButtonsState extends State<GpsActionButtons>
+    with SingleTickerProviderStateMixin {
+  bool _isExpanded = false;
+  late AnimationController _animationController;
+  late Animation<double> _expandAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _expandAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  void _toggleExpansion() {
+    setState(() {
+      _isExpanded = !_isExpanded;
+      if (_isExpanded) {
+        _animationController.forward();
+      } else {
+        _animationController.reverse();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<GpsController>(
       builder: (context, controller, child) {
-        // Set context in controller if not already set
-        if (controller.context == null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            controller.setContext(context);
-          });
-        }
-
         return Positioned(
-          top:
-              MediaQuery.of(context).size.height *
-              0.15, // Responsive positioning
           right: 16,
+          top: 120, // Below the stats panel
           child: SafeArea(
-            child: Container(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.6,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    _buildCurrentLocationButton(controller),
-                    const SizedBox(height: 8),
-                    _buildSaveLocationButton(controller),
-                    const SizedBox(height: 8),
-                    _buildLocationTypeButton(controller),
-                    const SizedBox(height: 8),
-                    _buildShareLocationButton(controller),
-                    const SizedBox(height: 8),
-                    _buildOfflineMapButton(controller),
-                  ],
+            child: Column(
+              children: [
+                // Main action button (always visible)
+                _buildMainActionButton(controller),
+                
+                // Expandable buttons
+                SizeTransition(
+                  sizeFactor: _expandAnimation,
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 8),
+                      _buildActionButton(
+                        icon: Icons.my_location,
+                        onPressed: widget.onCenterCurrentLocation,
+                        tooltip: 'Center on location',
+                        color: Colors.blue,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildActionButton(
+                        icon: Icons.download,
+                        onPressed: () => controller.downloadOfflineMap(),
+                        tooltip: 'Download offline map',
+                        color: Colors.green,
+                        isLoading: controller.isDownloadingMaps,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildActionButton(
+                        icon: Icons.save,
+                        onPressed: () => _showSaveLocationDialog(controller),
+                        tooltip: 'Save current location',
+                        color: Colors.orange,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildActionButton(
+                        icon: Icons.share,
+                        onPressed: () => controller.shareCurrentLocation(),
+                        tooltip: 'Share location',
+                        color: Colors.purple,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildActionButton(
+                        icon: Icons.location_searching,
+                        onPressed: () => controller.getCurrentLocation(),
+                        tooltip: 'Get current location',
+                        color: Colors.teal,
+                        isLoading: controller.isLoading,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         );
@@ -57,408 +118,168 @@ class GpsActionButtons extends StatelessWidget {
     );
   }
 
-  Widget _buildCurrentLocationButton(GpsController controller) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: ResQLinkTheme.cardDark,
-        border: Border.all(
-          color: controller.isLocationServiceEnabled
-              ? ResQLinkTheme.safeGreen
-              : Colors.red,
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: IconButton(
-        onPressed: () {
-          onCenterCurrentLocation();
-          controller.getCurrentLocation();
-        },
-        icon: Icon(
-          Icons.my_location,
-          color: controller.isLocationServiceEnabled
-              ? ResQLinkTheme.safeGreen
-              : Colors.red,
+  Widget _buildMainActionButton(GpsController controller) {
+    return FloatingActionButton(
+      onPressed: _toggleExpansion,
+      backgroundColor: ResQLinkTheme.cardDark,
+      foregroundColor: Colors.white,
+      elevation: 8,
+      child: AnimatedRotation(
+        turns: _isExpanded ? 0.125 : 0, // 45 degree rotation when expanded
+        duration: const Duration(milliseconds: 300),
+        child: Icon(
+          _isExpanded ? Icons.close : Icons.menu,
           size: 24,
         ),
-        tooltip: 'Center on current location',
       ),
     );
   }
 
-  Widget _buildSaveLocationButton(GpsController controller) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: ResQLinkTheme.cardDark,
-        border: Border.all(color: ResQLinkTheme.locationBlue, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: IconButton(
-        onPressed: controller.currentLocation != null
-            ? () => _showSaveLocationDialog(controller)
-            : null,
-        icon: Icon(
-          Icons.bookmark_add,
-          color: controller.currentLocation != null
-              ? ResQLinkTheme.locationBlue
-              : Colors.grey,
-          size: 24,
-        ),
-        tooltip: 'Save current location',
-      ),
-    );
-  }
-
-  Widget _buildLocationTypeButton(GpsController controller) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: ResQLinkTheme.cardDark,
-        border: Border.all(
-          color: _getSelectedLocationTypeColor(controller.selectedLocationType),
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: IconButton(
-        onPressed: () => _showLocationTypeDialog(controller),
-        icon: Icon(
-          _getLocationTypeIcon(controller.selectedLocationType),
-          color: _getSelectedLocationTypeColor(controller.selectedLocationType),
-          size: 24,
-        ),
-        tooltip: 'Change location type',
-      ),
-    );
-  }
-
-  Widget _buildShareLocationButton(GpsController controller) {
-    final bool canShare =
-        controller.currentLocation != null &&
-        controller.p2pService.connectedDevices.isNotEmpty;
-
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: ResQLinkTheme.cardDark,
-        border: Border.all(
-          color: canShare ? Colors.orange : Colors.grey,
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: IconButton(
-        onPressed: canShare ? () => controller.shareCurrentLocation() : null,
-        icon: Icon(
-          Icons.share_location,
-          color: canShare ? Colors.orange : Colors.grey,
-          size: 24,
-        ),
-        tooltip: canShare
-            ? 'Share location with connected devices'
-            : 'No devices connected',
-      ),
-    );
-  }
-
-  Widget _buildOfflineMapButton(GpsController controller) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: ResQLinkTheme.cardDark,
-        border: Border.all(
-          color: controller.hasOfflineMap
-              ? ResQLinkTheme.safeGreen
-              : Colors.purple,
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: IconButton(
-        onPressed: () => _showOfflineMapDialog(controller),
-        icon: Icon(
-          controller.hasOfflineMap ? Icons.offline_pin : Icons.download,
-          color: controller.hasOfflineMap
-              ? ResQLinkTheme.safeGreen
-              : Colors.purple,
-          size: 24,
-        ),
-        tooltip: controller.hasOfflineMap
-            ? 'Offline maps available'
-            : 'Download offline maps',
-      ),
+  Widget _buildActionButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    required String tooltip,
+    required Color color,
+    bool isLoading = false,
+  }) {
+    return FloatingActionButton(
+      mini: true,
+      onPressed: isLoading ? null : onPressed,
+      backgroundColor: color.withValues(alpha: 0.9),
+      foregroundColor: Colors.white,
+      tooltip: tooltip,
+      elevation: 4,
+      child: isLoading 
+          ? SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            )
+          : Icon(icon, size: 20),
     );
   }
 
   void _showSaveLocationDialog(GpsController controller) {
-    final context = controller.context;
-    if (context == null) return;
-
     String message = '';
+    LocationType selectedType = LocationType.normal;
 
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: ResQLinkTheme.cardDark,
-        title: const Text(
-          'Save Location',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Save current location as ${_getLocationTypeText(controller.selectedLocationType)}?',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              onChanged: (value) => message = value,
-              decoration: InputDecoration(
-                hintText: 'Optional message...',
-                hintStyle: TextStyle(color: Colors.grey.withValues(alpha: 0.6)),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                filled: true,
-                fillColor: Colors.grey.withValues(alpha: 0.1),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: ResQLinkTheme.cardDark,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            'Save Location',
+            style: TextStyle(color: Colors.white, fontSize: 18),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Location Type:',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
-              style: const TextStyle(color: Colors.white),
-              maxLines: 2,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext);
-              await controller.saveCurrentLocation(
-                message: message.isNotEmpty ? message : null,
-              );
-              _showLocationSavedSnackbar(controller);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: ResQLinkTheme.locationBlue,
-            ),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showLocationTypeDialog(GpsController controller) {
-    final context = controller.context;
-    if (context == null) return;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: ResQLinkTheme.cardDark,
-        title: const Text(
-          'Select Location Type',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: LocationType.values.length,
-            itemBuilder: (context, index) {
-              final type = LocationType.values[index];
-              final isSelected = type == controller.selectedLocationType;
-              final color = _getSelectedLocationTypeColor(type);
-
-              return Container(
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                decoration: BoxDecoration(
-                  color: isSelected ? color.withValues(alpha: 0.2) : null,
-                  borderRadius: BorderRadius.circular(8),
-                  border: isSelected
-                      ? Border.all(color: color, width: 2)
-                      : null,
+              const SizedBox(height: 8),
+              DropdownButtonFormField<LocationType>(
+                value: selectedType,
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.grey.withValues(alpha: 0.2),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
                 ),
-                child: ListTile(
-                  leading: Icon(_getLocationTypeIcon(type), color: color),
-                  title: Text(
-                    _getLocationTypeText(type),
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: isSelected
-                          ? FontWeight.bold
-                          : FontWeight.normal,
+                dropdownColor: ResQLinkTheme.cardDark,
+                style: const TextStyle(color: Colors.white),
+                onChanged: (LocationType? newValue) {
+                  if (newValue != null) {
+                    setDialogState(() {
+                      selectedType = newValue;
+                    });
+                  }
+                },
+                items: LocationType.values.map((LocationType type) {
+                  return DropdownMenuItem<LocationType>(
+                    value: type,
+                    child: Row(
+                      children: [
+                        Icon(
+                          _getLocationTypeIcon(type),
+                          color: _getLocationTypeColor(type),
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _getLocationTypeText(type),
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ],
                     ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Message (optional):',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                onChanged: (value) => message = value,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Add a note about this location...',
+                  hintStyle: TextStyle(color: Colors.grey.withValues(alpha: 0.6)),
+                  filled: true,
+                  fillColor: Colors.grey.withValues(alpha: 0.2),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
                   ),
-                  onTap: () {
-                    controller.setSelectedLocationType(type);
-                    Navigator.pop(dialogContext);
-                  },
                 ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showOfflineMapDialog(GpsController controller) {
-    final context = controller.context;
-    if (context == null) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: ResQLinkTheme.cardDark,
-        title: const Text(
-          'Offline Maps',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (controller.hasOfflineMap) ...[
-              Text(
-                'Offline maps are available for this area.',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Icon(
-                    Icons.check_circle,
-                    color: ResQLinkTheme.safeGreen,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Maps downloaded',
-                    style: TextStyle(color: ResQLinkTheme.safeGreen),
-                  ),
-                ],
-              ),
-            ] else ...[
-              Text(
-                'Download offline maps for this area to use without internet connection.',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Icon(Icons.download, color: Colors.purple, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Download required',
-                    style: TextStyle(color: Colors.purple),
-                  ),
-                ],
+                maxLines: 2,
               ),
             ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
           ),
-          if (!controller.hasOfflineMap)
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
             ElevatedButton(
               onPressed: () {
-                controller.downloadOfflineMap();
+                controller.setSelectedLocationType(selectedType);
+                controller.saveCurrentLocation(message: message.isEmpty ? null : message);
                 Navigator.pop(context);
+                
+                // Show success message
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Location saved as ${_getLocationTypeText(selectedType)}'),
+                    backgroundColor: Colors.green,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
               },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
-              child: const Text('Download'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Save'),
             ),
-        ],
-      ),
-    );
-  }
-
-  void _showLocationSavedSnackbar(GpsController controller) {
-    final context = controller.context;
-    if (context == null) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Location saved as ${_getLocationTypeText(controller.selectedLocationType)}',
-        ),
-        backgroundColor: ResQLinkTheme.safeGreen,
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-        action: SnackBarAction(
-          label: 'VIEW',
-          textColor: Colors.white,
-          onPressed: onLocationDetailsRequest,
+          ],
         ),
       ),
     );
   }
 
-  Color _getSelectedLocationTypeColor(LocationType type) {
-    switch (type) {
-      case LocationType.normal:
-        return Colors.blue;
-      case LocationType.emergency:
-      case LocationType.sos:
-        return ResQLinkTheme.primaryRed;
-      case LocationType.safezone:
-        return ResQLinkTheme.safeGreen;
-      case LocationType.hazard:
-        return Colors.orange;
-      case LocationType.evacuationPoint:
-        return Colors.purple;
-      case LocationType.medicalAid:
-        return Colors.red;
-      case LocationType.supplies:
-        return Colors.cyan;
-    }
-  }
-
+  // Helper methods for location types
   IconData _getLocationTypeIcon(LocationType type) {
     switch (type) {
       case LocationType.normal:
@@ -479,12 +300,32 @@ class GpsActionButtons extends StatelessWidget {
     }
   }
 
+  Color _getLocationTypeColor(LocationType type) {
+    switch (type) {
+      case LocationType.normal:
+        return Colors.blue;
+      case LocationType.emergency:
+      case LocationType.sos:
+        return ResQLinkTheme.primaryRed;
+      case LocationType.safezone:
+        return ResQLinkTheme.safeGreen;
+      case LocationType.hazard:
+        return Colors.orange;
+      case LocationType.evacuationPoint:
+        return Colors.purple;
+      case LocationType.medicalAid:
+        return Colors.red;
+      case LocationType.supplies:
+        return Colors.cyan;
+    }
+  }
+
   String _getLocationTypeText(LocationType type) {
     switch (type) {
       case LocationType.normal:
-        return 'Current Location';
+        return 'Normal Location';
       case LocationType.emergency:
-        return 'Emergency Location';
+        return 'Emergency';
       case LocationType.sos:
         return 'SOS Location';
       case LocationType.safezone:
@@ -496,7 +337,7 @@ class GpsActionButtons extends StatelessWidget {
       case LocationType.medicalAid:
         return 'Medical Aid';
       case LocationType.supplies:
-        return 'Supplies';
+        return 'Supply Point';
     }
   }
 }

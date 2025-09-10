@@ -219,7 +219,6 @@ class P2PConnectionService with ChangeNotifier {
       Map.from(_discoveredDevices);
   List<P2PMessage> get messageHistory => List.from(_messageHistory);
 
-  // Enhanced initialization with Android version compatibility
   Future<bool> initialize(String userName, {String? preferredRole}) async {
     try {
       _userName = userName;
@@ -298,6 +297,11 @@ class P2PConnectionService with ChangeNotifier {
           "ℹ️ WiFi Direct not supported, using alternative connection methods",
         );
       }
+      _currentRole = P2PRole.none;
+      debugPrint("🚀 P2P Service initialized - Role: ${_currentRole.name}");
+      debugPrint("📱 Preferred role: ${_preferredRole ?? 'auto'}");
+      debugPrint("📱 WiFi Direct support: $_supportsWifiDirect");
+      debugPrint("📱 Hotspot support: $_canCreateProgrammaticHotspot");
 
       // Setup listeners and monitoring
       _startMessageCleanup();
@@ -309,17 +313,134 @@ class P2PConnectionService with ChangeNotifier {
       // Load data
       await _loadKnownDevices();
       await _loadPendingMessages();
-
-      Timer(Duration(seconds: 2), () => _ensureConnection());
+      Timer(Duration(seconds: 2), () => _intelligentRoleSelection());
 
       debugPrint("✅ Enhanced P2P Service initialized successfully");
-      debugPrint(
-        "📱 Device Info: Android SDK $_androidSdkVersion, WiFi Direct: $_supportsWifiDirect, Hotspot: $_canCreateProgrammaticHotspot",
-      );
       return true;
     } catch (e) {
       debugPrint("❌ Enhanced P2P initialization error: $e");
       return false;
+    }
+  }
+
+  Future<void> _intelligentRoleSelection() async {
+    try {
+      debugPrint("🤖 Starting intelligent role selection...");
+
+      // Check if user has a preferred role
+      if (_forceRoleMode && _forcedRole != null) {
+        _currentRole = _forcedRole!;
+        debugPrint("🔒 Using forced role: ${_currentRole.name}");
+        if (_currentRole == P2PRole.host) {
+          await _becomeHost();
+        } else {
+          await _becomeClient();
+        }
+        return;
+      }
+
+      // Check preferred role from initialization
+      if (_preferredRole != null) {
+        if (_preferredRole == 'host') {
+          _currentRole = P2PRole.host;
+          await _becomeHost();
+          return;
+        } else if (_preferredRole == 'client') {
+          _currentRole = P2PRole.client;
+          await _becomeClient();
+          return;
+        }
+      }
+
+      // Auto-decide based on environment
+      await _autoDecideRole();
+    } catch (e) {
+      debugPrint("❌ Role selection error: $e");
+      // Fallback to client mode
+      _currentRole = P2PRole.client;
+      await _becomeClient();
+    }
+  }
+
+  Future<void> _autoDecideRole() async {
+    debugPrint("🔍 Auto-deciding role based on environment...");
+
+    // First, try to discover existing networks/devices
+    await _performDiscoveryScan();
+
+    // Wait a bit for discovery results
+    await Future.delayed(Duration(seconds: 5));
+
+    // Decide based on what we found
+    if (_discoveredDevices.isNotEmpty) {
+      // Found devices, become client
+      debugPrint(
+        "📱 Found ${_discoveredDevices.length} devices - becoming CLIENT",
+      );
+      _currentRole = P2PRole.client;
+      await _becomeClient();
+    } else {
+      // No devices found, become host
+      debugPrint("🏠 No devices found - becoming HOST");
+      _currentRole = P2PRole.host;
+      await _becomeHost();
+    }
+  }
+
+  Future<void> _becomeHost() async {
+    try {
+      debugPrint("🏠 Becoming HOST...");
+      _currentRole = P2PRole.host;
+
+      // Try to create hotspot if supported
+      if (_canCreateProgrammaticHotspot || _isModernAndroid) {
+        await createEmergencyHotspot();
+      }
+
+      // Also try WiFi Direct group creation
+      if (_supportsWifiDirect) {
+        try {
+          await WifiDirectPlugin.startDiscovery();
+          _isGroupOwner = true;
+          debugPrint("✅ WiFi Direct group owner mode enabled");
+        } catch (e) {
+          debugPrint("⚠️ WiFi Direct group creation failed: $e");
+        }
+      }
+
+      notifyListeners();
+      debugPrint("✅ Successfully became HOST");
+    } catch (e) {
+      debugPrint("❌ Failed to become host: $e");
+      // Fallback to client
+      await _becomeClient();
+    }
+  }
+
+  Future<void> _becomeClient() async {
+    try {
+      debugPrint("📱 Becoming CLIENT...");
+      _currentRole = P2PRole.client;
+
+      // Start discovery to find hosts
+      await discoverDevices(force: true);
+
+      // Try to connect to discovered devices after a delay
+      Timer(Duration(seconds: 3), () async {
+        if (_discoveredDevices.isNotEmpty && !_isConnected) {
+          await _connectToAvailableDevice(_discoveredDevices.values.toList());
+        } else if (_discoveredDevices.isEmpty) {
+          debugPrint("⚠️ No hosts found, considering becoming host...");
+          await _becomeHost();
+        }
+      });
+
+      notifyListeners();
+      debugPrint("✅ Successfully became CLIENT");
+    } catch (e) {
+      debugPrint("❌ Failed to become client: $e");
+      // Try to become host as fallback
+      await _becomeHost();
     }
   }
 
@@ -559,11 +680,6 @@ class P2PConnectionService with ChangeNotifier {
     // Load pending messages from database
   }
 
-  void _ensureConnection() {
-    if (!_isConnected && _emergencyMode) {
-      _connectionFallbackManager.initiateConnection();
-    }
-  }
 
   void _checkConnectionHealth() {
     if (_isDisposed) return;
@@ -1641,12 +1757,56 @@ class P2PConnectionService with ChangeNotifier {
 
   Future<void> _discoverWiFiDirect() async {
     try {
+      debugPrint("🔍 Starting WiFi Direct discovery...");
+
+      // Clear previous discoveries
+      _discoveredDevices.clear();
+
+      // Start discovery
       bool success = await WifiDirectPlugin.startDiscovery();
+
       if (success) {
-        debugPrint("✅ WiFi Direct discovery started");
+        debugPrint("✅ WiFi Direct discovery started successfully");
+
+        // Set a timeout for discovery
+        Timer(Duration(seconds: 15), () async {
+          try {
+            await WifiDirectPlugin.stopDiscovery();
+            debugPrint("⏰ WiFi Direct discovery timeout reached");
+
+            // If no devices found, notify UI
+            if (_discoveredDevices.isEmpty) {
+              debugPrint("📭 No WiFi Direct devices discovered");
+              onDevicesDiscovered?.call([]);
+            }
+          } catch (e) {
+            debugPrint("❌ Error stopping WiFi Direct discovery: $e");
+          }
+        });
+      } else {
+        debugPrint("❌ WiFi Direct discovery failed to start");
+        // Try fallback discovery methods
+        await _fallbackDiscovery();
       }
     } catch (e) {
       debugPrint("❌ WiFi Direct discovery error: $e");
+      await _fallbackDiscovery();
+    }
+  }
+
+  Future<void> _fallbackDiscovery() async {
+    debugPrint("🔄 Starting fallback discovery methods...");
+
+    // Try hotspot scanning
+    await _scanForResQLinkNetworks();
+
+    // Try mDNS discovery
+    await _discoverResQLinkDevices();
+
+    // Notify with whatever we found
+    final allDevices = _discoveredDevices.values.toList();
+    if (allDevices.isNotEmpty) {
+      onDevicesDiscovered?.call(allDevices);
     }
   }
 
@@ -2430,7 +2590,10 @@ class P2PMessage {
     this.latitude,
     this.longitude,
     required this.routePath,
-    this.synced = false, double? locationAccuracy, int? batteryLevel, String? emergencyLevel,
+    this.synced = false,
+    double? locationAccuracy,
+    int? batteryLevel,
+    String? emergencyLevel,
   });
 
   P2PMessage copyWith({

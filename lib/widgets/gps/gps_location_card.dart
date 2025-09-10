@@ -4,7 +4,7 @@ import '../../controllers/gps_controller.dart';
 import '../../gps_page.dart';
 import '../../utils/resqlink_theme.dart';
 
-class GpsLocationList extends StatelessWidget {
+class GpsLocationList extends StatefulWidget {
   final Function(LocationModel) onLocationSelected;
   final Function(LocationModel) onLocationShare;
 
@@ -13,6 +13,52 @@ class GpsLocationList extends StatelessWidget {
     required this.onLocationSelected,
     required this.onLocationShare,
   });
+
+  @override
+  State<GpsLocationList> createState() => _GpsLocationListState();
+}
+
+class _GpsLocationListState extends State<GpsLocationList>
+    with SingleTickerProviderStateMixin {
+  bool _isExpanded = false;
+  late AnimationController _animationController;
+  late Animation<double> _slideAnimation;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    _slideAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: const Interval(0.5, 1.0, curve: Curves.easeInOut),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  void _toggleExpansion() {
+    setState(() {
+      _isExpanded = !_isExpanded;
+      if (_isExpanded) {
+        _animationController.forward();
+      } else {
+        _animationController.reverse();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,43 +70,58 @@ class GpsLocationList extends StatelessWidget {
           });
         }
 
-        if (controller.savedLocations.isEmpty) {
-          return _buildEmptyState(context);
-        }
-
         final screenHeight = MediaQuery.of(context).size.height;
-        final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
-        final maxHeight =
-            (screenHeight - keyboardHeight) * 0.4; // Max 40% of screen height
+        final maxHeight = screenHeight * 0.4; // Max 40% of screen height
 
         return Positioned(
           bottom: 16,
           left: 16,
           right: 16,
           child: SafeArea(
-            child: Container(
-              constraints: BoxConstraints(maxHeight: maxHeight, minHeight: 120),
-              decoration: BoxDecoration(
-                color: ResQLinkTheme.cardDark.withValues(alpha: 0.95),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: ResQLinkTheme.locationBlue.withValues(alpha: 0.3),
-                  width: 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, -4),
+            child: AnimatedBuilder(
+              animation: _slideAnimation,
+              builder: (context, child) {
+                return Transform.translate(
+                  offset: Offset(0, (1 - _slideAnimation.value) * 200),
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxHeight: _isExpanded ? maxHeight : 80,
+                      minHeight: 80,
+                    ),
+                    decoration: BoxDecoration(
+                      color: ResQLinkTheme.cardDark.withValues(alpha: 0.95),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: ResQLinkTheme.locationBlue.withValues(
+                          alpha: 0.3,
+                        ),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          blurRadius: 12,
+                          offset: const Offset(0, -4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        _buildCompactHeader(controller),
+                        if (_isExpanded)
+                          Expanded(
+                            child: FadeTransition(
+                              opacity: _fadeAnimation,
+                              child: controller.savedLocations.isEmpty
+                                  ? _buildEmptyContent()
+                                  : _buildLocationsList(controller),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  _buildHeader(controller, context),
-                  Expanded(child: _buildLocationsList(controller, context)),
-                ],
-              ),
+                );
+              },
             ),
           ),
         );
@@ -68,133 +129,195 @@ class GpsLocationList extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState(BuildContext context) {
-    return Positioned(
-      bottom: 16,
-      left: 16,
-      right: 16,
-      child: SafeArea(
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: ResQLinkTheme.cardDark.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: Colors.grey.withValues(alpha: 0.3),
-              width: 1,
+  Widget _buildCompactHeader(GpsController controller) {
+    return GestureDetector(
+      onTap: _toggleExpansion,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: _isExpanded
+              ? Border(
+                  bottom: BorderSide(
+                    color: Colors.grey.withValues(alpha: 0.3),
+                    width: 1,
+                  ),
+                )
+              : null,
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: ResQLinkTheme.locationBlue.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                Icons.bookmark,
+                color: ResQLinkTheme.locationBlue,
+                size: 16,
+              ),
             ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.location_off,
-                size: 48,
-                color: Colors.grey.withValues(alpha: 0.6),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        'Saved Locations',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: ResQLinkTheme.locationBlue.withValues(
+                            alpha: 0.2,
+                          ),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: ResQLinkTheme.locationBlue.withValues(
+                              alpha: 0.5,
+                            ),
+                          ),
+                        ),
+                        child: Text(
+                          '${controller.savedLocations.length}',
+                          style: TextStyle(
+                            color: ResQLinkTheme.locationBlue,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (!_isExpanded)
+                    Text(
+                      controller.savedLocations.isEmpty
+                          ? 'Tap to see locations'
+                          : 'Latest: ${_getLatestLocationText(controller)}',
+                      style: TextStyle(
+                        color: Colors.grey.withValues(alpha: 0.8),
+                        fontSize: 11,
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                'No saved locations',
-                style: TextStyle(
-                  color: Colors.grey.withValues(alpha: 0.8),
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                ),
+            ),
+            if (controller.savedLocations.isNotEmpty && !_isExpanded)
+              _buildQuickActionButtons(controller),
+            AnimatedRotation(
+              turns: _isExpanded ? 0.5 : 0,
+              duration: const Duration(milliseconds: 300),
+              child: Icon(
+                Icons.keyboard_arrow_up,
+                color: Colors.white.withValues(alpha: 0.7),
+                size: 20,
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Tap the current location button to save your first location',
-                style: TextStyle(
-                  color: Colors.grey.withValues(alpha: 0.6),
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildHeader(GpsController controller, BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: Colors.grey.withValues(alpha: 0.3),
-            width: 1,
-          ),
+  Widget _buildQuickActionButtons(GpsController controller) {
+    final latestLocation = controller.savedLocations.isNotEmpty
+        ? controller.savedLocations.last
+        : null;
+
+    if (latestLocation == null) return const SizedBox.shrink();
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          onPressed: () => widget.onLocationSelected(latestLocation),
+          icon: const Icon(Icons.location_on, size: 16),
+          iconSize: 16,
+          color: ResQLinkTheme.locationBlue,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          tooltip: 'Go to location',
         ),
-      ),
-      child: Row(
+        IconButton(
+          onPressed: () => widget.onLocationShare(latestLocation),
+          icon: const Icon(Icons.share, size: 16),
+          iconSize: 16,
+          color: ResQLinkTheme.locationBlue,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          tooltip: 'Share location',
+        ),
+      ],
+    );
+  }
+
+  String _getLatestLocationText(GpsController controller) {
+    if (controller.savedLocations.isEmpty) return '';
+
+    final latest = controller.savedLocations.last;
+    final timeAgo = _formatDateTime(latest.timestamp);
+    return '${_getLocationTypeText(latest.type)} • $timeAgo';
+  }
+
+  Widget _buildEmptyContent() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: ResQLinkTheme.locationBlue.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              Icons.bookmark,
-              color: ResQLinkTheme.locationBlue,
-              size: 20,
+          Icon(
+            Icons.location_off,
+            size: 32,
+            color: Colors.grey.withValues(alpha: 0.6),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No saved locations',
+            style: TextStyle(
+              color: Colors.grey.withValues(alpha: 0.8),
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Saved Locations',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  '${controller.savedLocations.length} location(s) saved',
-                  style: TextStyle(
-                    color: Colors.grey.withValues(alpha: 0.8),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+          const SizedBox(width: 4),
+          Text(
+            'Save your current location to see it here',
+            style: TextStyle(
+              color: Colors.grey.withValues(alpha: 0.6),
+              fontSize: 11,
             ),
-          ),
-          TextButton.icon(
-            onPressed: () => _showClearAllDialog(controller, context),
-            icon: const Icon(Icons.clear_all, size: 16),
-            label: const Text('Clear'),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.red.withValues(alpha: 0.8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildLocationsList(GpsController controller, BuildContext context) {
+  Widget _buildLocationsList(GpsController controller) {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: controller.savedLocations.length,
       itemBuilder: (context, index) {
         final location = controller
             .savedLocations[controller.savedLocations.length - 1 - index];
-        return _buildLocationItem(location, controller, context);
+        return _buildCompactLocationItem(location, controller);
       },
     );
   }
 
-  Widget _buildLocationItem(
+  Widget _buildCompactLocationItem(
     LocationModel location,
     GpsController controller,
-    BuildContext context,
   ) {
     final Color typeColor = _getLocationTypeColor(location.type);
     final IconData typeIcon = _getLocationTypeIcon(location.type);
@@ -203,139 +326,95 @@ class GpsLocationList extends StatelessWidget {
         location.type == LocationType.sos;
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       decoration: BoxDecoration(
         color: typeColor.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: typeColor.withValues(alpha: 0.3),
-          width: isEmergency ? 2 : 1,
+          width: isEmergency ? 1.5 : 1,
         ),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         leading: Container(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
             color: typeColor.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: typeColor, width: 2),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: typeColor, width: 1),
           ),
-          child: Icon(typeIcon, color: typeColor, size: 20),
+          child: Icon(typeIcon, color: typeColor, size: 14),
         ),
         title: Row(
           children: [
             Expanded(
               child: Text(
                 _getLocationTypeText(location.type),
-                style: TextStyle(
+                style: const TextStyle(
                   color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 12,
                 ),
               ),
             ),
             if (isEmergency)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: ResQLinkTheme.primaryRed,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Text(
-                  'EMERGENCY',
+                  'EMR',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 10,
+                    fontSize: 8,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
           ],
         ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        subtitle: Row(
           children: [
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Icon(Icons.access_time, size: 12, color: Colors.grey),
-                const SizedBox(width: 4),
-                Text(
-                  _formatDateTime(location.timestamp),
-                  style: TextStyle(
-                    color: Colors.grey.withValues(alpha: 0.8),
-                    fontSize: 11,
-                  ),
+            Icon(Icons.access_time, size: 10, color: Colors.grey),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                _formatDateTime(location.timestamp),
+                style: TextStyle(
+                  color: Colors.grey.withValues(alpha: 0.8),
+                  fontSize: 10,
                 ),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Row(
-              children: [
-                Icon(Icons.gps_fixed, size: 12, color: Colors.grey),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    '${location.latitude.toStringAsFixed(4)}, ${location.longitude.toStringAsFixed(4)}',
-                    style: TextStyle(
-                      color: Colors.grey.withValues(alpha: 0.8),
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (location.message != null) ...[
-              const SizedBox(height: 2),
-              Row(
-                children: [
-                  Icon(Icons.message, size: 12, color: Colors.grey),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      location.message!,
-                      style: TextStyle(
-                        color: Colors.grey.withValues(alpha: 0.8),
-                        fontSize: 11,
-                        fontStyle: FontStyle.italic,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
               ),
-            ],
+            ),
           ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              onPressed: () => onLocationShare(location),
-              icon: Icon(
-                Icons.share,
-                color: ResQLinkTheme.locationBlue,
-                size: 20,
-              ),
-              tooltip: 'Share location',
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onPressed: () => widget.onLocationShare(location),
+              icon: const Icon(Icons.share, size: 14),
+              iconSize: 14,
+              color: ResQLinkTheme.locationBlue,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              tooltip: 'Share',
             ),
             IconButton(
               onPressed: () =>
                   _showDeleteLocationDialog(location, controller, context),
-              icon: Icon(
-                Icons.delete,
-                color: Colors.red.withValues(alpha: 0.8),
-                size: 20,
-              ),
-              tooltip: 'Delete location',
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: const Icon(Icons.delete, size: 14),
+              iconSize: 14,
+              color: Colors.red.withValues(alpha: 0.8),
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              tooltip: 'Delete',
             ),
           ],
         ),
-        onTap: () => onLocationSelected(location),
+        onTap: () => widget.onLocationSelected(location),
       ),
     );
   }
@@ -427,18 +506,19 @@ class GpsLocationList extends StatelessWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: ResQLinkTheme.cardDark,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text(
           'Delete Location',
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: Colors.white, fontSize: 16),
         ),
         content: Text(
-          'Are you sure you want to delete this saved location?',
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
+          'Remove this saved location?',
+          style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 14),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
+            child: const Text('Cancel', style: TextStyle(fontSize: 14)),
           ),
           TextButton(
             onPressed: () {
@@ -446,38 +526,7 @@ class GpsLocationList extends StatelessWidget {
               Navigator.pop(dialogContext);
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showClearAllDialog(GpsController controller, BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: ResQLinkTheme.cardDark,
-        title: const Text(
-          'Clear All Locations',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          'Are you sure you want to delete all saved locations? This action cannot be undone.',
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              controller.clearAllLocations();
-              Navigator.pop(dialogContext);
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Clear All'),
+            child: const Text('Delete', style: TextStyle(fontSize: 14)),
           ),
         ],
       ),
