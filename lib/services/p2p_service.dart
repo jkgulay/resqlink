@@ -246,7 +246,6 @@ class P2PConnectionService with ChangeNotifier {
       // Initialize enhanced network manager features
       await _initializeNetworkManager();
 
-      // Initialize existing managers with compatibility info
       _messageQueue = EnhancedMessageQueue(sendToDevice: _sendToDevice);
 
       _hotspotManager = HotspotManager(
@@ -256,7 +255,12 @@ class P2PConnectionService with ChangeNotifier {
         connectToHotspotTcpServer: (ssid) =>
             _connectToHotspotTcpServer({'ssid': ssid}),
         setCurrentRole: (role) {
-          _currentRole = role == 'host' ? P2PRole.host : P2PRole.client;
+          // ✅ FIX: Add proper role setting logic
+          if (role == 'host') {
+            _currentRole = P2PRole.host;
+          } else if (role == 'client') {
+            _currentRole = P2PRole.client;
+          }
           notifyListeners();
         },
         androidSdkVersion: _androidSdkVersion ?? 0,
@@ -2036,7 +2040,6 @@ class P2PConnectionService with ChangeNotifier {
       // Start discovering devices to connect as client
       await discoverDevices(force: true);
 
-      // Wait a bit for discovery, then try to connect to available devices
       Timer(Duration(seconds: 5), () async {
         if (_discoveredDevices.isNotEmpty) {
           await _connectToAvailableDevice(_discoveredDevices.values.toList());
