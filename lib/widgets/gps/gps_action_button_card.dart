@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../controllers/gps_controller.dart';
-import '../gps_page.dart';
-import '../utils/resqlink_theme.dart';
+import '../../controllers/gps_controller.dart';
+import '../../gps_page.dart';
+import '../../utils/resqlink_theme.dart';
 
 class GpsActionButtons extends StatelessWidget {
   final Function() onLocationDetailsRequest;
@@ -26,20 +26,31 @@ class GpsActionButtons extends StatelessWidget {
         }
 
         return Positioned(
-          top: 100,
-          right: 20,
-          child: Column(
-            children: [
-              _buildCurrentLocationButton(controller),
-              const SizedBox(height: 12),
-              _buildSaveLocationButton(controller),
-              const SizedBox(height: 12),
-              _buildLocationTypeButton(controller),
-              const SizedBox(height: 12),
-              _buildShareLocationButton(controller),
-              const SizedBox(height: 12),
-              _buildOfflineMapButton(controller),
-            ],
+          top:
+              MediaQuery.of(context).size.height *
+              0.15, // Responsive positioning
+          right: 16,
+          child: SafeArea(
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.6,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    _buildCurrentLocationButton(controller),
+                    const SizedBox(height: 8),
+                    _buildSaveLocationButton(controller),
+                    const SizedBox(height: 8),
+                    _buildLocationTypeButton(controller),
+                    const SizedBox(height: 8),
+                    _buildShareLocationButton(controller),
+                    const SizedBox(height: 8),
+                    _buildOfflineMapButton(controller),
+                  ],
+                ),
+              ),
+            ),
           ),
         );
       },

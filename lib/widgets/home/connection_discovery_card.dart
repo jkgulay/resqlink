@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../controllers/home_controller.dart';
-import '../services/p2p_service.dart';
-import '../utils/resqlink_theme.dart';
+import '../../controllers/home_controller.dart';
+import '../../services/p2p_service.dart';
+import '../../utils/resqlink_theme.dart';
 
 class ConnectionDiscoveryCard extends StatelessWidget {
   final HomeController controller;

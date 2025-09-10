@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../services/p2p_service.dart';
-import '../utils/resqlink_theme.dart';
+import '../../services/p2p_service.dart';
+import '../../utils/resqlink_theme.dart';
 
 class EmergencyModeCard extends StatefulWidget {
   final P2PConnectionService p2pService;

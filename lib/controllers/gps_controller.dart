@@ -9,14 +9,40 @@ import 'package:latlong2/latlong.dart';
 import '../gps_page.dart';
 import '../services/p2p_service.dart';
 import '../services/map_service.dart';
+import '../services/location_state_service.dart';
 
 class GpsController extends ChangeNotifier {
   final P2PConnectionService p2pService;
   final String? userId;
   final Function(LocationModel)? onLocationShare;
+  final LocationStateService _locationStateService = LocationStateService();
 
-  GpsController(this.p2pService, {this.userId, this.onLocationShare}) {
-    _initialize();
+  // Singleton pattern to prevent multiple initializations
+  static GpsController? _instance;
+  static bool _isInitialized = false;
+
+  factory GpsController(
+    P2PConnectionService p2pService, {
+    String? userId,
+    Function(LocationModel)? onLocationShare,
+  }) {
+    _instance ??= GpsController._internal(
+        p2pService,
+        userId: userId,
+        onLocationShare: onLocationShare,
+      );
+    return _instance!;
+  }
+
+  GpsController._internal(
+    this.p2pService, {
+    this.userId,
+    this.onLocationShare,
+  }) {
+    if (!_isInitialized) {
+      _initialize();
+      _isInitialized = true;
+    }
   }
 
   // Core State
@@ -33,13 +59,14 @@ class GpsController extends ChangeNotifier {
   bool _isMapReady = false;
   bool _isMoving = false;
 
-  // Download State
+  // Download State - Fixed to persist
   bool _isDownloadingMaps = false;
   double _downloadProgress = 0.0;
   String _downloadStatus = 'Ready to download';
   int _totalTiles = 0;
   int _downloadedTiles = 0;
   Map<String, dynamic> _cacheInfo = {};
+  bool _hasDownloadedMaps = false; // Add this to track download completion
 
   // Settings
   bool _autoSaveEnabled = false;
@@ -82,7 +109,8 @@ class GpsController extends ChangeNotifier {
   bool get autoSaveEnabled => _autoSaveEnabled;
   bool get emergencyBroadcastEnabled => _emergencyBroadcastEnabled;
   bool get hasOfflineMap =>
-      _cacheInfo['cachedTiles'] != null && _cacheInfo['cachedTiles'] > 0;
+      _hasDownloadedMaps ||
+      (_cacheInfo['cachedTiles'] != null && _cacheInfo['cachedTiles'] > 0);
   bool get showTrackingPath => _showTrackingPath;
   bool get showEmergencyZones => _showEmergencyZones;
   bool get showCriticalInfrastructure => _showCriticalInfrastructure;
@@ -102,6 +130,7 @@ class GpsController extends ChangeNotifier {
     try {
       _isLoading = true;
       notifyListeners();
+      _locationStateService.updateLoadingStatus(true);
 
       await Future.wait([
         _initializeServices(),
@@ -117,14 +146,18 @@ class GpsController extends ChangeNotifier {
       );
 
       _startLocationTracking();
+      await updateCacheInfo(); // Load existing cache info
+
       _isLoading = false;
       notifyListeners();
+      _locationStateService.updateLoadingStatus(false);
     } catch (e) {
       debugPrint('❌ Initialization error: $e');
       _isLoading = false;
       _errorMessage =
           'GPS initialization failed. Tap retry or check permissions.';
       notifyListeners();
+      _locationStateService.updateLoadingStatus(false);
     }
   }
 
@@ -208,6 +241,7 @@ class GpsController extends ChangeNotifier {
       if (!serviceEnabled) {
         _errorMessage = 'Location services are disabled';
         _isLocationServiceEnabled = false;
+        _locationStateService.updateLocationServiceStatus(false);
         notifyListeners();
         return;
       }
@@ -218,6 +252,7 @@ class GpsController extends ChangeNotifier {
         if (permission == LocationPermission.denied) {
           _errorMessage = 'Location permissions are denied';
           _isLocationServiceEnabled = false;
+          _locationStateService.updateLocationServiceStatus(false);
           notifyListeners();
           return;
         }
@@ -226,17 +261,20 @@ class GpsController extends ChangeNotifier {
       if (permission == LocationPermission.deniedForever) {
         _errorMessage = 'Location permission is permanently denied';
         _isLocationServiceEnabled = false;
+        _locationStateService.updateLocationServiceStatus(false);
         notifyListeners();
         return;
       }
 
       _isLocationServiceEnabled = true;
       _errorMessage = '';
+      _locationStateService.updateLocationServiceStatus(true);
       notifyListeners();
       await _startLocationTracking();
     } catch (e) {
       _errorMessage = 'Error: $e';
       _isLocationServiceEnabled = false;
+      _locationStateService.updateLocationServiceStatus(false);
       notifyListeners();
     }
   }
@@ -260,8 +298,12 @@ class GpsController extends ChangeNotifier {
   Future<void> _loadSavedLocations() async {
     try {
       final locations = await LocationService.getLocations();
+      final unsyncedCount = await LocationService.getUnsyncedCount();
+
       savedLocations.clear();
       savedLocations.addAll(locations);
+
+      _locationStateService.updateUnsyncedCount(unsyncedCount);
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading locations: $e');
@@ -467,11 +509,19 @@ class GpsController extends ChangeNotifier {
       type: _sosMode ? LocationType.sos : LocationType.normal,
       emergencyLevel: _currentEmergencyLevel,
       batteryLevel: _batteryLevel,
+      accuracy: position.accuracy,
+      altitude: position.altitude,
+      speed: position.speed,
+      heading: position.heading,
     );
 
     _currentLocation = newLocation;
     _lastKnownLocation = locationModel;
     _errorMessage = '';
+
+    // Update shared location state
+    _locationStateService.updateCurrentLocation(locationModel);
+
     notifyListeners();
 
     if (onLocationShare != null) {
@@ -649,7 +699,6 @@ class GpsController extends ChangeNotifier {
     }
   }
 
-  // Download Methods
   Future<void> downloadOfflineMaps(Map<String, dynamic> params) async {
     if (_currentLocation == null) return;
 
@@ -691,11 +740,12 @@ class GpsController extends ChangeNotifier {
           _isDownloadingMaps = false;
           _downloadProgress = 1.0;
           _downloadStatus = 'Download completed!';
+          _hasDownloadedMaps = true; // Mark as downloaded
           notifyListeners();
           updateCacheInfo();
 
           Timer(Duration(seconds: 3), () {
-            _downloadStatus = 'Ready to download';
+            _downloadStatus = 'Maps available offline';
             _downloadProgress = 0.0;
             notifyListeners();
           });
@@ -783,10 +833,20 @@ class GpsController extends ChangeNotifier {
         'storageSize': totalSize,
         'storageSizeMB': (totalSize / (1024 * 1024)).toStringAsFixed(2),
       };
+
+      if (totalTiles > 0) {
+        _hasDownloadedMaps = true;
+      }
+
       notifyListeners();
     } catch (e) {
       debugPrint('Error updating cache info: $e');
     }
+  }
+
+  static void resetInstance() {
+    _instance = null;
+    _isInitialized = false;
   }
 
   Future<void> clearCache() async {

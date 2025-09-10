@@ -2430,7 +2430,7 @@ class P2PMessage {
     this.latitude,
     this.longitude,
     required this.routePath,
-    this.synced = false,
+    this.synced = false, double? locationAccuracy, int? batteryLevel, String? emergencyLevel,
   });
 
   P2PMessage copyWith({

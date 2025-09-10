@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../controllers/gps_controller.dart';
-import '../gps_page.dart';
-import '../utils/resqlink_theme.dart';
+import '../../controllers/gps_controller.dart';
+import '../../gps_page.dart';
+import '../../utils/resqlink_theme.dart';
 
 class GpsLocationList extends StatelessWidget {
   final Function(LocationModel) onLocationSelected;
@@ -18,7 +18,6 @@ class GpsLocationList extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<GpsController>(
       builder: (context, controller, child) {
-        // Set context in controller if not already set
         if (controller.context == null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             controller.setContext(context);
@@ -26,35 +25,42 @@ class GpsLocationList extends StatelessWidget {
         }
 
         if (controller.savedLocations.isEmpty) {
-          return _buildEmptyState();
+          return _buildEmptyState(context);
         }
 
+        final screenHeight = MediaQuery.of(context).size.height;
+        final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+        final maxHeight =
+            (screenHeight - keyboardHeight) * 0.4; // Max 40% of screen height
+
         return Positioned(
-          bottom: 20,
-          left: 20,
-          right: 20,
-          child: Container(
-            constraints: const BoxConstraints(maxHeight: 300),
-            decoration: BoxDecoration(
-              color: ResQLinkTheme.cardDark.withValues(alpha: 0.95),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: ResQLinkTheme.locationBlue.withValues(alpha: 0.3),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 12,
-                  offset: const Offset(0, -4),
+          bottom: 16,
+          left: 16,
+          right: 16,
+          child: SafeArea(
+            child: Container(
+              constraints: BoxConstraints(maxHeight: maxHeight, minHeight: 120),
+              decoration: BoxDecoration(
+                color: ResQLinkTheme.cardDark.withValues(alpha: 0.95),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: ResQLinkTheme.locationBlue.withValues(alpha: 0.3),
+                  width: 1,
                 ),
-              ],
-            ),
-            child: Column(
-              children: [
-                _buildHeader(controller, context),
-                Expanded(child: _buildLocationsList(controller, context)),
-              ],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  _buildHeader(controller, context),
+                  Expanded(child: _buildLocationsList(controller, context)),
+                ],
+              ),
             ),
           ),
         );
@@ -62,47 +68,50 @@ class GpsLocationList extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(BuildContext context) {
     return Positioned(
-      bottom: 20,
-      left: 20,
-      right: 20,
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: ResQLinkTheme.cardDark.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: Colors.grey.withValues(alpha: 0.3),
-            width: 1,
+      bottom: 16,
+      left: 16,
+      right: 16,
+      child: SafeArea(
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: ResQLinkTheme.cardDark.withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Colors.grey.withValues(alpha: 0.3),
+              width: 1,
+            ),
           ),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              Icons.location_off,
-              size: 48,
-              color: Colors.grey.withValues(alpha: 0.6),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No saved locations',
-              style: TextStyle(
-                color: Colors.grey.withValues(alpha: 0.8),
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Tap the current location button to save your first location',
-              style: TextStyle(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.location_off,
+                size: 48,
                 color: Colors.grey.withValues(alpha: 0.6),
-                fontSize: 12,
               ),
-              textAlign: TextAlign.center,
-            ),
-          ],
+              const SizedBox(height: 16),
+              Text(
+                'No saved locations',
+                style: TextStyle(
+                  color: Colors.grey.withValues(alpha: 0.8),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Tap the current location button to save your first location',
+                style: TextStyle(
+                  color: Colors.grey.withValues(alpha: 0.6),
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -182,7 +191,11 @@ class GpsLocationList extends StatelessWidget {
     );
   }
 
-  Widget _buildLocationItem(LocationModel location, GpsController controller, BuildContext context) {
+  Widget _buildLocationItem(
+    LocationModel location,
+    GpsController controller,
+    BuildContext context,
+  ) {
     final Color typeColor = _getLocationTypeColor(location.type);
     final IconData typeIcon = _getLocationTypeIcon(location.type);
     final bool isEmergency =

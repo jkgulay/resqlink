@@ -3,18 +3,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:resqlink/controllers/gps_controller.dart';
 import 'package:resqlink/services/settings_service.dart';
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
 import 'services/p2p_service.dart';
 import 'services/map_service.dart';
+import 'services/location_state_service.dart';
 import 'controllers/home_controller.dart';
-import 'widgets/emergency_mode_card.dart';
-import 'widgets/emergency_actions_card.dart';
-import 'widgets/location_status_card.dart';
-import 'widgets/connection_discovery_card.dart';
-import 'widgets/instructions_card.dart';
+import 'widgets/home/emergency_mode_card.dart';
+import 'widgets/home/emergency_actions_card.dart';
+import 'widgets/home/location_status_card.dart';
+import 'widgets/home/connection_discovery_card.dart';
+import 'widgets/home/instructions_card.dart';
 
 class HomePage extends StatefulWidget {
   @override
@@ -32,6 +34,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   SettingsService? _settingsService;
   Timer? _updateTimer;
 
+  // Shared GPS controller instance
+  late GpsController _gpsController;
+
   late final List<Widget> pages;
 
   @override
@@ -40,15 +45,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     _homeController = HomeController(_p2pService);
+
+    _gpsController = GpsController(
+      _p2pService,
+      userId: _userId,
+      onLocationShare: _onLocationShare,
+    );
+    LocationStateService().setP2PService(_p2pService);
+
     _initializeP2P();
     _initializeMapService();
 
     pages = [
       _buildHomePage(),
-      GpsPage(
-        userId: _userId,
-        p2pService: _p2pService,
-        onLocationShare: _onLocationShare,
+      ChangeNotifierProvider<GpsController>.value(
+        value: _gpsController,
+        child: GpsPage(
+          userId: _userId,
+          p2pService: _p2pService,
+          onLocationShare: _onLocationShare,
+        ),
       ),
       MessagePage(
         p2pService: _p2pService,
@@ -62,12 +78,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Widget _buildHomePage() {
-    return ChangeNotifierProvider.value(
-      value: _homeController,
-      child: Consumer<HomeController>(
-        builder: (context, controller, child) {
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: _homeController),
+        ChangeNotifierProvider.value(value: LocationStateService()),
+      ],
+      child: Consumer2<HomeController, LocationStateService>(
+        builder: (context, controller, locationState, child) {
           return RefreshIndicator(
-            onRefresh: controller.refreshLocation,
+            onRefresh: () async {
+              await controller.refreshLocation();
+              await locationState.refreshLocation();
+            },
             child: SingleChildScrollView(
               physics: AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16.0),
@@ -93,18 +115,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     SizedBox(height: 16),
                   ],
 
-                  // Location Status Card
-                  if (!controller.isLoadingLocation &&
-                      controller.currentLocation != null) ...[
-                    LocationStatusCard(
-                      location: controller.currentLocation,
-                      isLoading: controller.isLoadingLocation,
-                      unsyncedCount: controller.unsyncedCount,
-                      onRefresh: controller.refreshLocation,
-                      onShare: controller.shareLocation,
-                    ),
-                    SizedBox(height: 16),
-                  ],
+                  // Location Status Card - Now using shared state
+                  LocationStatusCard(
+                    location: locationState.currentLocation,
+                    isLoading: locationState.isLoadingLocation,
+                    unsyncedCount: locationState.unsyncedCount,
+                    onRefresh: locationState.refreshLocation,
+                    onShare: locationState.shareLocation,
+                  ),
+                  SizedBox(height: 16),
 
                   // Instructions Card
                   InstructionsCard(),

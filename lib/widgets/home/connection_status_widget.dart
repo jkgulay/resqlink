@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/p2p_service.dart';
-import '../utils/resqlink_theme.dart';
+import '../../services/p2p_service.dart';
+import '../../utils/resqlink_theme.dart';
 
 class EnhancedConnectionWidget extends StatelessWidget {
   @override
