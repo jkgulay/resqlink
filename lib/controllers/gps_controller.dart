@@ -16,6 +16,7 @@ class GpsController extends ChangeNotifier {
   final String? userId;
   final Function(LocationModel)? onLocationShare;
   final LocationStateService _locationStateService = LocationStateService();
+  late PhilippinesMapService _mapService;
 
   // Singleton pattern to prevent multiple initializations
   static GpsController? _instance;
@@ -131,6 +132,10 @@ class GpsController extends ChangeNotifier {
       _isLoading = true;
       notifyListeners();
       _locationStateService.updateLoadingStatus(true);
+      _mapService = PhilippinesMapService.instance;
+      await _mapService.initialize();
+      final offlineReady = await _mapService.testOfflineCapability();
+      debugPrint('🗺️ Offline maps ready: $offlineReady');
 
       await Future.wait([
         _initializeServices(),
@@ -214,18 +219,40 @@ class GpsController extends ChangeNotifier {
     await _loadSavedLocations();
   }
 
-  Future<void> downloadOfflineMap() async {
+ Future<void> downloadOfflineMap() async {
     if (_currentLocation == null) {
       _errorMessage = 'No location available for map download';
       notifyListeners();
       return;
     }
 
-    await downloadOfflineMaps({
-      'radius': 5.0, // 5km radius
-      'minZoom': 8,
-      'maxZoom': 16,
-    });
+    try {
+      _isDownloadingMaps = true;
+      notifyListeners();
+
+      // Use MapService to download area around current location
+      final bounds = _calculateBounds(_currentLocation!, 5.0); // 5km radius
+      
+      final downloadProgress = await _mapService.cacheArea(
+        bounds: bounds,
+        minZoom: 8,
+        maxZoom: 16,
+        regionName: 'Current Area',
+      );
+
+      // Listen to progress
+      downloadProgress.percentageStream.listen((percentage) {
+        debugPrint('📊 Download progress: ${percentage.toStringAsFixed(1)}%');
+      });
+
+      debugPrint('✅ Offline map download started');
+    } catch (e) {
+      debugPrint('❌ Error downloading offline map: $e');
+      _errorMessage = 'Failed to download offline map: $e';
+    } finally {
+      _isDownloadingMaps = false;
+      notifyListeners();
+    }
   }
 
   void toggleLocationService() async {
@@ -716,16 +743,16 @@ class GpsController extends ChangeNotifier {
     await _loadSavedLocations();
   }
 
-Future<void> _syncLocationsToFirebase() async {
-  try {
-    await FirebaseLocationService.syncAllUnsyncedLocations();
-    await _loadSavedLocations(); // Refresh local data
-    
-    debugPrint('✅ All locations synced to Firebase');
-  } catch (e) {
-    debugPrint('❌ Firebase sync error: $e');
+  Future<void> _syncLocationsToFirebase() async {
+    try {
+      await FirebaseLocationService.syncAllUnsyncedLocations();
+      await _loadSavedLocations(); // Refresh local data
+
+      debugPrint('✅ All locations synced to Firebase');
+    } catch (e) {
+      debugPrint('❌ Firebase sync error: $e');
+    }
   }
-}
 
   Future<void> downloadOfflineMaps(Map<String, dynamic> params) async {
     if (_currentLocation == null) return;

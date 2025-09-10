@@ -285,20 +285,24 @@ class LocationService {
   }
 
   static Future<List<LocationModel>> getUnsyncedLocations() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      _tableName,
-      where: 'synced = ?',
-      whereArgs: [0],
-    );
-    return List.generate(maps.length, (i) => LocationModel.fromMap(maps[i]));
+    try {
+      final db = await database;
+      final List<Map<String, dynamic>> maps = await db.query(
+        _tableName,
+        where: 'synced = 0',
+        orderBy: 'timestamp DESC',
+      );
+      return maps.map((map) => LocationModel.fromMap(map)).toList();
+    } catch (e) {
+      print('❌ Error getting unsynced locations: $e');
+      return [];
+    }
   }
 
   static Future<void> markLocationSynced(int id) async {
     try {
-      final db = await database;
-
-      await db.update(
+      final db = _database;
+      await db?.update(
         _tableName,
         {'synced': 1},
         where: 'id = ?',
@@ -789,7 +793,6 @@ class _GpsPageState extends State<GpsPage> {
         backgroundColor: ResQLinkTheme.backgroundDark,
         body: Stack(
           children: [
-            // Enhanced Map
             GpsEnhancedMap(
               mapController: _mapController,
               onMapTap: _handleMapTap,
@@ -802,16 +805,10 @@ class _GpsPageState extends State<GpsPage> {
               showCriticalInfrastructure: controller.showCriticalInfrastructure,
             ),
 
-            // Top Status Panel
             const GpsStatsPanel(),
 
-            // Action Buttons (Right side)
-            GpsActionButtons(
-              onLocationDetailsRequest: _showLocationDetailsRequest,
-              onCenterCurrentLocation: _centerOnCurrentLocation,
-            ),
+            GpsActionButtons(onCenterCurrentLocation: _centerOnCurrentLocation),
 
-            // Emergency SOS Button
             const GpsEmergencyButton(),
 
             // Bottom Location List
@@ -936,12 +933,6 @@ class _GpsPageState extends State<GpsPage> {
           backgroundColor: Colors.orange,
         ),
       );
-    }
-  }
-
-  void _showLocationDetailsRequest() {
-    if (_gpsController.savedLocations.isNotEmpty) {
-      _showLocationDetails(_gpsController.savedLocations.first);
     }
   }
 

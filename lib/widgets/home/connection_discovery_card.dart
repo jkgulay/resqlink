@@ -581,7 +581,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      device.name,
+                      device.userName,
                       style: TextStyle(
                         fontWeight: FontWeight.w500,
                         fontSize: isNarrow ? 14 : 15,

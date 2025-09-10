@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:resqlink/models/device_model.dart';
 import '../../services/p2p_service.dart';
 import '../../utils/resqlink_theme.dart';
 
@@ -259,7 +260,9 @@ class EnhancedConnectionWidget extends StatelessWidget {
   }
 
   Widget _buildDiscoveredDevices(P2PConnectionService service) {
-    final devices = service.discoveredResQLinkDevices;
+    // ✅ UPDATE: Use DeviceModel consistently
+    final devices =
+        service.discoveredResQLinkDevices; // Now returns List<DeviceModel>
     final connectedDevices = service.connectedDevices;
 
     if (devices.isEmpty && connectedDevices.isEmpty) return SizedBox.shrink();
@@ -307,12 +310,32 @@ class EnhancedConnectionWidget extends StatelessWidget {
               color: Colors.green.withValues(alpha: 0.1),
               child: ListTile(
                 leading: Icon(Icons.devices, color: Colors.green),
-                title: Text(device.name, style: TextStyle(fontFamily: 'Inter')),
+                title: Text(
+                  // ✅ FIXED: Now using DeviceModel.userName correctly
+                  device.userName.isNotEmpty
+                      ? device.userName
+                      : device.deviceId,
+                  style: TextStyle(fontFamily: 'Inter'),
+                ),
                 subtitle: Text(
-                  'Role: ${device.isHost ? "Host" : "Client"} | Connected: ${_formatTime(device.connectedAt)}',
+                  'Role: ${device.isHost ? "Host" : "Client"} | ID: ${device.deviceId}',
                   style: TextStyle(fontFamily: 'JetBrains Mono', fontSize: 12),
                 ),
-                trailing: Icon(Icons.circle, color: Colors.green, size: 12),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, color: Colors.green, size: 12),
+                    SizedBox(width: 8),
+                    Text(
+                      _formatTime(device.lastSeen),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey,
+                        fontFamily: 'JetBrains Mono',
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -341,22 +364,48 @@ class EnhancedConnectionWidget extends StatelessWidget {
                   child: ListTile(
                     leading: Icon(Icons.devices_other, color: Colors.blue),
                     title: Text(
-                      device.name,
+                      // ✅ FIXED: Now using DeviceModel.userName correctly
+                      device.userName.isNotEmpty
+                          ? device.userName
+                          : device.deviceId,
                       style: TextStyle(fontFamily: 'Inter'),
                     ),
                     subtitle: Text(
-                      'Port: ${device.port} | Last seen: ${_formatTime(device.lastSeen)}',
+                      'ID: ${device.deviceId} | Last seen: ${_formatTime(device.lastSeen)}',
                       style: TextStyle(
                         fontFamily: 'JetBrains Mono',
                         fontSize: 12,
                       ),
                     ),
-                    trailing: Icon(
-                      Icons.circle,
-                      color: _isRecentlySeen(device.lastSeen)
-                          ? Colors.green
-                          : Colors.grey,
-                      size: 12,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.circle,
+                          color: device.isOnline
+                              ? Colors.green
+                              : _isRecentlySeen(device.lastSeen)
+                              ? Colors.orange
+                              : Colors.grey,
+                          size: 12,
+                        ),
+                        SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () => _connectToDevice(service, device),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            minimumSize: Size(60, 28),
+                          ),
+                          child: Text(
+                            'Connect',
+                            style: TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 );
@@ -366,6 +415,22 @@ class EnhancedConnectionWidget extends StatelessWidget {
         ],
       ],
     );
+  }
+
+  // ✅ ADD: Method to connect to a discovered device
+  void _connectToDevice(P2PConnectionService service, DeviceModel device) {
+    // Convert DeviceModel to the format expected by connectToDevice
+    final deviceMap = {
+      'deviceId': device.deviceId,
+      'deviceAddress': device.deviceId,
+      'deviceName': device.userName,
+      'isHost': device.isHost,
+      'connectionType': device.deviceInfo?['connectionType'] ?? 'unknown',
+      'port': device.deviceInfo?['port'],
+    };
+
+    // Try to connect via device ID
+    service.connectToDevice(deviceMap);
   }
 
   Color _getSignalColor(int level) {
