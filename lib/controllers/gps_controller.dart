@@ -1,0 +1,858 @@
+import 'dart:async';
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:battery_plus/battery_plus.dart';
+import 'package:latlong2/latlong.dart';
+import '../gps_page.dart';
+import '../services/p2p_service.dart';
+import '../services/map_service.dart';
+
+class GpsController extends ChangeNotifier {
+  final P2PConnectionService p2pService;
+  final String? userId;
+  final Function(LocationModel)? onLocationShare;
+
+  GpsController(this.p2pService, {this.userId, this.onLocationShare}) {
+    _initialize();
+  }
+
+  // Core State
+  final List<LocationModel> savedLocations = [];
+  LocationModel? _lastKnownLocation;
+  LatLng? _currentLocation;
+  bool _isLocationServiceEnabled = false;
+  bool _isConnected = false;
+  EmergencyLevel _currentEmergencyLevel = EmergencyLevel.safe;
+  bool _sosMode = false;
+  int _batteryLevel = 100;
+  bool _isLoading = true;
+  String _errorMessage = '';
+  bool _isMapReady = false;
+  bool _isMoving = false;
+
+  // Download State
+  bool _isDownloadingMaps = false;
+  double _downloadProgress = 0.0;
+  String _downloadStatus = 'Ready to download';
+  int _totalTiles = 0;
+  int _downloadedTiles = 0;
+  Map<String, dynamic> _cacheInfo = {};
+
+  // Settings
+  bool _autoSaveEnabled = false;
+  bool _emergencyBroadcastEnabled = true;
+  bool _showTrackingPath = true;
+  bool _showEmergencyZones = false;
+  bool _showCriticalInfrastructure = false;
+  LocationType _selectedLocationType = LocationType.normal;
+
+  // Context storage
+  BuildContext? _context;
+
+  // Subscriptions
+  final Battery _battery = Battery();
+  Timer? _locationTimer;
+  Timer? _sosTimer;
+  Timer? _batteryTimer;
+  StreamSubscription<Position>? _positionStream;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  StreamSubscription<double>? _downloadProgressSubscription;
+
+  // Getters
+  List<LocationModel> get locations => savedLocations;
+  LocationModel? get lastKnownLocation => _lastKnownLocation;
+  LatLng? get currentLocation => _currentLocation;
+  bool get isLocationServiceEnabled => _isLocationServiceEnabled;
+  bool get isConnected => _isConnected;
+  EmergencyLevel get currentEmergencyLevel => _currentEmergencyLevel;
+  bool get sosMode => _sosMode;
+  int get batteryLevel => _batteryLevel;
+  bool get isLoading => _isLoading;
+  String get errorMessage => _errorMessage;
+  bool get isMapReady => _isMapReady;
+  bool get isDownloadingMaps => _isDownloadingMaps;
+  double get downloadProgress => _downloadProgress;
+  String get downloadStatus => _downloadStatus;
+  int get totalTiles => _totalTiles;
+  int get downloadedTiles => _downloadedTiles;
+  Map<String, dynamic> get cacheInfo => _cacheInfo;
+  bool get autoSaveEnabled => _autoSaveEnabled;
+  bool get emergencyBroadcastEnabled => _emergencyBroadcastEnabled;
+  bool get hasOfflineMap =>
+      _cacheInfo['cachedTiles'] != null && _cacheInfo['cachedTiles'] > 0;
+  bool get showTrackingPath => _showTrackingPath;
+  bool get showEmergencyZones => _showEmergencyZones;
+  bool get showCriticalInfrastructure => _showCriticalInfrastructure;
+  LocationType get selectedLocationType => _selectedLocationType;
+  BuildContext? get context => _context;
+
+  void setContext(BuildContext context) {
+    _context = context;
+  }
+
+  void setSelectedLocationType(LocationType type) {
+    _selectedLocationType = type;
+    notifyListeners();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+
+      await Future.wait([
+        _initializeServices(),
+        _loadSavedLocations(),
+        _checkConnectivity(),
+        _startBatteryMonitoring(),
+      ]).timeout(
+        Duration(seconds: 15),
+        onTimeout: () {
+          debugPrint('⏰ Initialization timeout - using fallback mode');
+          return <void>[];
+        },
+      );
+
+      _startLocationTracking();
+      _isLoading = false;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ Initialization error: $e');
+      _isLoading = false;
+      _errorMessage =
+          'GPS initialization failed. Tap retry or check permissions.';
+      notifyListeners();
+    }
+  }
+
+  Future<void> _initializeServices() async {
+    try {
+      await PhilippinesMapService.instance.initialize().timeout(
+        Duration(seconds: 10),
+      );
+      debugPrint('✅ Map service initialized');
+    } catch (e) {
+      debugPrint('⚠️ Map service timeout/error: $e - using fallback');
+    }
+
+    await checkLocationPermission();
+    await _loadLastKnownLocation();
+    await _checkBatteryLevel();
+  }
+
+  Future<void> shareCurrentLocation() async {
+    if (currentLocation != null && lastKnownLocation != null) {
+      await shareLocation(lastKnownLocation!);
+    }
+  }
+
+  Future<void> shareLocation(LocationModel location) async {
+    if (onLocationShare != null) {
+      onLocationShare!(location);
+    }
+  }
+
+  Future<void> deleteLocation(LocationModel location) async {
+    // Implementation to delete from database
+    await _loadSavedLocations();
+  }
+
+  void clearAllLocations() async {
+    await LocationService.clearAllLocations();
+    await _loadSavedLocations();
+  }
+
+  void downloadOfflineMap() async {
+    await downloadOfflineMaps({'radius': 5.0, 'minZoom': 10, 'maxZoom': 16});
+  }
+
+  void toggleLocationService() async {
+    await checkLocationPermission();
+  }
+
+  void toggleAutoSave() {
+    _autoSaveEnabled = !_autoSaveEnabled;
+    notifyListeners();
+  }
+
+  void toggleEmergencyBroadcast() {
+    _emergencyBroadcastEnabled = !_emergencyBroadcastEnabled;
+    notifyListeners();
+  }
+
+  void toggleTrackingPath() {
+    _showTrackingPath = !_showTrackingPath;
+    notifyListeners();
+  }
+
+  void toggleEmergencyZones() {
+    _showEmergencyZones = !_showEmergencyZones;
+    notifyListeners();
+  }
+
+  void toggleCriticalInfrastructure() {
+    _showCriticalInfrastructure = !_showCriticalInfrastructure;
+    notifyListeners();
+  }
+
+  Future<void> requestLocationPermission() async {
+    await checkLocationPermission();
+  }
+
+  Future<void> checkLocationPermission() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _errorMessage = 'Location services are disabled';
+        _isLocationServiceEnabled = false;
+        notifyListeners();
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          _errorMessage = 'Location permissions are denied';
+          _isLocationServiceEnabled = false;
+          notifyListeners();
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        _errorMessage = 'Location permission is permanently denied';
+        _isLocationServiceEnabled = false;
+        notifyListeners();
+        return;
+      }
+
+      _isLocationServiceEnabled = true;
+      _errorMessage = '';
+      notifyListeners();
+      await _startLocationTracking();
+    } catch (e) {
+      _errorMessage = 'Error: $e';
+      _isLocationServiceEnabled = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadLastKnownLocation() async {
+    try {
+      final lastLocation = await LocationService.getLastKnownLocation();
+      if (lastLocation != null) {
+        _lastKnownLocation = lastLocation;
+        _currentLocation = LatLng(
+          lastLocation.latitude,
+          lastLocation.longitude,
+        );
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error loading last location: $e');
+    }
+  }
+
+  Future<void> _loadSavedLocations() async {
+    try {
+      final locations = await LocationService.getLocations();
+      savedLocations.clear();
+      savedLocations.addAll(locations);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error loading locations: $e');
+      savedLocations.clear();
+      notifyListeners();
+    }
+  }
+
+  Future<void> _checkConnectivity() async {
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+      List<ConnectivityResult> results,
+    ) async {
+      final wasConnected = _isConnected;
+      _isConnected = results.any((result) => result != ConnectivityResult.none);
+      notifyListeners();
+
+      if (!wasConnected && _isConnected) {
+        await _syncLocationsToFirebase();
+        final unsyncedCount = await LocationService.getUnsyncedCount();
+        if (unsyncedCount == 0) {
+          // Connection restored and synced
+        }
+      }
+    });
+  }
+
+  Future<void> _startBatteryMonitoring() async {
+    _checkBatteryLevel();
+    _batteryTimer?.cancel();
+    _batteryTimer = Timer.periodic(const Duration(minutes: 5), (timer) {
+      _checkBatteryLevel();
+    });
+  }
+
+  Future<void> _checkBatteryLevel() async {
+    try {
+      final level = await _battery.batteryLevel;
+      final oldLevel = _batteryLevel;
+      _batteryLevel = level;
+      notifyListeners();
+
+      if ((oldLevel - level).abs() >= 10) {
+        _optimizeLocationUpdates();
+      }
+    } catch (e) {
+      debugPrint('Error checking battery level: $e');
+    }
+  }
+
+  Future<void> _startLocationTracking() async {
+    if (!_isLocationServiceEnabled) {
+      await checkLocationPermission();
+      if (!_isLocationServiceEnabled) return;
+    }
+
+    try {
+      await getCurrentLocation();
+      final distanceFilter = _batteryLevel < 20 ? 20 : 10;
+      final accuracy = _batteryLevel < 20
+          ? LocationAccuracy.medium
+          : LocationAccuracy.high;
+      final locationSettings = LocationSettings(
+        accuracy: accuracy,
+        distanceFilter: distanceFilter,
+      );
+
+      _positionStream?.cancel();
+      _positionStream =
+          Geolocator.getPositionStream(
+            locationSettings: locationSettings,
+          ).listen(
+            (Position position) {
+              _updateCurrentLocation(position);
+            },
+            onError: (error) {
+              debugPrint('Position stream error: $error');
+              _errorMessage = 'GPS tracking error: $error';
+              notifyListeners();
+              Future.delayed(Duration(seconds: 5), () {
+                if (_isLocationServiceEnabled) {
+                  _startLocationTracking();
+                }
+              });
+            },
+          );
+
+      final updateInterval = _batteryLevel < 20
+          ? Duration(minutes: 2)
+          : Duration(seconds: 30);
+      _locationTimer?.cancel();
+      _locationTimer = Timer.periodic(updateInterval, (timer) {
+        if (_isLocationServiceEnabled) {
+          getCurrentLocation();
+        }
+      });
+    } catch (e) {
+      debugPrint('Error starting location tracking: $e');
+      _errorMessage = 'Failed to start tracking: $e';
+      notifyListeners();
+    }
+  }
+
+  void _optimizeLocationUpdates() {
+    final settings = LocationSettings(
+      accuracy: _batteryLevel < 20
+          ? LocationAccuracy.medium
+          : LocationAccuracy.high,
+      distanceFilter: _isMoving ? 5 : 20,
+      timeLimit: Duration(seconds: 10),
+    );
+
+    final updateInterval = _sosMode
+        ? Duration(seconds: 15)
+        : _isMoving
+        ? Duration(seconds: 30)
+        : Duration(minutes: 2);
+
+    _applyLocationSettings(settings, updateInterval);
+  }
+
+  void _applyLocationSettings(LocationSettings settings, Duration interval) {
+    _locationTimer?.cancel();
+    _positionStream?.cancel();
+
+    _positionStream = Geolocator.getPositionStream(locationSettings: settings)
+        .listen(
+          (Position position) {
+            _updateCurrentLocation(position);
+            _isMoving = position.speed > 1.0;
+          },
+          onError: (error) {
+            debugPrint('Position stream error: $error');
+          },
+        );
+
+    _locationTimer = Timer.periodic(interval, (timer) {
+      if (_isLocationServiceEnabled) {
+        getCurrentLocation();
+      }
+    });
+  }
+
+  Future<void> getCurrentLocation() async {
+    if (!_isLocationServiceEnabled) return;
+
+    try {
+      final locationSettings = LocationSettings(
+        accuracy: _batteryLevel < 20
+            ? LocationAccuracy.medium
+            : LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 5),
+      );
+
+      Position position;
+      if (bool.fromEnvironment('dart.vm.product') == false) {
+        try {
+          position = await Geolocator.getCurrentPosition(
+            locationSettings: locationSettings,
+          );
+        } catch (e) {
+          position = Position(
+            latitude: 14.5995,
+            longitude: 120.9842,
+            timestamp: DateTime.now(),
+            accuracy: 0.0,
+            altitude: 0.0,
+            heading: 0.0,
+            speed: 0.0,
+            speedAccuracy: 0.0,
+            altitudeAccuracy: 0.0,
+            headingAccuracy: 0.0,
+          );
+          debugPrint('Using mock location due to emulator: $e');
+        }
+      } else {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: locationSettings,
+        );
+      }
+
+      _updateCurrentLocation(position);
+    } catch (e) {
+      debugPrint('Error getting location: $e');
+      try {
+        Position? lastPosition = await Geolocator.getLastKnownPosition();
+        if (lastPosition != null) {
+          _updateCurrentLocation(lastPosition);
+        }
+      } catch (e2) {
+        debugPrint('Error getting last known position: $e2');
+      }
+    }
+  }
+
+  void _updateCurrentLocation(Position position) {
+    final newLocation = LatLng(position.latitude, position.longitude);
+    final locationModel = LocationModel(
+      latitude: position.latitude,
+      longitude: position.longitude,
+      timestamp: DateTime.now(),
+      userId: userId,
+      type: _sosMode ? LocationType.sos : LocationType.normal,
+      emergencyLevel: _currentEmergencyLevel,
+      batteryLevel: _batteryLevel,
+    );
+
+    _currentLocation = newLocation;
+    _lastKnownLocation = locationModel;
+    _errorMessage = '';
+    notifyListeners();
+
+    if (onLocationShare != null) {
+      onLocationShare!(locationModel);
+    }
+
+    if (_currentEmergencyLevel.index >= EmergencyLevel.warning.index ||
+        _sosMode) {
+      saveCurrentLocation(silent: true);
+    }
+  }
+
+  void activateSOS() {
+    _sosMode = true;
+    _currentEmergencyLevel = EmergencyLevel.critical;
+    notifyListeners();
+
+    _optimizeLocationUpdates();
+    _sendSOSLocation();
+
+    _sosTimer?.cancel();
+    _sosTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (_sosMode) {
+        _sendSOSLocation();
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void deactivateSOS() {
+    _sosMode = false;
+    _currentEmergencyLevel = EmergencyLevel.safe;
+    notifyListeners();
+
+    _sosTimer?.cancel();
+    _sosTimer = null;
+    _optimizeLocationUpdates();
+  }
+
+  Future<void> _sendSOSLocation() async {
+    if (_currentLocation == null) return;
+
+    final sosLocation = LocationModel(
+      latitude: _currentLocation!.latitude,
+      longitude: _currentLocation!.longitude,
+      timestamp: DateTime.now(),
+      userId: userId,
+      type: LocationType.sos,
+      message: 'EMERGENCY SOS - Immediate assistance required!',
+      emergencyLevel: EmergencyLevel.critical,
+      batteryLevel: _batteryLevel,
+    );
+
+    debugPrint('💾 Saving SOS location to SQLite...');
+    await LocationService.insertLocation(sosLocation);
+
+    if (_isConnected) {
+      try {
+        debugPrint('🔄 Syncing SOS location to Firebase...');
+        await FirebaseLocationService.syncLocation(sosLocation);
+      } catch (e) {
+        debugPrint('❌ Firebase sync failed: $e');
+      }
+    }
+
+    try {
+      debugPrint('📡 Broadcasting SOS via P2P...');
+      if (onLocationShare != null) {
+        onLocationShare!(sosLocation);
+      }
+    } catch (e) {
+      debugPrint('❌ P2P broadcast failed: $e');
+    }
+
+    await _loadSavedLocations();
+  }
+
+  Future<void> saveCurrentLocation({
+    bool silent = false,
+    String? message,
+  }) async {
+    if (_currentLocation == null) return;
+
+    final location = LocationModel(
+      latitude: _currentLocation!.latitude,
+      longitude: _currentLocation!.longitude,
+      timestamp: DateTime.now(),
+      userId: userId,
+      type: _selectedLocationType,
+      message: message,
+      emergencyLevel: _currentEmergencyLevel,
+      batteryLevel: _batteryLevel,
+    );
+
+    debugPrint('💾 Saving location to SQLite...');
+    await LocationService.insertLocation(location);
+    if (!silent && _context != null) {
+      ScaffoldMessenger.of(_context!).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Location saved as ${_getLocationTypeText(_selectedLocationType)}!',
+          ),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+
+    if (_isConnected) {
+      try {
+        debugPrint('🔄 Syncing location to Firebase...');
+        await FirebaseLocationService.syncLocation(location);
+      } catch (e) {
+        debugPrint('❌ Firebase sync failed: $e');
+      }
+    }
+
+    await _loadSavedLocations();
+  }
+
+  String _getLocationTypeText(LocationType type) {
+    switch (type) {
+      case LocationType.normal:
+        return 'Current Location';
+      case LocationType.emergency:
+        return 'Emergency Location';
+      case LocationType.sos:
+        return 'SOS Location';
+      case LocationType.safezone:
+        return 'Safe Zone';
+      case LocationType.hazard:
+        return 'Hazard Area';
+      case LocationType.evacuationPoint:
+        return 'Evacuation Point';
+      case LocationType.medicalAid:
+        return 'Medical Aid';
+      case LocationType.supplies:
+        return 'Supplies';
+    }
+  }
+
+  Future<void> markLocation(LocationType type) async {
+    if (_currentLocation == null) return;
+
+    final location = LocationModel(
+      latitude: _currentLocation!.latitude,
+      longitude: _currentLocation!.longitude,
+      timestamp: DateTime.now(),
+      userId: userId,
+      type: type,
+      emergencyLevel: _currentEmergencyLevel,
+      batteryLevel: _batteryLevel,
+    );
+
+    await LocationService.insertLocation(location);
+
+    if (_isConnected) {
+      try {
+        await FirebaseLocationService.syncLocation(location);
+      } catch (e) {
+        debugPrint('Firebase sync failed: $e');
+      }
+    }
+
+    await _loadSavedLocations();
+  }
+
+  Future<void> _syncLocationsToFirebase() async {
+    try {
+      await FirebaseLocationService.syncAllUnsyncedLocations();
+      await _loadSavedLocations();
+    } catch (e) {
+      debugPrint('Sync error: $e');
+    }
+  }
+
+  // Download Methods
+  Future<void> downloadOfflineMaps(Map<String, dynamic> params) async {
+    if (_currentLocation == null) return;
+
+    _isDownloadingMaps = true;
+    _downloadProgress = 0.0;
+    _downloadStatus = 'Preparing download...';
+    _downloadedTiles = 0;
+    _totalTiles = 0;
+    notifyListeners();
+
+    try {
+      final radiusKm = params['radius'];
+      final minZoom = params['minZoom'];
+      final maxZoom = params['maxZoom'];
+      final bounds = _calculateBounds(_currentLocation!, radiusKm);
+
+      _totalTiles = _estimateTotalTiles(bounds, minZoom, maxZoom);
+      _downloadStatus = 'Downloading $_totalTiles tiles...';
+      notifyListeners();
+
+      final downloadProgress = await PhilippinesMapService.instance.cacheArea(
+        bounds: bounds,
+        minZoom: minZoom,
+        maxZoom: maxZoom,
+        regionName: 'Current Area Download',
+        isEmergencyCache: false,
+      );
+
+      _downloadProgressSubscription?.cancel();
+      _downloadProgressSubscription = downloadProgress.percentageStream.listen(
+        (progress) {
+          _downloadProgress = progress / 100.0;
+          _downloadedTiles = (_totalTiles * _downloadProgress).round();
+          _downloadStatus =
+              'Downloaded $_downloadedTiles of $_totalTiles tiles (${progress.toStringAsFixed(1)}%)';
+          notifyListeners();
+        },
+        onDone: () {
+          _isDownloadingMaps = false;
+          _downloadProgress = 1.0;
+          _downloadStatus = 'Download completed!';
+          notifyListeners();
+          updateCacheInfo();
+
+          Timer(Duration(seconds: 3), () {
+            _downloadStatus = 'Ready to download';
+            _downloadProgress = 0.0;
+            notifyListeners();
+          });
+        },
+        onError: (error) {
+          debugPrint('❌ Download error: $error');
+          _isDownloadingMaps = false;
+          _downloadProgress = 0.0;
+          _downloadStatus = 'Download failed';
+          notifyListeners();
+
+          Timer(Duration(seconds: 3), () {
+            _downloadStatus = 'Ready to download';
+            notifyListeners();
+          });
+        },
+      );
+    } catch (e) {
+      _isDownloadingMaps = false;
+      _downloadProgress = 0.0;
+      _downloadStatus = 'Download failed';
+      notifyListeners();
+    }
+  }
+
+  LatLngBounds _calculateBounds(LatLng center, double radiusKm) {
+    final latOffset = radiusKm / 111.0;
+    final lngOffset =
+        radiusKm / (111.0 * math.cos(center.latitude * math.pi / 180));
+
+    return LatLngBounds(
+      LatLng(center.latitude - latOffset, center.longitude - lngOffset),
+      LatLng(center.latitude + latOffset, center.longitude + lngOffset),
+    );
+  }
+
+  int _estimateTotalTiles(LatLngBounds bounds, int minZoom, int maxZoom) {
+    int totalTiles = 0;
+
+    for (int zoom = minZoom; zoom <= maxZoom; zoom++) {
+      final scale = math.pow(2, zoom);
+      final minTileX = ((bounds.west + 180) / 360 * scale).floor();
+      final maxTileX = ((bounds.east + 180) / 360 * scale).floor();
+      final minTileY =
+          ((1 -
+                      math.log(
+                            math.tan(bounds.north * math.pi / 180) +
+                                1 / math.cos(bounds.north * math.pi / 180),
+                          ) /
+                          math.pi) /
+                  2 *
+                  scale)
+              .floor();
+      final maxTileY =
+          ((1 -
+                      math.log(
+                            math.tan(bounds.south * math.pi / 180) +
+                                1 / math.cos(bounds.south * math.pi / 180),
+                          ) /
+                          math.pi) /
+                  2 *
+                  scale)
+              .floor();
+
+      final tilesAtZoom = (maxTileX - minTileX + 1) * (maxTileY - minTileY + 1);
+      totalTiles += tilesAtZoom;
+    }
+
+    return totalTiles;
+  }
+
+  Future<void> updateCacheInfo() async {
+    try {
+      final stats = await PhilippinesMapService.instance.getCacheStats();
+      final totalSize = stats.values.fold(
+        0,
+        (total, stat) => total + stat.sizeBytes,
+      );
+      final totalTiles = stats.values.fold(
+        0,
+        (total, stat) => total + stat.tileCount,
+      );
+      _cacheInfo = {
+        'cachedTiles': totalTiles,
+        'storageSize': totalSize,
+        'storageSizeMB': (totalSize / (1024 * 1024)).toStringAsFixed(2),
+      };
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error updating cache info: $e');
+    }
+  }
+
+  Future<void> clearCache() async {
+    await PhilippinesMapService.instance.clearCache(null);
+    await updateCacheInfo();
+  }
+
+  // Diagnostics
+  Future<Map<String, dynamic>> runDiagnostics() async {
+    final results = <String, dynamic>{};
+
+    try {
+      // Test SQLite
+      final testLocation = LocationModel(
+        latitude: 14.5995,
+        longitude: 120.9842,
+        timestamp: DateTime.now(),
+        userId: userId,
+        type: LocationType.normal,
+        message: 'Test location',
+      );
+
+      final locationId = await LocationService.insertLocation(testLocation);
+      results['sqlite'] = locationId > 0;
+
+      // Test Firebase
+      final firebaseConnected =
+          await FirebaseLocationService.testFirebaseConnection();
+      results['firebase'] = firebaseConnected;
+
+      // Test Offline Maps
+      final offlineReady = await PhilippinesMapService.instance
+          .testOfflineCapability();
+      results['offline'] = offlineReady;
+
+      // Test P2P
+      results['p2p'] = p2pService.isConnected;
+
+      // Check unsynced count
+      final unsyncedCount = await LocationService.getUnsyncedCount();
+      results['unsynced'] = unsyncedCount;
+
+      return results;
+    } catch (e) {
+      debugPrint('Diagnostics error: $e');
+      return {'error': e.toString()};
+    }
+  }
+
+  void setMapReady(bool ready) {
+    _isMapReady = ready;
+    notifyListeners();
+  }
+
+  void retryInitialization() {
+    _initialize();
+  }
+
+  @override
+  void dispose() {
+    _locationTimer?.cancel();
+    _sosTimer?.cancel();
+    _batteryTimer?.cancel();
+    _downloadProgressSubscription?.cancel();
+    _connectivitySubscription?.cancel();
+    _positionStream?.cancel();
+    super.dispose();
+  }
+}

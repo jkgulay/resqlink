@@ -392,7 +392,7 @@ class PhilippinesMapService {
     }
   }
 
-  TileLayer getTileLayer({int? zoom}) {
+  TileLayer getTileLayer({int? zoom, required bool useOffline}) {
     if (!_isInitialized) {
       debugPrint('⚠️ Map service not initialized, using fallback');
       return _createFallbackTileLayer();
