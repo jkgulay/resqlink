@@ -140,27 +140,29 @@ class PhilippinesMapService {
     }
   }
 
-  /// Load bundled .mbtiles for Philippines (zoom 0-12)
   Future<void> _loadBundledTiles() async {
     try {
       final store = FMTCStore(_philippinesStore);
       final stats = await store.stats.all;
 
-      // Only download if store is empty
       if (stats.length == 0) {
-        debugPrint('Loading Philippines base tiles...');
+        debugPrint('📦 No base tiles found');
 
-        // Download base tiles if online
         if (_isOnline) {
-          await _downloadPhilippinesBaseTiles();
+          // Start download in background - don't await!
+          _downloadPhilippinesBaseTiles().catchError((e) {
+            debugPrint('Background download failed: $e');
+          });
+          debugPrint('🔄 Started background tile download');
         } else {
-          debugPrint('Offline - cannot download base tiles');
+          debugPrint('📱 Offline - will use online tiles when available');
         }
       } else {
-        debugPrint('Philippines tiles already loaded (${stats.length} tiles)');
+        debugPrint('✅ Base tiles ready (${stats.length} tiles)');
       }
     } catch (e) {
-      debugPrint('Error loading bundled tiles: $e');
+      debugPrint('⚠️ Tile loading error: $e - continuing with online mode');
+      // Don't rethrow - let the app continue
     }
   }
 
@@ -390,7 +392,7 @@ class PhilippinesMapService {
     }
   }
 
-  TileLayer getTileLayer({int? zoom}) {
+  TileLayer getTileLayer({int? zoom, required bool useOffline}) {
     if (!_isInitialized) {
       debugPrint('⚠️ Map service not initialized, using fallback');
       return _createFallbackTileLayer();

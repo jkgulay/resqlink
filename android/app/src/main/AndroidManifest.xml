@@ -113,18 +113,6 @@
             android:exported="false"
             android:foregroundServiceType="location" />
         
-        <!-- WiFi Direct Broadcast Receiver -->
-        <receiver
-            android:name=".WifiDirectBroadcastReceiver"
-            android:enabled="true"
-            android:exported="false">
-            <intent-filter android:priority="1000">
-                <action android:name="android.net.wifi.p2p.STATE_CHANGED" />
-                <action android:name="android.net.wifi.p2p.PEERS_CHANGED" />
-                <action android:name="android.net.wifi.p2p.CONNECTION_STATE_CHANGE" />
-                <action android:name="android.net.wifi.p2p.THIS_DEVICE_CHANGED" />
-            </intent-filter>
-        </receiver>
         
         <!-- Network state receiver -->
         <receiver
