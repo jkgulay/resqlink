@@ -398,8 +398,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       );
       if (!mounted) return;
 
+      // ✅ UPDATE: Use DeviceModel from connectedDevices
       final connectedDevices = widget.p2pService.connectedDevices;
-      final discoveredDevices = widget.p2pService.discoveredDevices;
+      final discoveredDevices = widget.p2pService.discoveredResQLinkDevices;
 
       final Map<String, MessageSummary> conversationMap = {};
 
@@ -409,11 +410,17 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         final endpointId = message.endpointId;
         String deviceName = message.fromUser;
 
+        // ✅ FIXED: Use DeviceModel.userName
         if (connectedDevices.containsKey(endpointId)) {
-          deviceName = connectedDevices[endpointId]!.name;
-        } else if (discoveredDevices.containsKey(endpointId)) {
-          deviceName =
-              discoveredDevices[endpointId]!['deviceName'] ?? deviceName;
+          deviceName = connectedDevices[endpointId]!.userName;
+        } else {
+          // Check discovered devices
+          final discoveredDevice = discoveredDevices
+              .where((d) => d.deviceId == endpointId)
+              .firstOrNull;
+          if (discoveredDevice != null) {
+            deviceName = discoveredDevice.userName;
+          }
         }
 
         if (!conversationMap.containsKey(endpointId)) {
@@ -1481,8 +1488,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       controller: _scrollController,
       padding: EdgeInsets.all(16),
       itemCount: _selectedConversationMessages.length,
-      itemExtent: null, 
-      cacheExtent: 200, 
+      itemExtent: null,
+      cacheExtent: 200,
       itemBuilder: (context, index) {
         final message = _selectedConversationMessages[index];
         final previousMessage = index > 0
@@ -1491,7 +1498,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         final showDateHeader = _shouldShowDateHeader(message, previousMessage);
 
         return Column(
-          key: ValueKey(message.messageId), 
+          key: ValueKey(message.messageId),
           children: [
             if (showDateHeader) _buildDateHeader(message.dateTime),
             _buildMessageBubble(message),

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/p2p_service.dart';
+import '../../services/p2p_service.dart';
 
 class InstructionsCard extends StatelessWidget {
   const InstructionsCard({super.key});

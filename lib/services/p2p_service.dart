@@ -5,7 +5,8 @@ import 'dart:convert';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:resqlink/gps_page.dart';
+import 'package:resqlink/models/device_model.dart';
+import 'package:resqlink/services/settings_service.dart';
 import 'package:wifi_direct_plugin/wifi_direct_plugin.dart';
 import 'package:crypto/crypto.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -62,7 +63,7 @@ class P2PConnectionService with ChangeNotifier {
   bool _isHotspotEnabled = false;
   bool _isWiFiEnabled = false;
   List<WiFiAccessPoint> _availableNetworks = [];
-  List<ResQLinkDevice> _discoveredResQLinkDevices = [];
+  List<DeviceModel> _discoveredResQLinkDevices = [];
   HttpServer? _localServer;
   WebSocketChannel? _wsChannel;
   MDnsClient? _mdnsClient;
@@ -103,7 +104,7 @@ class P2PConnectionService with ChangeNotifier {
   String? _connectedHotspotSSID;
 
   // Network state management
-  final Map<String, ConnectedDevice> _connectedDevices = {};
+  final Map<String, DeviceModel> _connectedDevices = {};
   final Map<String, DeviceCredentials> _knownDevices = {};
   final Map<String, Map<String, dynamic>> _discoveredDevices = {};
 
@@ -164,8 +165,7 @@ class P2PConnectionService with ChangeNotifier {
   bool get isHotspotEnabled => _isHotspotEnabled;
   bool get isWiFiEnabled => _isWiFiEnabled;
   List<WiFiAccessPoint> get availableNetworks => _availableNetworks;
-  List<ResQLinkDevice> get discoveredResQLinkDevices =>
-      _discoveredResQLinkDevices;
+  List<DeviceModel> get discoveredResQLinkDevices => _discoveredResQLinkDevices;
   ConnectionMode get currentConnectionMode => _currentConnectionMode;
   bool get hotspotFallbackEnabled => _hotspotFallbackEnabled;
   String? get connectedHotspotSSID => _connectedHotspotSSID;
@@ -212,15 +212,29 @@ class P2PConnectionService with ChangeNotifier {
   String? get groupOwnerAddress => _groupOwnerAddress;
 
   // Collection getters
-  Map<String, ConnectedDevice> get connectedDevices =>
-      Map.from(_connectedDevices);
+  Map<String, DeviceModel> get connectedDevices => Map.from(_connectedDevices);
   Map<String, DeviceCredentials> get knownDevices => Map.from(_knownDevices);
   Map<String, Map<String, dynamic>> get discoveredDevices =>
       Map.from(_discoveredDevices);
   List<P2PMessage> get messageHistory => List.from(_messageHistory);
+  late SettingsService _settingsService;
 
-  // Enhanced initialization with Android version compatibility
   Future<bool> initialize(String userName, {String? preferredRole}) async {
+    _settingsService = SettingsService.instance;
+    await _settingsService.loadSettings();
+
+    final connectionMode = _settingsService.connectionMode;
+    if (connectionMode == 'host') {
+      _preferredRole = 'host';
+    } else if (connectionMode == 'client') {
+      _preferredRole = 'client';
+    }
+
+    if (_settingsService.offlineMode) {
+      _emergencyMode = true;
+      debugPrint("📱 Offline mode enabled from settings");
+    }
+
     try {
       _userName = userName;
       _deviceId = _generateDeviceId(userName);
@@ -298,6 +312,11 @@ class P2PConnectionService with ChangeNotifier {
           "ℹ️ WiFi Direct not supported, using alternative connection methods",
         );
       }
+      _currentRole = P2PRole.none;
+      debugPrint("🚀 P2P Service initialized - Role: ${_currentRole.name}");
+      debugPrint("📱 Preferred role: ${_preferredRole ?? 'auto'}");
+      debugPrint("📱 WiFi Direct support: $_supportsWifiDirect");
+      debugPrint("📱 Hotspot support: $_canCreateProgrammaticHotspot");
 
       // Setup listeners and monitoring
       _startMessageCleanup();
@@ -309,17 +328,165 @@ class P2PConnectionService with ChangeNotifier {
       // Load data
       await _loadKnownDevices();
       await _loadPendingMessages();
-
-      Timer(Duration(seconds: 2), () => _ensureConnection());
+      Timer(Duration(seconds: 2), () => _intelligentRoleSelection());
 
       debugPrint("✅ Enhanced P2P Service initialized successfully");
-      debugPrint(
-        "📱 Device Info: Android SDK $_androidSdkVersion, WiFi Direct: $_supportsWifiDirect, Hotspot: $_canCreateProgrammaticHotspot",
-      );
       return true;
     } catch (e) {
       debugPrint("❌ Enhanced P2P initialization error: $e");
       return false;
+    }
+  }
+
+  Future<void> _intelligentRoleSelection() async {
+    try {
+      debugPrint("🤖 Starting intelligent role selection...");
+
+      // Check if user has a preferred role
+      if (_forceRoleMode && _forcedRole != null) {
+        _currentRole = _forcedRole!;
+        debugPrint("🔒 Using forced role: ${_currentRole.name}");
+        if (_currentRole == P2PRole.host) {
+          await _becomeHost();
+        } else {
+          await _becomeClient();
+        }
+        return;
+      }
+
+      // Check preferred role from initialization
+      if (_preferredRole != null) {
+        if (_preferredRole == 'host') {
+          _currentRole = P2PRole.host;
+          await _becomeHost();
+          return;
+        } else if (_preferredRole == 'client') {
+          _currentRole = P2PRole.client;
+          await _becomeClient();
+          return;
+        }
+      }
+
+      // Auto-decide based on environment
+      await _autoDecideRole();
+    } catch (e) {
+      debugPrint("❌ Role selection error: $e");
+      // Fallback to client mode
+      _currentRole = P2PRole.client;
+      await _becomeClient();
+    }
+  }
+
+  Future<void> _handleDeviceConnection(Map<String, dynamic> deviceInfo) async {
+    final deviceModel = DeviceModel(
+      id: deviceInfo['id'] ?? 'unknown',
+      deviceId:
+          deviceInfo['deviceId'] ?? deviceInfo['deviceAddress'] ?? 'unknown',
+      userName: deviceInfo['deviceName'] ?? 'Unknown User',
+      isHost: deviceInfo['isHost'] ?? false,
+      isOnline: true,
+      lastSeen: DateTime.now(),
+      createdAt: DateTime.now(),
+      capabilities: deviceInfo['capabilities']?.cast<String>(),
+      deviceInfo: {
+        'connectionMethod': deviceInfo['connectionType'] ?? 'unknown',
+        'connectedAt': DateTime.now().millisecondsSinceEpoch,
+      },
+    );
+
+    _connectedDevices[deviceModel.deviceId] = deviceModel;
+
+    // Save to database using DeviceModel
+    await DatabaseService.insertOrUpdateDevice(
+      deviceId: deviceModel.deviceId,
+      deviceName: deviceModel.userName,
+      connectionType: _currentConnectionMode.name,
+      isHost: deviceModel.isHost,
+    );
+
+    onDeviceConnected?.call(deviceModel.deviceId, deviceModel.userName);
+    notifyListeners();
+  }
+
+  Future<void> _autoDecideRole() async {
+    debugPrint("🔍 Auto-deciding role based on environment...");
+
+    // First, try to discover existing networks/devices
+    await _performDiscoveryScan();
+
+    // Wait a bit for discovery results
+    await Future.delayed(Duration(seconds: 5));
+
+    // Decide based on what we found
+    if (_discoveredDevices.isNotEmpty) {
+      // Found devices, become client
+      debugPrint(
+        "📱 Found ${_discoveredDevices.length} devices - becoming CLIENT",
+      );
+      _currentRole = P2PRole.client;
+      await _becomeClient();
+    } else {
+      // No devices found, become host
+      debugPrint("🏠 No devices found - becoming HOST");
+      _currentRole = P2PRole.host;
+      await _becomeHost();
+    }
+  }
+
+  Future<void> _becomeHost() async {
+    try {
+      debugPrint("🏠 Becoming HOST...");
+      _currentRole = P2PRole.host;
+
+      // Try to create hotspot if supported
+      if (_canCreateProgrammaticHotspot || _isModernAndroid) {
+        await createEmergencyHotspot();
+      }
+
+      // Also try WiFi Direct group creation
+      if (_supportsWifiDirect) {
+        try {
+          await WifiDirectPlugin.startDiscovery();
+          _isGroupOwner = true;
+          debugPrint("✅ WiFi Direct group owner mode enabled");
+        } catch (e) {
+          debugPrint("⚠️ WiFi Direct group creation failed: $e");
+        }
+      }
+
+      notifyListeners();
+      debugPrint("✅ Successfully became HOST");
+    } catch (e) {
+      debugPrint("❌ Failed to become host: $e");
+      // Fallback to client
+      await _becomeClient();
+    }
+  }
+
+  Future<void> _becomeClient() async {
+    try {
+      debugPrint("📱 Becoming CLIENT...");
+      _currentRole = P2PRole.client;
+
+      // Start discovery to find hosts
+      await discoverDevices(force: true);
+
+      // Try to connect to discovered devices after a delay
+      Timer(Duration(seconds: 3), () async {
+        if (_discoveredDevices.isNotEmpty && !_isConnected) {
+          await _connectToAvailableDevice(_discoveredDevices.values.toList());
+        } else if (_discoveredDevices.isEmpty) {
+          debugPrint("⚠️ No hosts found, considering becoming host...");
+          await _becomeHost();
+        }
+      });
+
+      notifyListeners();
+      debugPrint("✅ Successfully became CLIENT");
+    } catch (e) {
+      debugPrint("❌ Failed to become client: $e");
+      // Try to become host as fallback
+      await _becomeHost();
     }
   }
 
@@ -559,12 +726,6 @@ class P2PConnectionService with ChangeNotifier {
     // Load pending messages from database
   }
 
-  void _ensureConnection() {
-    if (!_isConnected && _emergencyMode) {
-      _connectionFallbackManager.initiateConnection();
-    }
-  }
-
   void _checkConnectionHealth() {
     if (_isDisposed) return;
 
@@ -717,11 +878,19 @@ class P2PConnectionService with ChangeNotifier {
       final success = await WifiDirectPlugin.connect(deviceAddress);
 
       if (success) {
-        _connectedDevices[deviceAddress] = ConnectedDevice(
+        // ✅ FIXED: Create DeviceModel directly instead of casting ConnectedDevice
+        _connectedDevices[deviceAddress] = DeviceModel(
           id: deviceAddress,
-          name: device['deviceName'] as String,
+          deviceId: deviceAddress,
+          userName: device['deviceName'] as String,
           isHost: false,
-          connectedAt: DateTime.now(),
+          isOnline: true,
+          lastSeen: DateTime.now(),
+          createdAt: DateTime.now(),
+          deviceInfo: {
+            'connectionType': 'wifi_direct',
+            'connectedAt': DateTime.now().millisecondsSinceEpoch,
+          },
         );
       }
 
@@ -1106,11 +1275,22 @@ class P2PConnectionService with ChangeNotifier {
     // Update connected devices based on hotspot clients
     for (var client in clients) {
       final deviceId = client['macAddress'];
-      _connectedDevices[deviceId] = ConnectedDevice(
+
+      // ✅ FIXED: Create DeviceModel directly
+      _connectedDevices[deviceId] = DeviceModel(
         id: deviceId,
-        name: client['deviceName'] ?? 'Unknown Device',
+        deviceId: deviceId,
+        userName: client['deviceName'] ?? 'Unknown Device',
         isHost: false,
-        connectedAt: DateTime.now(),
+        isOnline: true,
+        lastSeen: DateTime.now(),
+        createdAt: DateTime.now(),
+        deviceInfo: {
+          'connectionType': 'hotspot_client',
+          'macAddress': client['macAddress'],
+          'ipAddress': client['ipAddress'],
+          'connectedAt': DateTime.now().millisecondsSinceEpoch,
+        },
       );
 
       // Log to database
@@ -1277,24 +1457,33 @@ class P2PConnectionService with ChangeNotifier {
               in _mdnsClient!.lookup<SrvResourceRecord>(
                 ResourceRecordQuery.service(ptr.domainName),
               )) {
-            final device = ResQLinkDevice(
+            // ✅ CREATE: DeviceModel instead of ResQLinkDevice
+            final device = DeviceModel(
               id: ptr.domainName,
-              name: srv.target,
-              port: srv.port,
+              deviceId: ptr.domainName,
+              userName: srv.target,
+              isHost: false, // Will be determined during connection
+              isOnline: true,
               lastSeen: DateTime.now(),
+              createdAt: DateTime.now(),
+              deviceInfo: {
+                'port': srv.port,
+                'discoveryMethod': 'mdns',
+                'serviceType': serviceType,
+              },
             );
 
             _discoveredResQLinkDevices.add(device);
 
             // Add to discovered devices for unified handling
-            _discoveredDevices[device.id] = {
-              'deviceName': device.name,
-              'deviceAddress': device.id,
+            _discoveredDevices[device.deviceId] = {
+              'deviceName': device.userName,
+              'deviceAddress': device.deviceId,
               'status': 0,
               'isAvailable': true,
               'discoveredAt': DateTime.now().millisecondsSinceEpoch,
               'connectionType': 'mdns_enhanced',
-              'port': device.port,
+              'port': srv.port,
             };
           }
         }
@@ -1415,8 +1604,8 @@ class P2PConnectionService with ChangeNotifier {
       final device = _connectedDevices[deviceAddress]!;
       return {
         'isConnected': true,
-        'deviceName': device.name,
-        'connectedAt': device.connectedAt.millisecondsSinceEpoch,
+        'deviceName': device.userName,
+        'connectedAt': device.createdAt.millisecondsSinceEpoch,
         'isHost': device.isHost,
         'isKnown': _knownDevices.containsKey(deviceAddress),
       };
@@ -1562,14 +1751,27 @@ class P2PConnectionService with ChangeNotifier {
 
   Response _handleGetDevices(Request request) {
     final devices = [
-      ..._discoveredResQLinkDevices.map((d) => d.toJson()),
+      ..._discoveredResQLinkDevices.map(
+        (d) => {
+          'id': d.deviceId,
+          'name': d.userName,
+          'isHost': d.isHost,
+          'lastSeen': d.lastSeen.toIso8601String(),
+          'isOnline': d.isOnline,
+          'connectionType': 'discovered',
+          'deviceInfo': d.deviceInfo,
+        },
+      ),
+      // Connected devices
       ..._connectedDevices.values.map(
         (d) => {
-          'id': d.id,
-          'name': d.name,
+          'id': d.deviceId,
+          'name': d.userName,
           'isHost': d.isHost,
-          'connectedAt': d.connectedAt.toIso8601String(),
+          'lastSeen': d.lastSeen.toIso8601String(),
+          'isOnline': d.isOnline,
           'connectionType': 'connected',
+          'deviceInfo': d.deviceInfo,
         },
       ),
     ];
@@ -1641,12 +1843,56 @@ class P2PConnectionService with ChangeNotifier {
 
   Future<void> _discoverWiFiDirect() async {
     try {
+      debugPrint("🔍 Starting WiFi Direct discovery...");
+
+      // Clear previous discoveries
+      _discoveredDevices.clear();
+
+      // Start discovery
       bool success = await WifiDirectPlugin.startDiscovery();
+
       if (success) {
-        debugPrint("✅ WiFi Direct discovery started");
+        debugPrint("✅ WiFi Direct discovery started successfully");
+
+        // Set a timeout for discovery
+        Timer(Duration(seconds: 15), () async {
+          try {
+            await WifiDirectPlugin.stopDiscovery();
+            debugPrint("⏰ WiFi Direct discovery timeout reached");
+
+            // If no devices found, notify UI
+            if (_discoveredDevices.isEmpty) {
+              debugPrint("📭 No WiFi Direct devices discovered");
+              onDevicesDiscovered?.call([]);
+            }
+          } catch (e) {
+            debugPrint("❌ Error stopping WiFi Direct discovery: $e");
+          }
+        });
+      } else {
+        debugPrint("❌ WiFi Direct discovery failed to start");
+        // Try fallback discovery methods
+        await _fallbackDiscovery();
       }
     } catch (e) {
       debugPrint("❌ WiFi Direct discovery error: $e");
+      await _fallbackDiscovery();
+    }
+  }
+
+  Future<void> _fallbackDiscovery() async {
+    debugPrint("🔄 Starting fallback discovery methods...");
+
+    // Try hotspot scanning
+    await _scanForResQLinkNetworks();
+
+    // Try mDNS discovery
+    await _discoverResQLinkDevices();
+
+    // Notify with whatever we found
+    final allDevices = _discoveredDevices.values.toList();
+    if (allDevices.isNotEmpty) {
+      onDevicesDiscovered?.call(allDevices);
     }
   }
 
@@ -1696,46 +1942,42 @@ class P2PConnectionService with ChangeNotifier {
       final wsChannel = WebSocketChannel.connect(wsUrl);
 
       await wsChannel.ready;
-
       _webSocketConnections[deviceId] = wsChannel;
 
       wsChannel.stream.listen(
         (message) {
           _handleIncomingWebSocketMessage(message);
-          _consecutiveFailures = 0; // Reset on successful message
+          _consecutiveFailures = 0;
         },
         onError: (error) {
           debugPrint('WebSocket error: $error');
-          // ✅ USE: Handle WebSocket error
           _handleConnectionFailure();
         },
         onDone: () {
           debugPrint('WebSocket connection closed for $deviceId');
           _webSocketConnections.remove(deviceId);
           _connectedDevices.remove(deviceId);
-          // ✅ USE: Handle WebSocket disconnection
           _handleConnectionFailure();
           notifyListeners();
         },
       );
 
-      _connectedDevices[deviceId] = ConnectedDevice(
-        id: deviceId,
-        name: device['deviceName'] as String,
-        isHost: false,
-        connectedAt: DateTime.now(),
-      );
+      await _handleDeviceConnection({
+        'id': deviceId,
+        'deviceId': deviceId,
+        'deviceName': device['deviceName'] as String,
+        'isHost': false,
+        'connectionType': 'websocket',
+        'capabilities': [],
+      });
 
       _currentRole = P2PRole.client;
       _currentConnectionMode = ConnectionMode.websocket;
       _isConnected = true;
 
       debugPrint("✅ Connected to mDNS device via WebSocket: $deviceId");
-      onDeviceConnected?.call(deviceId, device['deviceName'] as String);
-      notifyListeners();
     } catch (e) {
       debugPrint("❌ mDNS device connection failed: $e");
-      // ✅ USE: Handle mDNS connection failure
       _handleConnectionFailure();
       rethrow;
     }
@@ -1984,7 +2226,6 @@ class P2PConnectionService with ChangeNotifier {
     };
   }
 
-  // Enhanced message sending with multiple transport support
   Future<void> sendMessage({
     required String message,
     required MessageType type,
@@ -2014,30 +2255,25 @@ class P2PConnectionService with ChangeNotifier {
 
     await _saveMessage(p2pMessage, true);
 
-    // If it's a location message, also save to LocationService
-    if (type == MessageType.location && latitude != null && longitude != null) {
-      try {
-        final locationModel = LocationModel(
-          latitude: latitude,
-          longitude: longitude,
-          timestamp: p2pMessage.timestamp,
-          userId: _deviceId,
-          type: LocationType.normal,
-          message: message,
-          synced: false,
-        );
+    if ((type == MessageType.location || latitude != null) &&
+        !_settingsService.locationSharingEnabled) {
+      debugPrint("❌ Location sharing disabled in settings");
+      latitude = null;
+      longitude = null;
+    }
 
-        await LocationService.insertLocation(locationModel);
-        debugPrint('✅ Location also saved to LocationService');
+    if (_settingsService.autoSync) {
+      try {
+        await DatabaseService.syncToFirebase();
+        debugPrint("✅ Auto-sync to Firebase completed");
       } catch (e) {
-        debugPrint('❌ Error saving to LocationService: $e');
+        debugPrint("⚠️ Auto-sync to Firebase failed: $e");
       }
     }
 
     _processedMessageIds.add(p2pMessage.id);
     _messageHistory.add(p2pMessage);
 
-    // Send via multiple channels
     await _sendMessageViaAllChannels(p2pMessage);
   }
 
@@ -2176,9 +2412,11 @@ class P2PConnectionService with ChangeNotifier {
       'hotspotFallbackEnabled': _hotspotFallbackEnabled,
 
       // Device counts
-      'connectedDevices': _connectedDevices.length,
+      'connectedDevicesCount':
+          _connectedDevices.length, // ✅ FIXED: Renamed to avoid duplicate
       'knownDevices': _knownDevices.length,
-      'discoveredDevices': _discoveredDevices.length,
+      'discoveredDevicesCount':
+          _discoveredDevices.length, // ✅ FIXED: Renamed to avoid duplicate
       'discoveredResQLinkDevices': _discoveredResQLinkDevices.length,
       'availableNetworks': _availableNetworks.length,
       'webSocketConnections': _webSocketConnections.length,
@@ -2206,6 +2444,33 @@ class P2PConnectionService with ChangeNotifier {
         'location_sharing',
         'offline_messaging',
       ],
+
+      // ✅ FIXED: Use different keys for device details
+      'connectedDeviceDetails': _connectedDevices.values
+          .map(
+            (device) => {
+              'deviceId': device.deviceId,
+              'userName': device.userName,
+              'isHost': device.isHost,
+              'isOnline': device.isOnline,
+              'lastSeen': device.lastSeen.millisecondsSinceEpoch,
+              'capabilities': device.capabilities,
+            },
+          )
+          .toList(),
+
+      'discoveredDeviceDetails': _discoveredResQLinkDevices
+          .map(
+            (device) => {
+              'deviceId': device.deviceId,
+              'userName': device.userName,
+              'isHost': device.isHost,
+              'isOnline': device.isOnline,
+              'lastSeen': device.lastSeen.millisecondsSinceEpoch,
+              'capabilities': device.capabilities,
+            },
+          )
+          .toList(),
     };
   }
 
@@ -2335,34 +2600,6 @@ enum MessageType { text, emergency, location, sos, system, file }
 
 enum EmergencyTemplate { sos, trapped, medical, safe, evacuating }
 
-class ResQLinkDevice {
-  final String id;
-  final String name;
-  final int port;
-  final DateTime lastSeen;
-
-  ResQLinkDevice({
-    required this.id,
-    required this.name,
-    required this.port,
-    required this.lastSeen,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'port': port,
-    'lastSeen': lastSeen.toIso8601String(),
-  };
-
-  factory ResQLinkDevice.fromJson(Map<String, dynamic> json) => ResQLinkDevice(
-    id: json['id'],
-    name: json['name'],
-    port: json['port'],
-    lastSeen: DateTime.parse(json['lastSeen']),
-  );
-}
-
 class ResQLinkMessage {
   final String id;
   final String senderId;
@@ -2431,6 +2668,9 @@ class P2PMessage {
     this.longitude,
     required this.routePath,
     this.synced = false,
+    double? locationAccuracy,
+    int? batteryLevel,
+    String? emergencyLevel,
   });
 
   P2PMessage copyWith({
