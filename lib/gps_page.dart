@@ -526,50 +526,40 @@ class _GpsPageState extends State<GpsPage>
 
   Future<void> _initializeApp() async {
     try {
-      if (!mounted) return;
-
       setState(() {
         _isLoading = true;
         _errorMessage = '';
       });
 
-      // Initialize offline maps
-      try {
-        await PhilippinesMapService.instance.initialize();
-        await _updateCacheInfo();
-      } catch (e) {
-        debugPrint('Map service init error: $e');
-        // Continue even if map service fails
-      }
+      await Future.wait([
+        _initializeServices(),
+        _loadSavedLocations(),
+        _checkConnectivity(),
+        _startBatteryMonitoring(),
+      ]).timeout(
+        Duration(seconds: 15),
+        onTimeout: () {
+          debugPrint('⏰ Initialization timeout - using fallback mode');
+          return <void>[];
+        },
+      );
 
-      if (!mounted) return;
+      _startLocationTracking();
 
-      await _initializeServices();
-      if (!mounted) return;
-
-      await _loadSavedLocations();
-      if (!mounted) return;
-
-      await _checkConnectivity();
-      if (!mounted) return;
-
-      await _startBatteryMonitoring();
-      if (!mounted) return;
-
-      await _startLocationTracking();
-      if (!mounted) return;
-
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _errorMessage = 'Failed to initialize GPS: $e';
         });
       }
-      debugPrint('Initialization error: $e');
+    } catch (e) {
+      debugPrint('❌ Initialization error: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage =
+              'GPS initialization failed. Tap retry or check permissions.';
+        });
+      }
     }
   }
 
@@ -669,6 +659,15 @@ class _GpsPageState extends State<GpsPage>
   }
 
   Future<void> _initializeServices() async {
+    try {
+      await PhilippinesMapService.instance.initialize().timeout(
+        Duration(seconds: 10),
+      );
+      debugPrint('✅ Map service initialized');
+    } catch (e) {
+      debugPrint('⚠️ Map service timeout/error: $e - using fallback');
+    }
+
     await _checkLocationPermission();
     await _loadLastKnownLocation();
     await _checkBatteryLevel();
@@ -1786,7 +1785,7 @@ class _GpsPageState extends State<GpsPage>
 
   Widget _buildTileLayer() {
     try {
-      int currentZoom = 13; // Default zoom
+      int currentZoom = 13;
       if (_isMapReady) {
         currentZoom = _mapController.camera.zoom.round();
       }
@@ -1802,7 +1801,6 @@ class _GpsPageState extends State<GpsPage>
       return tileLayer;
     } catch (e) {
       debugPrint('❌ Error getting tile layer: $e');
-      // Fallback to basic OpenStreetMap
       return TileLayer(
         urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
         userAgentPackageName: 'com.resqlink.app',
