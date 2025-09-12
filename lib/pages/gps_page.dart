@@ -807,7 +807,7 @@ class _GpsPageState extends State<GpsPage> {
 
             const GpsStatsPanel(),
 
-            GpsActionButtons(onCenterCurrentLocation: _centerOnCurrentLocation),
+            GpsActionButtons(onCenterCurrentLocation: _centerOnCurrentLocation, onLocationDetailsRequest: () {  },),
 
             const GpsEmergencyButton(),
 

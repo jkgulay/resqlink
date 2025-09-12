@@ -10,6 +10,7 @@ import 'package:resqlink/pages/gps_page.dart';
 import '../services/p2p_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class GpsController extends ChangeNotifier {
   final P2PConnectionService p2pService;
@@ -68,6 +69,10 @@ class GpsController extends ChangeNotifier {
   int _downloadedTiles = 0;
   Map<String, dynamic> _cacheInfo = {};
   bool _hasDownloadedMaps = false; // Add this to track download completion
+  bool _hasOfflineMap = false;
+  bool _isDownloadingOfflineMap = false;
+  double _offlineMapSizeInMB = 0.0;
+  DateTime? _offlineMapLastUpdated;
 
   // Settings
   bool _autoSaveEnabled = false;
@@ -117,6 +122,23 @@ class GpsController extends ChangeNotifier {
   bool get showCriticalInfrastructure => _showCriticalInfrastructure;
   LocationType get selectedLocationType => _selectedLocationType;
   BuildContext? get context => _context;
+  // Getters
+  bool get isDownloadingOfflineMap => _isDownloadingOfflineMap;
+  String get mapStorageSize => '${_offlineMapSizeInMB.toStringAsFixed(1)} MB';
+  String get mapLastUpdated {
+    if (_offlineMapLastUpdated == null) return 'Never';
+
+    final now = DateTime.now();
+    final difference = now.difference(_offlineMapLastUpdated!);
+
+    if (difference.inDays > 0) {
+      return '${difference.inDays} day${difference.inDays > 1 ? 's' : ''} ago';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours} hour${difference.inHours > 1 ? 's' : ''} ago';
+    } else {
+      return 'Recently';
+    }
+  }
 
   void setContext(BuildContext context) {
     _context = context;
@@ -125,6 +147,13 @@ class GpsController extends ChangeNotifier {
   void setSelectedLocationType(LocationType type) {
     _selectedLocationType = type;
     notifyListeners();
+  }
+
+  String get mapCoverageArea {
+    if (_currentLocation != null) {
+      return 'Current Region';
+    }
+    return 'Unknown Area';
   }
 
   Future<void> _initialize() async {
@@ -142,6 +171,7 @@ class GpsController extends ChangeNotifier {
         _loadSavedLocations(),
         _checkConnectivity(),
         _startBatteryMonitoring(),
+        _loadOfflineMapStatus(),
       ]).timeout(
         Duration(seconds: 15),
         onTimeout: () {
@@ -151,7 +181,7 @@ class GpsController extends ChangeNotifier {
       );
 
       _startLocationTracking();
-      await updateCacheInfo(); // Load existing cache info
+      await updateCacheInfo();
 
       _isLoading = false;
       notifyListeners();
@@ -203,6 +233,146 @@ class GpsController extends ChangeNotifier {
     }
   }
 
+  Future<void> updateOfflineMap() async {
+    if (_isDownloadingOfflineMap || !hasOfflineMap) return;
+
+    try {
+      _isDownloadingOfflineMap = true;
+      notifyListeners();
+
+      debugPrint('🔄 Updating offline maps...');
+
+      // Use your existing download functionality but as an update
+      if (_currentLocation != null) {
+        final params = {
+          'radius': 5.0, // 5km radius
+          'minZoom': 8,
+          'maxZoom': 16,
+        };
+
+        await downloadOfflineMaps(params);
+      }
+
+      _offlineMapLastUpdated = DateTime.now();
+      await _saveOfflineMapStatus();
+
+      debugPrint('✅ Offline map update completed');
+    } catch (e) {
+      debugPrint('❌ Error updating offline map: $e');
+    } finally {
+      _isDownloadingOfflineMap = false;
+      notifyListeners();
+    }
+  }
+
+  // Method to delete offline maps
+  Future<void> deleteOfflineMap() async {
+    if (_isDownloadingOfflineMap) return;
+
+    try {
+      debugPrint('🗑️ Deleting offline maps...');
+
+      // Clear the cache using your existing map service
+      await PhilippinesMapService.instance.clearCache(null);
+
+      // Reset all offline map state
+      _hasOfflineMap = false;
+      _hasDownloadedMaps = false;
+      _offlineMapSizeInMB = 0.0;
+      _offlineMapLastUpdated = null;
+      _cacheInfo.clear();
+
+      await _saveOfflineMapStatus();
+      await updateCacheInfo();
+
+      debugPrint('✅ Offline maps deleted');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ Error deleting offline map: $e');
+    }
+  }
+
+  // Helper method to save offline map status to SharedPreferences
+  Future<void> _saveOfflineMapStatus() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('has_offline_map', _hasOfflineMap);
+      await prefs.setDouble('offline_map_size', _offlineMapSizeInMB);
+
+      if (_offlineMapLastUpdated != null) {
+        await prefs.setString(
+          'offline_map_last_updated',
+          _offlineMapLastUpdated!.toIso8601String(),
+        );
+      } else {
+        await prefs.remove('offline_map_last_updated');
+      }
+    } catch (e) {
+      debugPrint('❌ Error saving offline map status: $e');
+    }
+  }
+
+  // Helper method to load offline map status from SharedPreferences
+  Future<void> _loadOfflineMapStatus() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _hasOfflineMap = prefs.getBool('has_offline_map') ?? false;
+      _offlineMapSizeInMB = prefs.getDouble('offline_map_size') ?? 0.0;
+
+      final lastUpdatedString = prefs.getString('offline_map_last_updated');
+      if (lastUpdatedString != null) {
+        _offlineMapLastUpdated = DateTime.parse(lastUpdatedString);
+      }
+
+      debugPrint(
+        '📱 Loaded offline map status: hasMap=$_hasOfflineMap, size=${_offlineMapSizeInMB}MB',
+      );
+    } catch (e) {
+      debugPrint('❌ Error loading offline map status: $e');
+    }
+  }
+
+  // Override the existing downloadOfflineMap method to work with the new system:
+  Future<void> downloadOfflineMap() async {
+    if (_currentLocation == null) {
+      _errorMessage = 'No location available for map download';
+      notifyListeners();
+      return;
+    }
+
+    if (_isDownloadingOfflineMap) return;
+
+    try {
+      _isDownloadingOfflineMap = true;
+      notifyListeners();
+
+      debugPrint('🗺️ Starting offline map download...');
+
+      // Use your existing downloadOfflineMaps method
+      final params = {
+        'radius': 5.0, // 5km radius
+        'minZoom': 8,
+        'maxZoom': 16,
+      };
+
+      await downloadOfflineMaps(params);
+
+      _hasOfflineMap = true;
+      _offlineMapSizeInMB = double.parse(_cacheInfo['storageSizeMB'] ?? '0.0');
+      _offlineMapLastUpdated = DateTime.now();
+
+      await _saveOfflineMapStatus();
+
+      debugPrint('✅ Offline map download completed');
+    } catch (e) {
+      debugPrint('❌ Error downloading offline map: $e');
+      _errorMessage = 'Failed to download offline map: $e';
+    } finally {
+      _isDownloadingOfflineMap = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> shareLocation(LocationModel location) async {
     if (onLocationShare != null) {
       onLocationShare!(location);
@@ -217,42 +387,6 @@ class GpsController extends ChangeNotifier {
   void clearAllLocations() async {
     await LocationService.clearAllLocations();
     await _loadSavedLocations();
-  }
-
- Future<void> downloadOfflineMap() async {
-    if (_currentLocation == null) {
-      _errorMessage = 'No location available for map download';
-      notifyListeners();
-      return;
-    }
-
-    try {
-      _isDownloadingMaps = true;
-      notifyListeners();
-
-      // Use MapService to download area around current location
-      final bounds = _calculateBounds(_currentLocation!, 5.0); // 5km radius
-      
-      final downloadProgress = await _mapService.cacheArea(
-        bounds: bounds,
-        minZoom: 8,
-        maxZoom: 16,
-        regionName: 'Current Area',
-      );
-
-      // Listen to progress
-      downloadProgress.percentageStream.listen((percentage) {
-        debugPrint('📊 Download progress: ${percentage.toStringAsFixed(1)}%');
-      });
-
-      debugPrint('✅ Offline map download started');
-    } catch (e) {
-      debugPrint('❌ Error downloading offline map: $e');
-      _errorMessage = 'Failed to download offline map: $e';
-    } finally {
-      _isDownloadingMaps = false;
-      notifyListeners();
-    }
   }
 
   void toggleLocationService() async {
