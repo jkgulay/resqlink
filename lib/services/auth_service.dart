@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'database_service.dart';
 import '../firebase_auth_helper.dart';
 import '../models/user_model.dart';
@@ -340,6 +342,60 @@ class AuthService {
       print('Registration error: $e');
       return AuthResult.failure('Registration error: ${e.toString()}');
     }
+  }
+
+  // Authentication utility functions
+  static Future<void> saveToken(
+    String idToken,
+    String refreshToken,
+    DateTime expiresAt,
+  ) async {
+    await _secureStorage.write(key: 'idToken', value: idToken);
+    await _secureStorage.write(key: 'refreshToken', value: refreshToken);
+    await _secureStorage.write(
+      key: 'expiresAt',
+      value: expiresAt.toIso8601String(),
+    );
+  }
+
+  static Future<String?> loadIdToken() async {
+    try {
+      return await _secureStorage.read(key: 'idToken');
+    } catch (e) {
+      debugPrint('Error reading idToken: $e');
+      return null;
+    }
+  }
+
+  static Future<String?> loadRefreshToken() async =>
+      await _secureStorage.read(key: 'refreshToken');
+      
+  static Future<DateTime?> loadExpiresAt() async {
+    final val = await _secureStorage.read(key: 'expiresAt');
+    return val != null ? DateTime.tryParse(val) : null;
+  }
+
+  static Future<void> clearTokens() async {
+    await _secureStorage.deleteAll();
+  }
+
+  static Future<bool> isOnline() async {
+    final List<ConnectivityResult> connectivityResult = (await Connectivity()
+        .checkConnectivity());
+    return connectivityResult.contains(ConnectivityResult.mobile) ||
+        connectivityResult.contains(ConnectivityResult.wifi);
+  }
+
+  static Future<String?> refreshIdToken() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      await user.reload();
+      final newToken = await user.getIdToken();
+      final expiration = DateTime.now().add(const Duration(hours: 1));
+      await saveToken(newToken!, '', expiration);
+      return newToken;
+    }
+    return null;
   }
 }
 

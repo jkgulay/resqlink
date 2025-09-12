@@ -3,7 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/gps_controller.dart';
-import '../../gps_page.dart';
+import '../../pages/gps_page.dart';
 import '../../services/map_service.dart';
 import '../../utils/resqlink_theme.dart';
 

@@ -173,7 +173,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                     )
                   : Icon(Icons.search, size: isNarrow ? 18 : 20),
               label: Text(
-                controller.isScanning ? 'Scanning...' : 'Find Devices',
+                controller.isScanning ? 'Scanning' : 'Find Devices',
                 style: TextStyle(
                   fontSize: isNarrow ? 13 : 14,
                   fontWeight: FontWeight.w600,

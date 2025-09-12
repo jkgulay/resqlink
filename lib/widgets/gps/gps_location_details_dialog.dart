@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../gps_page.dart';
+import '../../pages/gps_page.dart';
 import '../../utils/resqlink_theme.dart';
 
 class GpsLocationDetailsDialog extends StatelessWidget {
