@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:resqlink/gps_page.dart';
+import 'package:resqlink/pages/gps_page.dart';
 import 'package:resqlink/services/message_sync_service.dart';
 import 'package:resqlink/services/settings_service.dart';
-import 'services/p2p_service.dart';
-import '../services/database_service.dart';
-import '../models/message_model.dart';
-import '../utils/resqlink_theme.dart';
+import '../services/p2p_service.dart';
+import '../../services/database_service.dart';
+import '../../models/message_model.dart';
+import '../../utils/resqlink_theme.dart';
 import 'dart:async';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
-import '../services/message_ack_service.dart';
-import '../services/signal_monitoring_service.dart';
-import '../services/emergency_recovery_service.dart';
+import '../../services/message_ack_service.dart';
+import '../../services/signal_monitoring_service.dart';
+import '../../services/emergency_recovery_service.dart';
 
 // Notification Service Class
 class NotificationService {

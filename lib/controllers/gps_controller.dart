@@ -6,7 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:resqlink/gps_page.dart';
+import 'package:resqlink/pages/gps_page.dart';
 import '../services/p2p_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:resqlink/pages/landing_page.dart';
 import 'package:resqlink/services/auth_service.dart';
 import 'package:resqlink/services/database_service.dart';
 import 'package:resqlink/services/message_sync_service.dart';
@@ -6,9 +7,8 @@ import 'package:resqlink/services/p2p_service.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import '../main.dart';
 import 'package:provider/provider.dart';
-import 'services/settings_service.dart';
+import '../services/settings_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -386,10 +386,8 @@ class SettingsPageState extends State<SettingsPage> {
         await AuthService.logout(clearOfflineCredentials: false);
       }
 
-      // Navigate after a microtask to ensure state updates
       Future.microtask(() {
         if (mounted) {
-          // Navigate to the LandingPage (now properly imported)
           Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
             MaterialPageRoute(builder: (context) => const LandingPage()),
             (route) => false,

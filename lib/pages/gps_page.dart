@@ -10,15 +10,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 
 // Import your widgets and controllers
-import 'controllers/gps_controller.dart';
-import 'services/p2p_service.dart';
-import 'utils/resqlink_theme.dart';
-import 'widgets/gps/gps_enhanced_map.dart';
-import 'widgets/gps/gps_action_button_card.dart';
-import 'widgets/gps/gps_location_card.dart';
-import 'widgets/gps/gps_button_card.dart';
-import 'widgets/gps/gps_panel_card.dart';
-import 'widgets/gps/gps_location_details_dialog.dart';
+import '../controllers/gps_controller.dart';
+import '../services/p2p_service.dart';
+import '../utils/resqlink_theme.dart';
+import '../widgets/gps/gps_enhanced_map.dart';
+import '../widgets/gps/gps_action_button_card.dart';
+import '../widgets/gps/gps_location_card.dart';
+import '../widgets/gps/gps_button_card.dart';
+import '../widgets/gps/gps_panel_card.dart';
+import '../widgets/gps/gps_location_details_dialog.dart';
 
 // Location types for emergency scenarios
 enum LocationType {

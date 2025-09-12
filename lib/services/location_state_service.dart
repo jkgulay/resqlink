@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../gps_page.dart';
+import '../pages/gps_page.dart';
 import '../services/p2p_service.dart';
 
 class LocationStateService extends ChangeNotifier {

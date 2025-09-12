@@ -8,15 +8,15 @@ import 'package:resqlink/services/settings_service.dart';
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
-import 'services/p2p_service.dart';
-import 'services/map_service.dart';
-import 'services/location_state_service.dart';
-import 'controllers/home_controller.dart';
-import 'widgets/home/emergency_mode_card.dart';
-import 'widgets/home/emergency_actions_card.dart';
-import 'widgets/home/location_status_card.dart';
-import 'widgets/home/connection_discovery_card.dart';
-import 'widgets/home/instructions_card.dart';
+import '../services/p2p_service.dart';
+import '../services/map_service.dart';
+import '../services/location_state_service.dart';
+import '../controllers/home_controller.dart';
+import '../widgets/home/emergency_mode_card.dart';
+import '../widgets/home/emergency_actions_card.dart';
+import '../widgets/home/location_status_card.dart';
+import '../widgets/home/connection_discovery_card.dart';
+import '../widgets/home/instructions_card.dart';
 
 class HomePage extends StatefulWidget {
   @override

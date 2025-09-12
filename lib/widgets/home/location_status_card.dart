@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../gps_page.dart';
+import '../../pages/gps_page.dart';
 
 class LocationStatusCard extends StatelessWidget {
   final LocationModel? location;

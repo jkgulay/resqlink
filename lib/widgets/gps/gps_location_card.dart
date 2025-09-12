@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/gps_controller.dart';
-import '../../gps_page.dart';
+import '../../pages/gps_page.dart';
 import '../../utils/resqlink_theme.dart';
 
 class GpsLocationList extends StatefulWidget {
