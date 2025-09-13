@@ -9,7 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 import '../models/message_model.dart';
 import '../services/database_service.dart';
-import 'p2p_service.dart';
+import 'p2p/p2p_main_service.dart';
 
 class MessageSyncService {
   static final MessageSyncService _instance = MessageSyncService._internal();
@@ -132,7 +132,7 @@ class MessageSyncService {
     required MessageType messageType,
     double? latitude,
     double? longitude,
-    P2PConnectionService? p2pService,
+    P2PMainService? p2pService,
   }) async {
     // Generate unique message ID with collision check
     String messageId = _generateUniqueMessageId();
@@ -264,18 +264,17 @@ class MessageSyncService {
   // Send via P2P multi-hop
   Future<bool> _sendViaP2P(
     MessageModel message,
-    P2PConnectionService p2pService,
+    P2PMainService p2pService,
   ) async {
     try {
       await p2pService.sendMessage(
         message: message.message,
-        type: MessageType.values.firstWhere(
-          (e) => e.name == message.type,
-          orElse: () => MessageType.text,
-        ),
+        type: message.messageType,
         targetDeviceId: message.endpointId,
         latitude: message.latitude,
-        longitude: message.longitude, senderName: '',
+        longitude: message.longitude,
+        senderName: message.fromUser,
+        id: message.messageId,
       );
       debugPrint('📡 Message sent via P2P: ${message.messageId}');
       return true;

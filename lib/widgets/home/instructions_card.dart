@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../services/p2p_service.dart';
+import '../../services/p2p/p2p_base_service.dart';
 
 class InstructionsCard extends StatelessWidget {
   const InstructionsCard({super.key});
@@ -147,7 +147,7 @@ class InstructionsCard extends StatelessWidget {
           SizedBox(height: 20),
           _buildInstructionItem(
             '2',
-            'Messages relay through multiple devices to reach everyone (up to ${P2PConnectionService.maxTtl} hops)',
+            'Messages relay through multiple devices to reach everyone (up to ${P2PBaseService.maxTtl} hops)',
             Icons.hub,
             Colors.green,
             isNarrow,

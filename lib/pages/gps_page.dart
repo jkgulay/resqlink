@@ -11,7 +11,7 @@ import 'dart:async';
 
 // Import your widgets and controllers
 import '../controllers/gps_controller.dart';
-import '../services/p2p_service.dart';
+import '../services/p2p/p2p_main_service.dart';
 import '../utils/resqlink_theme.dart';
 import '../widgets/gps/gps_enhanced_map.dart';
 import '../widgets/gps/gps_action_button_card.dart';

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../services/p2p_service.dart';
+import '../../services/p2p/p2p_main_service.dart';
+import '../../services/p2p/p2p_base_service.dart';
 
 class EmergencyActionsCard extends StatelessWidget {
-  final P2PConnectionService p2pService;
+  final P2PMainService p2pService;
   final Function(EmergencyTemplate) onEmergencyMessage;
 
   const EmergencyActionsCard({

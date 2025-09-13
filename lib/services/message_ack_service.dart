@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/message_model.dart';
-import 'p2p_service.dart';
+import 'p2p/p2p_main_service.dart';
 import 'database_service.dart';
 
 class MessageAcknowledgmentService {
@@ -18,7 +18,7 @@ class MessageAcknowledgmentService {
   // Initialize with P2P service
   void initialize(P2PConnectionService p2pService) {
     p2pService.onMessageReceived = (message) {
-      _handleIncomingMessage(message, p2pService);
+      _handleIncomingMessage(message as P2PMessage, p2pService);
     };
   }
 

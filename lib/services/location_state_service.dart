@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:resqlink/models/message_model.dart';
 import '../pages/gps_page.dart';
-import '../services/p2p_service.dart';
+import 'p2p/p2p_main_service.dart';
 
 class LocationStateService extends ChangeNotifier {
   static final LocationStateService _instance =
@@ -14,7 +15,7 @@ class LocationStateService extends ChangeNotifier {
   bool _isLocationServiceEnabled = false;
   int _unsyncedCount = 0;
   bool _isLoadingLocation = false;
-  P2PConnectionService? _p2pService;
+  P2PMainService? _p2pService;
 
   // Getters
   LocationModel? get currentLocation => _currentLocation;
@@ -23,7 +24,7 @@ class LocationStateService extends ChangeNotifier {
   bool get isLoadingLocation => _isLoadingLocation;
 
   // Set P2P service for location sharing
-  void setP2PService(P2PConnectionService p2pService) {
+  void setP2PService(P2PMainService p2pService) {
     _p2pService = p2pService;
   }
 

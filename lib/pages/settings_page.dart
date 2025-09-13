@@ -3,7 +3,8 @@ import 'package:resqlink/pages/landing_page.dart';
 import 'package:resqlink/services/auth_service.dart';
 import 'package:resqlink/services/database_service.dart';
 import 'package:resqlink/services/message_sync_service.dart';
-import 'package:resqlink/services/p2p_service.dart';
+import 'package:resqlink/services/p2p/p2p_base_service.dart';
+import 'package:resqlink/services/p2p/p2p_main_service.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -12,7 +13,7 @@ import '../services/settings_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class SettingsPage extends StatefulWidget {
-  final P2PConnectionService? p2pService;
+  final P2PMainService? p2pService;
   final MessageSyncService? syncService;
 
   const SettingsPage({super.key, this.p2pService, this.syncService});
@@ -965,7 +966,7 @@ class SettingsPageState extends State<SettingsPage> {
 
           case 'hotspot_fallback':
             widget.p2pService!.setHotspotFallbackEnabled(true);
-            // Force hotspot mode
+            // Force hotspot mode - FIXED
             await widget.p2pService!.hotspotManager.createResQLinkHotspot();
 
           case 'hybrid':
@@ -976,7 +977,7 @@ class SettingsPageState extends State<SettingsPage> {
         }
       }
 
-      setState(() {});
+      setState(() => _isLoading = false);
 
       if (!mounted) return;
       _showMessage(
@@ -984,6 +985,7 @@ class SettingsPageState extends State<SettingsPage> {
         isSuccess: true,
       );
     } catch (e) {
+      setState(() => _isLoading = false);
       if (!mounted) return;
       _showMessage('Failed to change connection mode: $e', isDanger: true);
     }

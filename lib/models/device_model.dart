@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Represents a device in the P2P network
 class DeviceModel {
   final String id;
   final String deviceId;
@@ -16,6 +15,11 @@ class DeviceModel {
   final int messageCount;
   final List<String>? capabilities;
 
+  // Add these new properties for P2P compatibility
+  final String? deviceAddress;
+  final bool isConnected;
+  final String? discoveryMethod;
+
   DeviceModel({
     required this.id,
     required this.deviceId,
@@ -30,6 +34,9 @@ class DeviceModel {
     this.lastLocation,
     this.messageCount = 0,
     this.capabilities,
+    this.deviceAddress, // Add this
+    this.isConnected = false, // Add this
+    this.discoveryMethod, // Add this
   });
 
   /// Create from Firestore document
@@ -48,8 +55,8 @@ class DeviceModel {
       deviceInfo: data['deviceInfo'],
       lastLocation: data['lastLocation'],
       messageCount: data['messageCount'] ?? 0,
-      capabilities: data['capabilities'] != null 
-          ? List<String>.from(data['capabilities']) 
+      capabilities: data['capabilities'] != null
+          ? List<String>.from(data['capabilities'])
           : null,
     );
   }
@@ -85,15 +92,15 @@ class DeviceModel {
       lastSeen: DateTime.fromMillisecondsSinceEpoch(json['lastSeen'] ?? 0),
       createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt'] ?? 0),
       deviceInfo: json['deviceInfo'],
-      lastLocation: json['lastLocation'] != null 
+      lastLocation: json['lastLocation'] != null
           ? GeoPoint(
               json['lastLocation']['latitude'],
               json['lastLocation']['longitude'],
             )
           : null,
       messageCount: json['messageCount'] ?? 0,
-      capabilities: json['capabilities'] != null 
-          ? List<String>.from(json['capabilities']) 
+      capabilities: json['capabilities'] != null
+          ? List<String>.from(json['capabilities'])
           : null,
     );
   }
@@ -111,7 +118,7 @@ class DeviceModel {
       'lastSeen': lastSeen.millisecondsSinceEpoch,
       'createdAt': createdAt.millisecondsSinceEpoch,
       'deviceInfo': deviceInfo,
-      'lastLocation': lastLocation != null 
+      'lastLocation': lastLocation != null
           ? {
               'latitude': lastLocation!.latitude,
               'longitude': lastLocation!.longitude,
@@ -122,7 +129,6 @@ class DeviceModel {
     };
   }
 
-  /// Create a copy with updated fields
   DeviceModel copyWith({
     String? id,
     String? deviceId,
@@ -137,6 +143,9 @@ class DeviceModel {
     GeoPoint? lastLocation,
     int? messageCount,
     List<String>? capabilities,
+    String? deviceAddress, 
+    bool? isConnected, 
+    String? discoveryMethod, 
   }) {
     return DeviceModel(
       id: id ?? this.id,
@@ -152,6 +161,9 @@ class DeviceModel {
       lastLocation: lastLocation ?? this.lastLocation,
       messageCount: messageCount ?? this.messageCount,
       capabilities: capabilities ?? this.capabilities,
+      deviceAddress: deviceAddress ?? this.deviceAddress, 
+      isConnected: isConnected ?? this.isConnected, 
+      discoveryMethod: discoveryMethod ?? this.discoveryMethod, 
     );
   }
 
@@ -217,7 +229,7 @@ class DeviceCapabilities {
   static const String storage = 'storage';
   static const String camera = 'camera';
   static const String microphone = 'microphone';
-  
+
   static List<String> getAllCapabilities() {
     return [
       bluetooth,
@@ -233,12 +245,7 @@ class DeviceCapabilities {
 }
 
 /// Device role in the P2P network
-enum DeviceRole {
-  none,
-  host,
-  client,
-  relay,
-}
+enum DeviceRole { none, host, client, relay }
 
 /// Extension methods for DeviceRole
 extension DeviceRoleExtension on DeviceRole {
@@ -255,6 +262,44 @@ extension DeviceRoleExtension on DeviceRole {
     }
   }
 
-  bool get canCreateGroup => this == DeviceRole.none || this == DeviceRole.client;
+  bool get canCreateGroup =>
+      this == DeviceRole.none || this == DeviceRole.client;
   bool get canRelay => this == DeviceRole.host || this == DeviceRole.relay;
+}
+
+/// Device credentials for P2P connections
+class DeviceCredentials {
+  final String deviceId;
+  final String? ssid;
+  final String? psk;
+  final bool isHost;
+  final DateTime lastSeen;
+
+  DeviceCredentials({
+    required this.deviceId,
+    this.ssid,
+    this.psk,
+    required this.isHost,
+    required this.lastSeen,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'deviceId': deviceId,
+      'ssid': ssid,
+      'psk': psk,
+      'isHost': isHost,
+      'lastSeen': lastSeen.millisecondsSinceEpoch,
+    };
+  }
+
+  factory DeviceCredentials.fromJson(Map<String, dynamic> json) {
+    return DeviceCredentials(
+      deviceId: json['deviceId'],
+      ssid: json['ssid'],
+      psk: json['psk'],
+      isHost: json['isHost'] ?? false,
+      lastSeen: DateTime.fromMillisecondsSinceEpoch(json['lastSeen'] ?? 0),
+    );
+  }
 }
