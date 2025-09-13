@@ -22,9 +22,6 @@ class P2PMainService extends P2PBaseService {
   late HotspotManager _hotspotManager;
   late WiFiDirectService _wifiDirectService;
   late HotspotService _hotspotService;
-  static const MethodChannel _hotspotChannel = MethodChannel(
-    'resqlink/hotspot',
-  );
 
   // Enhanced state
   bool _hotspotCreationInProgress = false;

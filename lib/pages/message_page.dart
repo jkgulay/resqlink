@@ -1022,6 +1022,49 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _reconnectToDevice(String deviceId) async {
+    try {
+      _showSuccessMessage('Attempting to reconnect...');
+
+      // Start discovery to find the device
+      await widget.p2pService.discoverDevices(force: true);
+
+      // Wait a moment for discovery
+      await Future.delayed(Duration(seconds: 2));
+
+      // Try to connect if device is discovered
+      final devices = widget.p2pService.discoveredDevices;
+      Map<String, dynamic>? targetDevice;
+
+      // Check if device exists in discovered devices map
+      if (devices.containsKey(deviceId)) {
+        targetDevice = devices[deviceId];
+      } else {
+        // Search through all devices for matching deviceId or endpointId
+        for (final deviceData in devices.values) {
+          if (deviceData['deviceId'] == deviceId || deviceData['endpointId'] == deviceId) {
+            targetDevice = deviceData;
+            break;
+          }
+        }
+      }
+
+      if (targetDevice != null && targetDevice.isNotEmpty) {
+        final success = await widget.p2pService.connectToDevice(targetDevice);
+        if (success) {
+          _showSuccessMessage('Reconnected successfully!');
+        } else {
+          _showErrorMessage('Failed to reconnect. Try creating a new connection.');
+        }
+      } else {
+        _showErrorMessage('Device not found. Try scanning again or create a new connection.');
+      }
+    } catch (e) {
+      debugPrint('❌ Reconnection failed: $e');
+      _showErrorMessage('Reconnection failed. Try manual connection.');
+    }
+  }
+
   Future<void> _showClearChatConfirmDialog() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -1111,18 +1154,41 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
             maxLines: 1,
           ),
-          Text(
-            widget.p2pService.connectedDevices.containsKey(_selectedEndpointId)
-                ? 'Connected'
-                : 'Offline',
-            style: TextStyle(
-              fontSize: 12,
-              color:
-                  widget.p2pService.connectedDevices.containsKey(
-                    _selectedEndpointId,
-                  )
-                  ? ResQLinkTheme.safeGreen
-                  : ResQLinkTheme.warningYellow,
+          GestureDetector(
+            onTap: () {
+              if (!widget.p2pService.connectedDevices.containsKey(_selectedEndpointId) && _selectedEndpointId != null) {
+                _reconnectToDevice(_selectedEndpointId!);
+              }
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: widget.p2pService.connectedDevices.containsKey(_selectedEndpointId)
+                        ? ResQLinkTheme.safeGreen
+                        : ResQLinkTheme.warningYellow,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                SizedBox(width: 4),
+                Text(
+                  widget.p2pService.connectedDevices.containsKey(_selectedEndpointId)
+                      ? 'Connected'
+                      : 'Disconnected - Tap to reconnect',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: widget.p2pService.connectedDevices.containsKey(_selectedEndpointId)
+                        ? ResQLinkTheme.safeGreen
+                        : ResQLinkTheme.warningYellow,
+                    decoration: !widget.p2pService.connectedDevices.containsKey(_selectedEndpointId)
+                        ? TextDecoration.underline
+                        : null,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1150,6 +1216,27 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   List<Widget> _buildAppBarActions() {
     final actions = <Widget>[];
+
+    // Add reconnect button for disconnected devices in chat view
+    if (_isChatView && _selectedEndpointId != null &&
+        !widget.p2pService.connectedDevices.containsKey(_selectedEndpointId)) {
+      actions.add(
+        Container(
+          margin: EdgeInsets.only(right: 8),
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ResQLinkTheme.primaryRed,
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: Size(0, 32),
+            ),
+            icon: Icon(Icons.refresh, size: 16, color: Colors.white),
+            label: Text('Reconnect',
+              style: TextStyle(fontSize: 12, color: Colors.white)),
+            onPressed: () => _reconnectToDevice(_selectedEndpointId!),
+          ),
+        ),
+      );
+    }
 
     actions.add(
       Container(

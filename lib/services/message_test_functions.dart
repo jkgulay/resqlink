@@ -1,12 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:resqlink/services/message_debug_service.dart';
 import '../models/message_model.dart';
 import '../services/database_service.dart';
 import 'p2p/p2p_main_service.dart';
-import 'message_debug_service.dart';
-
 class MessageTestFunctions {
-  static final MessageDebugService _debugService = MessageDebugService();
 
   /// Test basic message sending functionality
   static Future<TestResult> testBasicMessageSending(P2PMainService p2pService) async {
