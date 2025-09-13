@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:resqlink/services/p2p/p2p_base_service.dart';
 import '../../controllers/home_controller.dart';
-import '../../services/p2p_service.dart';
 import '../../utils/resqlink_theme.dart';
 
 class ConnectionDiscoveryCard extends StatelessWidget {

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'p2p_service.dart';
+import 'p2p/p2p_main_service.dart';
 import 'signal_monitoring_service.dart';
 
 class EmergencyRecoveryService {
@@ -12,7 +12,7 @@ class EmergencyRecoveryService {
 
   Timer? _recoveryTimer;
   Timer? _aggressiveScanTimer;
-  P2PConnectionService? _p2pService;
+  P2PMainService? _p2pService;
   SignalMonitoringService? _signalService;
 
   bool _isRecoveryActive = false;
@@ -25,7 +25,7 @@ class EmergencyRecoveryService {
   static const Duration _emergencyRecoveryInterval = Duration(seconds: 5);
 
   void initialize(
-    P2PConnectionService p2pService,
+    P2PMainService p2pService,
     SignalMonitoringService signalService,
   ) {
     _p2pService = p2pService;
@@ -146,8 +146,9 @@ class EmergencyRecoveryService {
       // Wait for results
       await Future.delayed(Duration(seconds: 8));
 
-      // Try to connect to best available device
-      final devices = _p2pService!.discoveredDevices.values
+      // Try to connect to best available device - FIXED
+      final discoveredDevices = _p2pService!.discoveredDevices;
+      final devices = discoveredDevices.values
           .where((d) => d['isAvailable'] == true)
           .toList();
 
@@ -176,7 +177,7 @@ class EmergencyRecoveryService {
         _p2pService!.setHotspotFallbackEnabled(true);
       }
 
-      // Scan for ResQLink hotspots
+      // Scan for ResQLink hotspots - FIXED
       final hotspots = _p2pService!.getAvailableHotspots();
 
       if (hotspots.isNotEmpty) {
@@ -217,8 +218,9 @@ class EmergencyRecoveryService {
             .inHours;
 
         if (hoursSinceLastSeen < 24) {
-          // Try to find this device in current discoveries
-          final discovered = _p2pService!.discoveredDevices[device.deviceId];
+          // Try to find this device in current discoveries - FIXED
+          final discoveredDevices = _p2pService!.discoveredDevices;
+          final discovered = discoveredDevices[device.deviceId];
 
           if (discovered != null && discovered['isAvailable'] == true) {
             await _p2pService!.connectToDevice(discovered);

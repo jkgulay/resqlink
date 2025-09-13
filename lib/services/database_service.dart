@@ -9,7 +9,7 @@ import '../models/user_model.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/message_model.dart';
-import 'p2p_service.dart';
+import '../models/device_model.dart';
 
 class DatabaseService {
   static Database? _database;
@@ -1694,11 +1694,9 @@ static Future<void> _createDB(Database db, int version) async {
             orElse: () => MessageType.text,
           ),
           timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp']),
-          ttl: 0,
-          latitude: map['latitude'],
-          longitude: map['longitude'],
-          routePath: [],
-          synced: false,
+          isEmergency: map['isEmergency'] == 1,
+          latitude: map['latitude']?.toDouble(),
+          longitude: map['longitude']?.toDouble(),
         );
       }).toList();
     } catch (e) {

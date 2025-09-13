@@ -4,11 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/controllers/gps_controller.dart';
+import 'package:resqlink/models/message_model.dart';
 import 'package:resqlink/services/settings_service.dart';
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
-import '../services/p2p_service.dart';
+import '../services/p2p/p2p_main_service.dart';
+import '../services/p2p/p2p_base_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';
 import '../controllers/home_controller.dart';
@@ -25,7 +27,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int selectedIndex = 0;
-  final P2PConnectionService _p2pService = P2PConnectionService();
+  final P2PMainService _p2pService = P2PMainService();
   String? _userId = "user_${DateTime.now().millisecondsSinceEpoch}";
   bool _isP2PInitialized = false;
   bool _isInBackground = false;
@@ -299,11 +301,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  void _showNotification(P2PMessage message) {
+  void _showNotification(MessageModel message) {
     if (!mounted) return;
 
-    if (message.type == MessageType.emergency ||
-        message.type == MessageType.sos) {
+    if (message.messageType == MessageType.emergency ||
+        message.messageType == MessageType.sos) {
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -321,7 +323,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'From: ${message.senderName}',
+                'From: ${message.fromUser}',
                 style: TextStyle(color: Colors.white),
               ),
               SizedBox(height: 8),

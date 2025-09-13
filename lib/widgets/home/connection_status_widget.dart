@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/models/device_model.dart';
-import '../../services/p2p_service.dart';
+import '../../services/p2p/p2p_main_service.dart';
 import '../../utils/resqlink_theme.dart';
 
 class EnhancedConnectionWidget extends StatelessWidget {
@@ -214,25 +214,25 @@ class EnhancedConnectionWidget extends StatelessWidget {
                 child: ListTile(
                   leading: Icon(
                     Icons.wifi,
-                    color: _getSignalColor(network.level),
+                    color: _getSignalColor(network['level'] as int?),
                   ),
                   title: Text(
-                    network.ssid,
+                    network['ssid'] as String? ?? 'Unknown Network',
                     style: TextStyle(fontFamily: 'Inter'),
                   ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Signal: ${network.level}dBm | ${network.frequency}MHz',
+                        'Signal: ${network['level'] ?? 0}dBm | ${network['frequency'] ?? 0}MHz',
                         style: TextStyle(
                           fontFamily: 'JetBrains Mono',
                           fontSize: 12,
                         ),
                       ),
-                      if (network.capabilities.isNotEmpty)
+                      if ((network['capabilities'] as String?)?.isNotEmpty == true)
                         Text(
-                          'Security: ${network.capabilities}',
+                          'Security: ${network['capabilities'] ?? 'Open'}',
                           style: TextStyle(
                             fontFamily: 'JetBrains Mono',
                             fontSize: 10,
@@ -244,7 +244,7 @@ class EnhancedConnectionWidget extends StatelessWidget {
                   trailing: ElevatedButton(
                     onPressed: service.isConnecting
                         ? null
-                        : () => service.connectToResQLinkNetwork(network.ssid),
+                        : () => service.connectToResQLinkNetwork(network['ssid'] as String? ?? ''),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                     ),
@@ -433,7 +433,8 @@ class EnhancedConnectionWidget extends StatelessWidget {
     service.connectToDevice(deviceMap);
   }
 
-  Color _getSignalColor(int level) {
+  Color _getSignalColor(int? level) {
+    if (level == null) return Colors.grey;
     if (level > -50) return Colors.green;
     if (level > -70) return Colors.orange;
     return Colors.red;

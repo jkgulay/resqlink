@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
-import 'p2p_service.dart';
+import 'p2p/p2p_main_service.dart';
 
 class SignalMonitoringService {
   static final SignalMonitoringService _instance = SignalMonitoringService._internal();

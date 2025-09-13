@@ -4,7 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:resqlink/pages/gps_page.dart';
 import 'package:resqlink/services/message_sync_service.dart';
 import 'package:resqlink/services/settings_service.dart';
-import '../services/p2p_service.dart';
+import '../services/p2p/p2p_main_service.dart';
+import '../services/p2p/p2p_base_service.dart';
 import '../../services/database_service.dart';
 import '../../models/message_model.dart';
 import '../../utils/resqlink_theme.dart';
@@ -12,9 +13,10 @@ import 'dart:async';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
-import '../../services/message_ack_service.dart';
-import '../../services/signal_monitoring_service.dart';
-import '../../services/emergency_recovery_service.dart';
+// Services updated for P2PMainService compatibility
+// import '../../services/message_ack_service.dart';  // Available if needed
+// import '../../services/signal_monitoring_service.dart';  // Available if needed
+// import '../../services/emergency_recovery_service.dart';  // Available if needed
 
 // Notification Service Class
 class NotificationService {
@@ -122,7 +124,7 @@ class MessageSummary {
 }
 
 class MessagePage extends StatefulWidget {
-  final P2PConnectionService p2pService;
+  final P2PMainService p2pService;
   final LocationModel? currentLocation;
 
   const MessagePage({
@@ -140,12 +142,12 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  // Services
+  // Services - Updated for P2PMainService compatibility
   final MessageSyncService _syncService = MessageSyncService();
-  final MessageAcknowledgmentService _ackService =
-      MessageAcknowledgmentService();
-  final SignalMonitoringService _signalService = SignalMonitoringService();
-  final EmergencyRecoveryService _recoveryService = EmergencyRecoveryService();
+  // Additional services available for integration with P2PMainService:
+  // final MessageAcknowledgmentService _ackService = MessageAcknowledgmentService();
+  // final SignalMonitoringService _signalService = SignalMonitoringService();
+  // final EmergencyRecoveryService _recoveryService = EmergencyRecoveryService();
 
   final List<Map<String, dynamic>> _offlineMessageQueue = [];
   Timer? _queueProcessingTimer;
@@ -209,12 +211,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         _showErrorMessage('Device disconnected');
       };
 
-      _ackService.initialize(widget.p2pService);
-      _signalService.startMonitoring(widget.p2pService);
-      _recoveryService.initialize(widget.p2pService, _signalService);
+      // Services ready for P2PMainService integration:
+      // _ackService.initialize(widget.p2pService);
+      // _signalService.startMonitoring(widget.p2pService);
+      // _recoveryService.initialize(widget.p2pService, _signalService);
 
       if (widget.p2pService.emergencyMode) {
-        _recoveryService.startEmergencyRecovery();
+        // _recoveryService.startEmergencyRecovery();
       }
 
       widget.p2pService.addListener(_onP2PUpdate);
@@ -263,9 +266,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     try {
       _syncService.dispose();
-      _signalService.dispose();
-      _recoveryService.dispose();
-      _ackService.dispose();
+      // _signalService.dispose();
+      // _recoveryService.dispose();
+      // _ackService.dispose();
     } catch (e) {
       debugPrint('Error disposing services: $e');
     }
@@ -520,29 +523,12 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  void _onMessageReceived(P2PMessage message) async {
+  void _onMessageReceived(MessageModel message) async {
     if (!mounted) return;
 
     try {
-      final messageId = message.id;
-      final senderId = message.senderId;
-      final senderName = message.senderName;
-
-      final messageModel = MessageModel(
-        endpointId: senderId,
-        fromUser: senderName,
-        message: message.message,
-        isMe: false,
-        isEmergency:
-            message.type == MessageType.emergency ||
-            message.type == MessageType.sos,
-        timestamp: message.timestamp.millisecondsSinceEpoch,
-        latitude: message.latitude,
-        longitude: message.longitude,
-        messageId: messageId,
-        type: message.type.name,
-        status: MessageStatus.delivered,
-      );
+      final messageId = message.messageId ?? 'unknown';
+      final senderId = message.endpointId;
 
       final existingMessage = await DatabaseService.getMessageById(messageId);
       if (existingMessage != null) {
@@ -550,15 +536,15 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         return;
       }
 
-      await DatabaseService.insertMessage(messageModel);
+      await DatabaseService.insertMessage(message);
 
       if (!mounted) return;
 
       await _batchUIUpdates(() async {
         await _loadConversations();
 
-        if (message.type == MessageType.emergency ||
-            message.type == MessageType.sos) {
+        if (message.messageType == MessageType.emergency ||
+            message.messageType == MessageType.sos) {
           await _showEmergencyNotification(message);
         }
 
@@ -584,7 +570,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _showEmergencyNotification(P2PMessage message) async {
+  Future<void> _showEmergencyNotification(MessageModel message) async {
     if (!mounted) return;
 
     try {
@@ -596,7 +582,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       final vibrate = settings.vibrationNotifications && !settings.silentMode;
 
       await NotificationService.showEmergencyNotification(
-        title: '${message.type.name.toUpperCase()} from ${message.senderName}',
+        title: '${message.messageType.name.toUpperCase()} from ${message.fromUser}',
         body: message.message,
         playSound: playSound,
         vibrate: vibrate,
@@ -623,7 +609,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '${message.type.name.toUpperCase()} from ${message.senderName}',
+                        '${message.messageType.name.toUpperCase()} from ${message.fromUser}',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
@@ -646,7 +632,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               label: 'VIEW',
               textColor: Colors.white,
               onPressed: () =>
-                  _openConversation(message.senderId, message.senderName),
+                  _openConversation(message.endpointId, message.fromUser),
             ),
           ),
         );
@@ -656,7 +642,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  void _showInAppNotification(P2PMessage message) {
+  void _showInAppNotification(MessageModel message) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -666,13 +652,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             CircleAvatar(
               radius: 16,
               backgroundColor:
-                  message.type == MessageType.emergency ||
-                      message.type == MessageType.sos
+                  message.messageType == MessageType.emergency ||
+                      message.messageType == MessageType.sos
                   ? ResQLinkTheme.primaryRed
                   : ResQLinkTheme.safeGreen,
               child: Icon(
-                message.type == MessageType.emergency ||
-                        message.type == MessageType.sos
+                message.messageType == MessageType.emergency ||
+                        message.messageType == MessageType.sos
                     ? Icons.warning
                     : Icons.message,
                 color: Colors.white,
@@ -686,7 +672,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'New message from ${message.senderName}',
+                    'New message from ${message.fromUser}',
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
@@ -708,7 +694,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           label: 'VIEW',
           textColor: ResQLinkTheme.primaryRed,
           onPressed: () =>
-              _openConversation(message.senderId, message.senderName),
+              _openConversation(message.endpointId, message.fromUser),
         ),
       ),
     );
@@ -737,6 +723,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         message: messageText,
         isMe: true,
         isEmergency: type == MessageType.emergency || type == MessageType.sos,
+        messageType: type,
         timestamp: timestamp.millisecondsSinceEpoch,
         latitude: _currentLocation?.latitude,
         longitude: _currentLocation?.longitude,

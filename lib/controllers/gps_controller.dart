@@ -7,13 +7,13 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:resqlink/pages/gps_page.dart';
-import '../services/p2p_service.dart';
+import '../services/p2p/p2p_main_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class GpsController extends ChangeNotifier {
-  final P2PConnectionService p2pService;
+  final P2PMainService p2pService;
   final String? userId;
   final Function(LocationModel)? onLocationShare;
   final LocationStateService _locationStateService = LocationStateService();

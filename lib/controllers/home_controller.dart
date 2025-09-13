@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../services/p2p_service.dart';
+import 'package:resqlink/models/message_model.dart';
+import 'package:resqlink/services/p2p/p2p_base_service.dart';
+import '../services/p2p/p2p_main_service.dart';
 import '../services/database_service.dart';
 import '../pages/gps_page.dart';
 
 class HomeController extends ChangeNotifier {
-  final P2PConnectionService p2pService;
+  final P2PMainService p2pService;
 
   HomeController(this.p2pService) {
     _initialize();
