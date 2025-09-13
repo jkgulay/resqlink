@@ -164,7 +164,7 @@ class LandingPage extends StatelessWidget {
           : CrossAxisAlignment.center,
       children: [
         Text(
-          'ResQLink Emergency Chat',
+          'ResQLink',
           textAlign:
               ResponsiveUtils.isLandscape(context) &&
                   !ResponsiveUtils.isDesktop(context)
@@ -178,7 +178,7 @@ class LandingPage extends StatelessWidget {
         ),
         SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 10)),
         Text(
-          'Instant emergency communication - online or offline',
+          'Offline Emergency Chat & Location Sharing',
           textAlign:
               ResponsiveUtils.isLandscape(context) &&
                   !ResponsiveUtils.isDesktop(context)

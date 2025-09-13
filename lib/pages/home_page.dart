@@ -13,6 +13,7 @@ import '../services/p2p/p2p_main_service.dart';
 import '../services/p2p/p2p_base_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';
+import '../services/temporary_identity_service.dart';
 import '../controllers/home_controller.dart';
 import '../widgets/home/emergency_mode_card.dart';
 import '../widgets/home/emergency_actions_card.dart';
@@ -218,8 +219,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeP2P() async {
-    final userName =
-        "User_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
+    // Get display name from temporary identity service (from landing page)
+    String? displayName = await TemporaryIdentityService.getTemporaryDisplayName();
+    final userName = displayName ?? "User_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
+
+    debugPrint('🆔 Initializing P2P with username: $userName');
+
     final preferredRole = DateTime.now().millisecondsSinceEpoch % 2 == 0
         ? 'host'
         : 'client';
@@ -255,13 +260,34 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _onDeviceConnected(String deviceId, String userName) {
     debugPrint("✅ Device connected: $userName ($deviceId)");
     if (mounted) {
+      // Show connection notification with action to view chat
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Connected to $userName'),
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Connected to $userName')),
+            ],
+          ),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 2),
+          duration: Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'VIEW CHAT',
+            textColor: Colors.white,
+            onPressed: () {
+              setState(() => selectedIndex = 2); // Navigate to Messages tab
+            },
+          ),
         ),
       );
+
+      // Auto-navigate to Messages tab after a short delay
+      Timer(Duration(seconds: 1), () {
+        if (mounted) {
+          setState(() => selectedIndex = 2);
+        }
+      });
     }
   }
 
