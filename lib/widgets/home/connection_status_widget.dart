@@ -214,25 +214,25 @@ class EnhancedConnectionWidget extends StatelessWidget {
                 child: ListTile(
                   leading: Icon(
                     Icons.wifi,
-                    color: _getSignalColor(network.level),
+                    color: _getSignalColor(network['level'] as int?),
                   ),
                   title: Text(
-                    network.ssid ?? 'Unknown Network',
+                    network['ssid'] as String? ?? 'Unknown Network',
                     style: TextStyle(fontFamily: 'Inter'),
                   ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Signal: ${network.level ?? 0}dBm | ${network.frequency ?? 0}MHz',
+                        'Signal: ${network['level'] ?? 0}dBm | ${network['frequency'] ?? 0}MHz',
                         style: TextStyle(
                           fontFamily: 'JetBrains Mono',
                           fontSize: 12,
                         ),
                       ),
-                      if (network.capabilities?.isNotEmpty == true)
+                      if ((network['capabilities'] as String?)?.isNotEmpty == true)
                         Text(
-                          'Security: ${network.capabilities ?? 'Open'}',
+                          'Security: ${network['capabilities'] ?? 'Open'}',
                           style: TextStyle(
                             fontFamily: 'JetBrains Mono',
                             fontSize: 10,
@@ -244,7 +244,7 @@ class EnhancedConnectionWidget extends StatelessWidget {
                   trailing: ElevatedButton(
                     onPressed: service.isConnecting
                         ? null
-                        : () => service.connectToResQLinkNetwork(network.ssid ?? ''),
+                        : () => service.connectToResQLinkNetwork(network['ssid'] as String? ?? ''),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                     ),

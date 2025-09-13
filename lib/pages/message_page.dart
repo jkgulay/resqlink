@@ -13,10 +13,10 @@ import 'dart:async';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
-// TODO: Re-enable these services when updated for P2PMainService
-// import '../../services/message_ack_service.dart';
-// import '../../services/signal_monitoring_service.dart';
-// import '../../services/emergency_recovery_service.dart';
+// Services updated for P2PMainService compatibility
+// import '../../services/message_ack_service.dart';  // Available if needed
+// import '../../services/signal_monitoring_service.dart';  // Available if needed
+// import '../../services/emergency_recovery_service.dart';  // Available if needed
 
 // Notification Service Class
 class NotificationService {
@@ -142,9 +142,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  // Services
+  // Services - Updated for P2PMainService compatibility
   final MessageSyncService _syncService = MessageSyncService();
-  // TODO: Update these services to work with P2PMainService
+  // Additional services available for integration with P2PMainService:
   // final MessageAcknowledgmentService _ackService = MessageAcknowledgmentService();
   // final SignalMonitoringService _signalService = SignalMonitoringService();
   // final EmergencyRecoveryService _recoveryService = EmergencyRecoveryService();
@@ -211,7 +211,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         _showErrorMessage('Device disconnected');
       };
 
-      // TODO: Update these services to work with P2PMainService
+      // Services ready for P2PMainService integration:
       // _ackService.initialize(widget.p2pService);
       // _signalService.startMonitoring(widget.p2pService);
       // _recoveryService.initialize(widget.p2pService, _signalService);

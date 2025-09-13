@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_discovery_service.dart';
-import 'package:wifi_iot/wifi_iot.dart';
 import '../../models/message_model.dart';
 import '../../services/database_service.dart';
+import '../../services/wifi_direct_service.dart';
+import '../../services/hotspot_service.dart';
 import 'p2p_base_service.dart';
 import 'p2p_network_service.dart';
 import '../connection_fallback.dart';
@@ -19,6 +20,8 @@ class P2PMainService extends P2PBaseService {
   late P2PDiscoveryService _discoveryService;
   late ConnectionFallbackManager _connectionFallbackManager;
   late HotspotManager _hotspotManager;
+  late WiFiDirectService _wifiDirectService;
+  late HotspotService _hotspotService;
   static const MethodChannel _hotspotChannel = MethodChannel(
     'resqlink/hotspot',
   );
@@ -85,6 +88,13 @@ class P2PMainService extends P2PBaseService {
       );
 
       await _discoveryService.initialize();
+
+      // Initialize new services
+      _wifiDirectService = WiFiDirectService.instance;
+      _hotspotService = HotspotService.instance;
+
+      await _wifiDirectService.initialize();
+      await _hotspotService.initialize();
 
       _addMessageTrace('Main service initialized with userName: $userName');
       debugPrint('✅ P2P Main Service initialized successfully');
@@ -220,54 +230,28 @@ class P2PMainService extends P2PBaseService {
     try {
       debugPrint('🔧 Creating emergency hotspot...');
 
-      // 1. Check permissions
-      if (!await checkAndRequestPermissions()) {
-        debugPrint('❌ Required permissions not granted');
-        _addMessageTrace('Hotspot permissions denied');
-        return false;
-      }
-
-      // 2. Generate unique SSID
+      // Generate unique SSID
       final hotspotSSID =
           "${P2PBaseService.resqlinkPrefix}${deviceId ?? DateTime.now().millisecondsSinceEpoch}";
       debugPrint('🔧 Creating hotspot with SSID: $hotspotSSID');
       _addMessageTrace('Creating hotspot: $hotspotSSID');
 
-      // 3. Enable WiFi first
-      await _ensureWiFiEnabled();
-
-      // 4. Try multiple hotspot creation methods
-      bool success = false;
-
-      // Method 1: Try native Android implementation
-      success = await _createNativeHotspot(hotspotSSID);
-      if (success) {
-        debugPrint('✅ Native hotspot created');
-        _addMessageTrace('Native hotspot created successfully');
-      }
-
-      // Method 2: Try WiFiForIoTPlugin (if Method 1 failed)
-      if (!success) {
-        success = await _createPluginHotspot(hotspotSSID);
-        if (success) {
-          debugPrint('✅ Plugin hotspot created');
-          _addMessageTrace('Plugin hotspot created successfully');
-        }
-      }
-
-      // Method 3: Manual setup guidance (if all else fails)
-      if (!success) {
-        success = await _createManualHotspot(hotspotSSID);
-        if (success) {
-          debugPrint('✅ Manual hotspot setup initiated');
-          _addMessageTrace('Manual hotspot setup completed');
-        }
-      }
+      // Try to create hotspot using the new HotspotService
+      final success = await _hotspotService.createHotspot(
+        ssid: hotspotSSID,
+        password: P2PBaseService.emergencyPassword,
+      );
 
       if (success) {
-        _actualCreatedSSID = hotspotSSID;
+        _actualCreatedSSID = _hotspotService.currentSSID ?? hotspotSSID;
         _isHotspotEnabled = true;
         _currentConnectionMode = P2PConnectionMode.hotspot;
+
+        debugPrint('✅ Emergency hotspot created successfully');
+        debugPrint('  - SSID: ${_hotspotService.currentSSID}');
+        debugPrint('  - Password: ${_hotspotService.currentPassword}');
+
+        _addMessageTrace('Hotspot created successfully: $_actualCreatedSSID');
 
         // Setup network services
         await _networkService.setupHotspotServices();
@@ -277,19 +261,11 @@ class P2PMainService extends P2PBaseService {
           discoverDevices(force: true);
         });
 
-        // Verify hotspot is working
-        await Future.delayed(Duration(seconds: 3));
-        final verified = await _verifyHotspotWorking();
-        if (!verified) {
-          debugPrint('⚠️ Hotspot created but not accessible');
-          _addMessageTrace('Hotspot created but verification failed');
-        }
-
         updateConnectionStatus(true);
         return true;
       } else {
-        debugPrint('❌ All hotspot creation methods failed');
-        _addMessageTrace('All hotspot creation methods failed');
+        debugPrint('❌ Failed to create emergency hotspot');
+        _addMessageTrace('Emergency hotspot creation failed');
         _isHotspotEnabled = false;
         _currentConnectionMode = P2PConnectionMode.none;
         return false;
@@ -297,69 +273,14 @@ class P2PMainService extends P2PBaseService {
     } catch (e) {
       debugPrint('❌ Exception in createEmergencyHotspot: $e');
       _addMessageTrace('Exception in hotspot creation: $e');
+      _isHotspotEnabled = false;
+      _currentConnectionMode = P2PConnectionMode.none;
       return false;
     } finally {
       _hotspotCreationInProgress = false;
     }
   }
 
-  /// Ensure WiFi is enabled
-  Future<void> _ensureWiFiEnabled() async {
-    try {
-      await WiFiForIoTPlugin.setEnabled(true);
-      await Future.delayed(Duration(seconds: 2)); // Wait for WiFi to stabilize
-      debugPrint('✅ WiFi enabled');
-    } catch (e) {
-      debugPrint('⚠️ Failed to enable WiFi: $e');
-    }
-  }
-
-  /// Create hotspot using native Android methods
-  Future<bool> _createNativeHotspot(String ssid) async {
-    try {
-      debugPrint('🔧 Attempting native Android hotspot creation...');
-
-      final result = await _hotspotChannel.invokeMethod('createHotspot', {
-        'ssid': ssid,
-        'password': P2PBaseService.emergencyPassword,
-        'force': true,
-      });
-
-      if (result['success'] == true) {
-        debugPrint('✅ Native hotspot created successfully');
-        return true;
-      } else {
-        debugPrint('❌ Native hotspot creation failed: ${result['error']}');
-        return false;
-      }
-    } on PlatformException catch (e) {
-      debugPrint('❌ Platform exception in native hotspot: $e');
-      return false;
-    } catch (e) {
-      debugPrint('❌ Native hotspot creation exception: $e');
-      return false;
-    }
-  }
-
-  /// Create hotspot using WiFiForIoTPlugin
-  Future<bool> _createPluginHotspot(String ssid) async {
-    try {
-      debugPrint('🔧 Attempting plugin hotspot creation...');
-
-      final result = await WiFiForIoTPlugin.setEnabled(true);
-
-      if (result) {
-        debugPrint('✅ Plugin hotspot enabled successfully');
-        return true;
-      } else {
-        debugPrint('❌ Plugin hotspot creation failed');
-        return false;
-      }
-    } catch (e) {
-      debugPrint('❌ Plugin hotspot creation exception: $e');
-      return false;
-    }
-  }
 
   Future<bool> connectToDevice(Map<String, dynamic> device) async {
     try {
@@ -616,41 +537,6 @@ class P2PMainService extends P2PBaseService {
     return knownMap;
   }
 
-  /// Create hotspot with manual user guidance
-  Future<bool> _createManualHotspot(String ssid) async {
-    try {
-      debugPrint('🔧 Initiating manual hotspot setup...');
-
-      // Show instructions to user (in a real app, this would be a dialog)
-      _showHotspotInstructions(ssid);
-
-      // Wait for user to set up hotspot
-      debugPrint('⏳ Waiting for manual hotspot creation...');
-      await Future.delayed(Duration(seconds: 15));
-
-      // In emergency mode, assume success even if we can't verify
-      debugPrint('✅ Manual hotspot setup assumed complete');
-      return true;
-    } catch (e) {
-      debugPrint('❌ Manual hotspot setup exception: $e');
-      return false;
-    }
-  }
-
-  /// Show hotspot setup instructions
-  void _showHotspotInstructions(String ssid) {
-    debugPrint('''
-📱 EMERGENCY HOTSPOT SETUP REQUIRED:
-
-1. Open Settings → Network & Internet → Hotspot & Tethering
-2. Turn ON "Portable Wi-Fi hotspot"
-3. Set Network Name (SSID) to: $ssid
-4. Set Password to: $P2PBaseService.emergencyPassword
-5. Tap "Turn on hotspot"
-
-⚠️ This is critical for emergency communication!
-''');
-  }
 
   /// Verify hotspot is working
   Future<bool> _verifyHotspotWorking() async {
@@ -692,7 +578,13 @@ class P2PMainService extends P2PBaseService {
   Future<void> discoverDevices({bool force = false}) async {
     try {
       debugPrint('🔍 Starting device discovery...');
+
+      // Use WiFi Direct discovery
+      await _wifiDirectService.startDiscovery();
+
+      // Also use existing discovery service
       await _discoveryService.discoverDevices(force: force);
+
       debugPrint('✅ Device discovery completed');
     } catch (e) {
       debugPrint('❌ Device discovery failed: $e');
@@ -818,7 +710,20 @@ ${_messageTrace.take(5).join('\n')}
   }
 
   /// Get available ResQLink networks
-  List<WifiNetwork> get availableNetworks => _networkService.availableNetworks;
+  List<Map<String, dynamic>> get availableNetworks {
+    try {
+      return _networkService.availableNetworks.map((network) => {
+        'ssid': network.ssid,
+        'bssid': network.bssid,
+        'level': network.level,
+        'frequency': network.frequency,
+        'capabilities': network.capabilities,
+      }).toList();
+    } catch (e) {
+      debugPrint('❌ Error getting available networks: $e');
+      return [];
+    }
+  }
 
   @override
   void dispose() {
