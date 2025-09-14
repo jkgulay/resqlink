@@ -4,7 +4,8 @@
       "Bash(find:*)",
       "Bash(flutter analyze:*)",
       "Bash(sed:*)",
-      "Bash(dart analyze:*)"
+      "Bash(dart analyze:*)",
+      "Bash(flutter:*)"
     ],
     "deny": [],
     "ask": []

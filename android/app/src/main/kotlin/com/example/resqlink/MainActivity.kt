@@ -38,6 +38,7 @@ class MainActivity : FlutterActivity() {
     private lateinit var wifiP2pManager: WifiP2pManager
     private lateinit var hotspotManager: HotspotManager
     private lateinit var permissionHelper: PermissionHelper
+    private lateinit var wifiDirectDiagnostic: WiFiDirectDiagnostic
 
     private var channel: WifiP2pManager.Channel? = null
     private var wifiDirectReceiver: WifiDirectBroadcastReceiver? = null
@@ -53,6 +54,7 @@ class MainActivity : FlutterActivity() {
 
         hotspotManager = HotspotManager(this)
         permissionHelper = PermissionHelper(this)
+        wifiDirectDiagnostic = WiFiDirectDiagnostic(this)
 
         // Channels
         setupMethodChannels(flutterEngine)
@@ -102,6 +104,11 @@ class MainActivity : FlutterActivity() {
                 "createGroup" -> createWifiDirectGroup(result)
                 "removeGroup" -> removeWifiDirectGroup(result)
                 "getGroupInfo" -> getWifiDirectGroupInfo(result)
+                "runDiagnostic" -> {
+                    val diagnostic = wifiDirectDiagnostic.runFullDiagnostic()
+                    wifiDirectDiagnostic.logDetailedStatus()
+                    result.success(diagnostic)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -148,6 +155,11 @@ class MainActivity : FlutterActivity() {
                 }
 
                 "checkAllPermissions" -> result.success(permissionHelper.checkAllPermissions())
+                "requestWifiDirectPermissions" -> {
+                    val allGranted = permissionHelper.requestWifiDirectPermissions()
+                    result.success(allGranted)
+                }
+                "hasAllWifiDirectPermissions" -> result.success(permissionHelper.hasAllWifiDirectPermissions())
                 "openSettings" -> {
                     val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                         data = android.net.Uri.parse("package:$packageName")
@@ -189,42 +201,77 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun startWifiDirectDiscovery(result: MethodChannel.Result) {
-        android.util.Log.d("WiFiDirect", "Starting WiFi Direct discovery...")
+        android.util.Log.d("WiFiDirect", "=== Starting WiFi Direct Discovery ===")
+        android.util.Log.d("WiFiDirect", "WiFi enabled: ${wifiManager.isWifiEnabled}")
+        android.util.Log.d("WiFiDirect", "WiFi Direct support: ${checkWifiDirectSupport()}")
+        android.util.Log.d("WiFiDirect", "All permissions: ${permissionHelper.hasAllWifiDirectPermissions()}")
 
-        if (!checkWifiDirectSupport()) {
-            android.util.Log.e("WiFiDirect", "WiFi Direct not supported")
-            result.error("UNSUPPORTED", "WiFi Direct not supported", null)
+        // Check WiFi is enabled
+        if (!wifiManager.isWifiEnabled) {
+            android.util.Log.e("WiFiDirect", "WiFi is disabled")
+            result.error("WIFI_DISABLED", "WiFi must be enabled for device discovery", null)
             return
         }
 
-        if (!permissionHelper.hasLocationPermission()) {
-            android.util.Log.e("WiFiDirect", "Location permission not granted")
-            result.error("PERMISSION_DENIED", "Location permission required", null)
+        // Check hardware support
+        if (!checkWifiDirectSupport()) {
+            android.util.Log.e("WiFiDirect", "WiFi Direct not supported on this device")
+            result.error("UNSUPPORTED", "WiFi Direct not supported on this device", null)
+            return
+        }
+
+        // Check all required permissions
+        if (!permissionHelper.hasAllWifiDirectPermissions()) {
+            android.util.Log.e("WiFiDirect", "WiFi Direct permissions not granted")
+            result.error("PERMISSION_DENIED", "All WiFi Direct permissions required", null)
             return
         }
 
         channel?.let { ch ->
-            android.util.Log.d("WiFiDirect", "Initiating peer discovery...")
-            wifiP2pManager.discoverPeers(ch, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    android.util.Log.d("WiFiDirect", "Peer discovery started successfully")
-                    result.success(true)
-                }
-                override fun onFailure(reason: Int) {
-                    val errorMsg = when (reason) {
-                        WifiP2pManager.P2P_UNSUPPORTED -> "P2P unsupported"
-                        WifiP2pManager.ERROR -> "Internal error"
-                        WifiP2pManager.BUSY -> "System busy"
-                        else -> "Unknown error code $reason"
-                    }
-                    android.util.Log.e("WiFiDirect", "Discovery failed: $errorMsg")
-                    result.error("DISCOVERY_FAILED", errorMsg, null)
-                }
-            })
+            android.util.Log.d("WiFiDirect", "Initiating peer discovery with retry logic...")
+            startDiscoveryWithRetry(ch, result, 0)
         } ?: run {
             android.util.Log.e("WiFiDirect", "WiFi P2P channel not initialized")
-            result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+            result.error("NOT_INITIALIZED", "WiFi P2P channel not initialized", null)
         }
+    }
+
+    private fun startDiscoveryWithRetry(
+        channel: WifiP2pManager.Channel,
+        result: MethodChannel.Result,
+        retryCount: Int
+    ) {
+        val maxRetries = 3
+
+        wifiP2pManager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                android.util.Log.d("WiFiDirect", "Peer discovery started successfully (attempt ${retryCount + 1})")
+                result.success(true)
+            }
+            override fun onFailure(reason: Int) {
+                val errorMsg = when (reason) {
+                    WifiP2pManager.P2P_UNSUPPORTED -> "P2P unsupported on device"
+                    WifiP2pManager.ERROR -> "Internal WiFi Direct error"
+                    WifiP2pManager.BUSY -> "WiFi Direct system busy"
+                    else -> "Unknown error code $reason"
+                }
+
+                android.util.Log.w("WiFiDirect", "Discovery attempt ${retryCount + 1} failed: $errorMsg")
+
+                if (retryCount < maxRetries) {
+                    // Exponential backoff: 1s, 2s, 4s
+                    val delayMs = (1000 * kotlin.math.pow(2.0, retryCount.toDouble())).toLong()
+                    android.util.Log.d("WiFiDirect", "Retrying discovery in ${delayMs}ms...")
+
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        startDiscoveryWithRetry(channel, result, retryCount + 1)
+                    }, delayMs)
+                } else {
+                    android.util.Log.e("WiFiDirect", "All discovery attempts failed: $errorMsg")
+                    result.error("DISCOVERY_FAILED", "Discovery failed after $maxRetries attempts: $errorMsg", null)
+                }
+            }
+        })
     }
 
     private fun stopWifiDirectDiscovery(result: MethodChannel.Result) {
