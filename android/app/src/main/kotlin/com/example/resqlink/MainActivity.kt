@@ -259,8 +259,8 @@ class MainActivity : FlutterActivity() {
                 android.util.Log.w("WiFiDirect", "Discovery attempt ${retryCount + 1} failed: $errorMsg")
 
                 if (retryCount < maxRetries) {
-                    // Exponential backoff: 1s, 2s, 4s
-                    val delayMs = (1000 * kotlin.math.pow(2.0, retryCount.toDouble())).toLong()
+                    // Simple exponential backoff: 1s, 2s, 4s
+                    val delayMs = 1000L * (1 shl retryCount) // Bit shift for 2^retryCount
                     android.util.Log.d("WiFiDirect", "Retrying discovery in ${delayMs}ms...")
 
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
