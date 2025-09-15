@@ -70,23 +70,54 @@ class WifiDirectBroadcastReceiver(
     private fun handleConnectionChanged(intent: Intent) {
         val networkInfo = intent.getParcelableExtra<NetworkInfo>(WifiP2pManager.EXTRA_NETWORK_INFO)
         val wifiP2pInfo = intent.getParcelableExtra<WifiP2pInfo>(WifiP2pManager.EXTRA_WIFI_P2P_INFO)
-        
+
         Log.d("WifiDirectReceiver", "Connection changed - Connected: ${networkInfo?.isConnected}")
-        
+        Log.d("WifiDirectReceiver", "Group formed: ${wifiP2pInfo?.groupFormed}")
+        Log.d("WifiDirectReceiver", "Group owner: ${wifiP2pInfo?.isGroupOwner}")
+        Log.d("WifiDirectReceiver", "Group owner address: ${wifiP2pInfo?.groupOwnerAddress?.hostAddress}")
+
         if (networkInfo?.isConnected == true && wifiP2pInfo != null) {
             val connectionInfo = mutableMapOf<String, Any>()
             connectionInfo["isConnected"] = true
-            connectionInfo["isGroupOwner"] = wifiP2pInfo.groupOwnerAddress != null
+            connectionInfo["isGroupOwner"] = wifiP2pInfo.isGroupOwner
             connectionInfo["groupOwnerAddress"] = wifiP2pInfo.groupOwnerAddress?.hostAddress ?: ""
-            
-            // Send non-null map
+            connectionInfo["groupFormed"] = wifiP2pInfo.groupFormed
+
+            // If this is a system-level connection, attempt to establish socket
+            if (wifiP2pInfo.groupFormed) {
+                Log.d("WifiDirectReceiver", "System-level WiFi Direct connection detected!")
+
+                // Request peer list and group info to get full details
+                channel?.let { ch ->
+                    manager.requestPeers(ch) { peers ->
+                        val peersList = peers.deviceList.map { device ->
+                            mapOf(
+                                "deviceName" to (device.deviceName ?: "Unknown Device"),
+                                "deviceAddress" to (device.deviceAddress ?: "Unknown Address"),
+                                "status" to device.status
+                            )
+                        }
+
+                        val systemConnectionData = mapOf(
+                            "systemConnection" to true,
+                            "connectionInfo" to connectionInfo,
+                            "peers" to peersList
+                        )
+
+                        activity.sendToFlutter("wifi_direct", "onSystemConnectionDetected", systemConnectionData)
+                    }
+                }
+            }
+
+            // Send standard connection changed event
             activity.sendToFlutter("wifi_direct", "onConnectionChanged", connectionInfo)
         } else {
             // Handle disconnection
             val disconnectionInfo = mapOf<String, Any>(
                 "isConnected" to false,
                 "isGroupOwner" to false,
-                "groupOwnerAddress" to ""
+                "groupOwnerAddress" to "",
+                "groupFormed" to false
             )
             activity.sendToFlutter("wifi_direct", "onConnectionChanged", disconnectionInfo)
         }

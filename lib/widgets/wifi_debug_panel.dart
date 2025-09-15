@@ -3,10 +3,10 @@ import '../services/wifi_direct_service.dart';
 import '../services/hotspot_service.dart';
 
 class WiFiDebugPanel extends StatefulWidget {
-  const WiFiDebugPanel({Key? key}) : super(key: key);
+  const WiFiDebugPanel({super.key});
 
   @override
-  _WiFiDebugPanelState createState() => _WiFiDebugPanelState();
+  State<WiFiDebugPanel> createState() => _WiFiDebugPanelState();
 }
 
 class _WiFiDebugPanelState extends State<WiFiDebugPanel> {
