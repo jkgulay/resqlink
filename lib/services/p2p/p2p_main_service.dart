@@ -93,6 +93,9 @@ class P2PMainService extends P2PBaseService {
       await _wifiDirectService.initialize();
       await _hotspotService.initialize();
 
+      // Setup WiFi Direct state synchronization
+      _setupWiFiDirectSync();
+
       _addMessageTrace('Main service initialized with userName: $userName');
       debugPrint('✅ P2P Main Service initialized successfully');
 
@@ -121,11 +124,105 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
+  /// Setup WiFi Direct state synchronization
+  void _setupWiFiDirectSync() {
+    // Listen for WiFi Direct connection changes
+    _wifiDirectService.connectionStream.listen((connectionState) {
+      debugPrint('🔗 WiFi Direct connection state changed: $connectionState');
+
+      if (connectionState == WiFiDirectConnectionState.connected) {
+        _currentConnectionMode = P2PConnectionMode.wifiDirect;
+        updateConnectionStatus(true);
+      } else if (connectionState == WiFiDirectConnectionState.disconnected) {
+        if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
+          _currentConnectionMode = P2PConnectionMode.none;
+          updateConnectionStatus(false);
+        }
+      }
+      notifyListeners();
+    });
+
+    // Listen for peer discoveries
+    _wifiDirectService.peersStream.listen((peers) {
+      debugPrint('👥 WiFi Direct peers updated: ${peers.length} peers found');
+
+      // Convert WiFi Direct peers to device models
+      for (final peer in peers) {
+        final deviceModel = DeviceModel(
+          id: peer.deviceAddress,
+          deviceId: peer.deviceAddress,
+          userName: peer.deviceName,
+          isHost: false,
+          isOnline: true,
+          createdAt: DateTime.now(),
+          lastSeen: DateTime.now(),
+          isConnected: false,
+          discoveryMethod: 'wifi_direct',
+          deviceAddress: peer.deviceAddress,
+        );
+
+        // Add to discovered devices if not already present
+        if (!discoveredResQLinkDevices.any((d) => d.deviceId == deviceModel.deviceId)) {
+          discoveredResQLinkDevices.add(deviceModel);
+        }
+      }
+      notifyListeners();
+    });
+
+    // Listen for state changes (socket establishment, etc.)
+    _wifiDirectService.stateStream.listen((state) {
+      debugPrint('📡 WiFi Direct state update: $state');
+
+      if (state['socketReady'] == true) {
+        debugPrint('🔌 WiFi Direct socket communication ready');
+        _addMessageTrace('WiFi Direct socket established');
+      }
+
+      if (state['socketEstablished'] == true) {
+        final connectionInfo = state['connectionInfo'] as Map<String, dynamic>?;
+        if (connectionInfo != null) {
+          debugPrint('✅ Socket established: $connectionInfo');
+          _handleSocketEstablished(connectionInfo);
+        }
+      }
+    });
+  }
+
+  /// Handle socket establishment
+  void _handleSocketEstablished(Map<String, dynamic> connectionInfo) {
+    final isGroupOwner = connectionInfo['isGroupOwner'] as bool? ?? false;
+    final groupOwnerAddress = connectionInfo['groupOwnerAddress'] as String? ?? '';
+
+    debugPrint('🔌 Socket established - Group Owner: $isGroupOwner, Address: $groupOwnerAddress');
+
+    // Update connection mode and status
+    _currentConnectionMode = P2PConnectionMode.wifiDirect;
+    updateConnectionStatus(true);
+
+    _addMessageTrace('Socket communication established (Group Owner: $isGroupOwner)');
+    notifyListeners();
+  }
+
+  /// Check for system-level WiFi Direct connections (call when returning from settings)
+  Future<void> checkForSystemConnections() async {
+    try {
+      debugPrint('🔍 Checking for system-level connections...');
+      await _wifiDirectService.checkForSystemConnection();
+    } catch (e) {
+      debugPrint('❌ Error checking system connections: $e');
+    }
+  }
+
   /// Setup enhanced monitoring and verification
   void _setupEnhancedMonitoring() {
     // Monitor hotspot status every 30 seconds
     _hotspotVerificationTimer = Timer.periodic(Duration(seconds: 30), (_) {
       _verifyHotspotStatus();
+    });
+
+    // Check for system connections every 15 seconds
+    Timer.periodic(Duration(seconds: 15), (_) {
+      checkForSystemConnections();
     });
   }
 
@@ -305,14 +402,30 @@ class P2PMainService extends P2PBaseService {
   }
 
   Future<bool> _connectViaWifiDirect(Map<String, dynamic> device) async {
-    // Implementation for WiFi Direct connection
     final deviceAddress = device['deviceAddress'] as String?;
     if (deviceAddress == null) return false;
 
     try {
-      // Add WiFi Direct connection logic here
       debugPrint('📡 Connecting via WiFi Direct to: $deviceAddress');
-      return true; // Placeholder
+
+      // Use WiFiDirectService for actual connection
+      final success = await _wifiDirectService.connectToPeer(deviceAddress);
+
+      if (success) {
+        // Update P2P service state
+        _currentConnectionMode = P2PConnectionMode.wifiDirect;
+        updateConnectionStatus(true);
+
+        // Add device to connected devices
+        final deviceName = device['deviceName'] as String? ?? 'Unknown Device';
+        addConnectedDevice(deviceAddress, deviceName);
+
+        debugPrint('✅ WiFi Direct connection successful');
+        return true;
+      } else {
+        debugPrint('❌ WiFi Direct connection failed');
+        return false;
+      }
     } catch (e) {
       debugPrint('❌ WiFi Direct connection failed: $e');
       return false;

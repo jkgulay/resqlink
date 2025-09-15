@@ -104,6 +104,8 @@ class MainActivity : FlutterActivity() {
                 "createGroup" -> createWifiDirectGroup(result)
                 "removeGroup" -> removeWifiDirectGroup(result)
                 "getGroupInfo" -> getWifiDirectGroupInfo(result)
+                "getConnectionInfo" -> getWifiDirectConnectionInfo(result)
+                "establishSocketConnection" -> establishSocketConnection(result)
                 "runDiagnostic" -> {
                     val diagnostic = wifiDirectDiagnostic.runFullDiagnostic()
                     wifiDirectDiagnostic.logDetailedStatus()
@@ -193,7 +195,17 @@ class MainActivity : FlutterActivity() {
 
     private fun enableWifi() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            // Try to open WiFi Direct settings directly
+            try {
+                val intent = Intent("android.settings.WIFI_DIRECT_SETTINGS")
+                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(intent)
+                android.util.Log.d("WiFiDirect", "Opened WiFi Direct settings directly")
+            } catch (e: Exception) {
+                // Fallback to WiFi settings if Direct settings not available
+                android.util.Log.d("WiFiDirect", "WiFi Direct settings not available, opening WiFi settings")
+                startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            }
         } else {
             @Suppress("DEPRECATION")
             wifiManager.isWifiEnabled = true
@@ -372,6 +384,54 @@ class MainActivity : FlutterActivity() {
                     )
                     result.success(info)
                 } else result.success(null)
+            }
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun getWifiDirectConnectionInfo(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            wifiP2pManager.requestConnectionInfo(ch) { info ->
+                if (info != null) {
+                    val connectionInfo = mapOf(
+                        "isConnected" to true,
+                        "isGroupOwner" to info.isGroupOwner,
+                        "groupOwnerAddress" to (info.groupOwnerAddress?.hostAddress ?: ""),
+                        "groupFormed" to info.groupFormed
+                    )
+                    result.success(connectionInfo)
+                } else {
+                    result.success(mapOf(
+                        "isConnected" to false,
+                        "isGroupOwner" to false,
+                        "groupOwnerAddress" to "",
+                        "groupFormed" to false
+                    ))
+                }
+            }
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun establishSocketConnection(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            wifiP2pManager.requestConnectionInfo(ch) { info ->
+                if (info?.groupFormed == true) {
+                    // Connection established at system level
+                    android.util.Log.d("WiFiDirect", "Group formed, establishing socket connection")
+
+                    val connectionData = mapOf(
+                        "success" to true,
+                        "isGroupOwner" to info.isGroupOwner,
+                        "groupOwnerAddress" to (info.groupOwnerAddress?.hostAddress ?: ""),
+                        "socketPort" to 8888 // Default socket port
+                    )
+
+                    // Notify Flutter about successful socket connection
+                    sendToFlutter("wifi_direct", "onSocketEstablished", connectionData)
+                    result.success(connectionData)
+                } else {
+                    android.util.Log.e("WiFiDirect", "No WiFi Direct group formed for socket connection")
+                    result.error("NO_GROUP", "No WiFi Direct group formed", null)
+                }
             }
         } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
     }

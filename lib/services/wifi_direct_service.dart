@@ -316,6 +316,19 @@ class WiFiDirectService {
         _connectionController.add(_connectionState);
         break;
 
+      case 'onSystemConnectionDetected':
+        await _handleSystemConnection(call.arguments as Map<String, dynamic>);
+        break;
+
+      case 'onSocketEstablished':
+        final args = call.arguments as Map<String, dynamic>;
+        debugPrint('🔌 Socket connection established: $args');
+        _stateController.add({
+          'socketEstablished': true,
+          'connectionInfo': args,
+        });
+        break;
+
       case 'onDeviceChanged':
         final args = call.arguments as Map<String, dynamic>;
         debugPrint('📱 Device info: ${args['deviceName']} (${args['deviceAddress']})');
@@ -340,6 +353,106 @@ class WiFiDirectService {
           'wifiDirectReady': permission == 'wifiDirectReady' ? granted : null,
         });
         break;
+    }
+  }
+
+  /// Handle system-level WiFi Direct connection
+  Future<void> _handleSystemConnection(Map<String, dynamic> data) async {
+    debugPrint('🔗 System WiFi Direct connection detected!');
+
+    final connectionInfo = data['connectionInfo'] as Map<String, dynamic>?;
+    final peers = data['peers'] as List?;
+
+    if (connectionInfo != null) {
+      final isConnected = connectionInfo['isConnected'] as bool? ?? false;
+      final groupFormed = connectionInfo['groupFormed'] as bool? ?? false;
+
+      if (isConnected && groupFormed) {
+        debugPrint('✅ Valid system connection detected');
+
+        // Update connection state
+        _connectionState = WiFiDirectConnectionState.connected;
+        _connectionController.add(_connectionState);
+
+        // Update peer list if available
+        if (peers != null) {
+          final systemPeers = peers.map((peer) =>
+            WiFiDirectPeer.fromMap(peer as Map<String, dynamic>)).toList();
+          _discoveredPeers = systemPeers;
+          _peersController.add(systemPeers);
+        }
+
+        // Attempt to establish socket communication
+        await _establishSocketCommunication();
+      }
+    }
+  }
+
+  /// Establish socket communication after system connection
+  Future<void> _establishSocketCommunication() async {
+    try {
+      debugPrint('🔌 Establishing socket communication...');
+
+      final result = await _wifiChannel.invokeMethod<Map>('establishSocketConnection');
+
+      if (result != null && result['success'] == true) {
+        debugPrint('✅ Socket communication established');
+        debugPrint('  - Is Group Owner: ${result['isGroupOwner']}');
+        debugPrint('  - Group Owner Address: ${result['groupOwnerAddress']}');
+        debugPrint('  - Socket Port: ${result['socketPort']}');
+
+        _stateController.add({
+          'socketReady': true,
+          'socketInfo': result,
+        });
+      } else {
+        debugPrint('❌ Failed to establish socket communication');
+      }
+    } catch (e) {
+      debugPrint('❌ Socket establishment error: $e');
+    }
+  }
+
+  /// Get current connection info
+  Future<Map<String, dynamic>?> getConnectionInfo() async {
+    try {
+      final result = await _wifiChannel.invokeMethod<Map>('getConnectionInfo');
+      return result?.cast<String, dynamic>();
+    } catch (e) {
+      debugPrint('❌ Failed to get connection info: $e');
+      return null;
+    }
+  }
+
+  /// Monitor for system connections (call this when returning from settings)
+  Future<void> checkForSystemConnection() async {
+    try {
+      debugPrint('🔍 Checking for system-level WiFi Direct connections...');
+
+      final connectionInfo = await getConnectionInfo();
+
+      if (connectionInfo != null) {
+        final isConnected = connectionInfo['isConnected'] as bool? ?? false;
+        final groupFormed = connectionInfo['groupFormed'] as bool? ?? false;
+
+        if (isConnected && groupFormed) {
+          debugPrint('✅ System connection found!');
+
+          // Trigger socket establishment
+          await _establishSocketCommunication();
+
+          // Refresh peer list
+          await _refreshPeerList();
+
+          // Update connection state
+          _connectionState = WiFiDirectConnectionState.connected;
+          _connectionController.add(_connectionState);
+        } else {
+          debugPrint('ℹ️ No active WiFi Direct connection found');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking system connection: $e');
     }
   }
 

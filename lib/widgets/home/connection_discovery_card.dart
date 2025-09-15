@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:path/path.dart';
 import 'package:resqlink/services/p2p/p2p_base_service.dart';
 import '../../controllers/home_controller.dart';
 import '../../utils/resqlink_theme.dart';
@@ -441,86 +442,268 @@ class ConnectionDiscoveryCard extends StatelessWidget {
   }
 
   Widget _buildDeviceItem(Map<String, dynamic> device, bool isNarrow) {
-    final signalStrength = -45 - (device.hashCode % 40);
+    // Get actual signal strength or use device signal level
+    final signalStrength = device['signalLevel'] as int? ?? (-45 - (device.hashCode % 40));
     final signalLevel = _getSignalLevel(signalStrength);
     final signalColor = _getSignalColor(signalLevel);
+
+    // Get connection type
+    final connectionType = device['connectionType'] as String? ?? 'unknown';
+    final isConnected = device['isConnected'] as bool? ?? false;
+    final isAvailable = device['isAvailable'] as bool? ?? true;
 
     return Container(
       padding: EdgeInsets.all(isNarrow ? 16 : 18),
       decoration: BoxDecoration(
-        color: Colors.grey.withValues(alpha: 0.08),
+        color: isConnected
+          ? Colors.green.withValues(alpha: 0.08)
+          : Colors.grey.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.grey.withValues(alpha: 0.25),
+          color: isConnected
+            ? Colors.green.withValues(alpha: 0.35)
+            : Colors.grey.withValues(alpha: 0.25),
           width: 1.5,
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            backgroundColor: signalColor.withValues(alpha: 0.2),
-            radius: 24,
-            child: Icon(Icons.devices, color: signalColor, size: 22),
+          Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: signalColor.withValues(alpha: 0.2),
+                radius: 24,
+                child: Icon(
+                  _getConnectionTypeIcon(connectionType),
+                  color: signalColor,
+                  size: 22,
+                ),
+              ),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            device['deviceName'] ?? 'Unknown Device',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                              color: isConnected ? Colors.green : Colors.white,
+                            ),
+                          ),
+                        ),
+                        if (isConnected)
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green.withValues(alpha: 0.4)),
+                            ),
+                            child: Text(
+                              'CONNECTED',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.green,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      device['deviceAddress'] ?? '',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _getConnectionTypeColor(connectionType).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _getConnectionTypeColor(connectionType).withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Text(
+                            _getConnectionTypeLabel(connectionType),
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: _getConnectionTypeColor(connectionType),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: signalColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: signalColor.withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _buildSignalBars(signalLevel, signalColor),
+                              SizedBox(width: 4),
+                              Text(
+                                '$signalStrength dBm',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: signalColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          if (!isConnected) ...[
+            SizedBox(height: 12),
+            Row(
               children: [
-                Text(
-                  device['deviceName'] ?? 'Unknown Device',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  device['deviceAddress'] ?? '',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade600,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                SizedBox(height: 8),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: signalColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: signalColor.withValues(alpha: 0.3),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: isAvailable ? () => controller.connectToDevice(device) : null,
+                    icon: Icon(Icons.link, size: 16),
+                    label: Text(isAvailable ? 'Connect' : 'Unavailable'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isAvailable ? Colors.blue : Colors.grey,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _buildSignalBars(signalLevel, signalColor),
-                      SizedBox(width: 6),
-                      Text(
-                        '$signalStrength dBm',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: signalColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
+                ),
+                SizedBox(width: 8),
+                IconButton(
+                  onPressed: () => _showDeviceDetails(context as BuildContext, device),
+                  icon: Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                  tooltip: 'Device Details',
                 ),
               ],
             ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  IconData _getConnectionTypeIcon(String connectionType) {
+    switch (connectionType.toLowerCase()) {
+      case 'wifi_direct':
+        return Icons.wifi;
+      case 'hotspot':
+      case 'hotspot_enhanced':
+        return Icons.router;
+      case 'mdns':
+      case 'mdns_enhanced':
+        return Icons.broadcast_on_personal;
+      default:
+        return Icons.devices;
+    }
+  }
+
+  Color _getConnectionTypeColor(String connectionType) {
+    switch (connectionType.toLowerCase()) {
+      case 'wifi_direct':
+        return Colors.blue;
+      case 'hotspot':
+      case 'hotspot_enhanced':
+        return Colors.purple;
+      case 'mdns':
+      case 'mdns_enhanced':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _getConnectionTypeLabel(String connectionType) {
+    switch (connectionType.toLowerCase()) {
+      case 'wifi_direct':
+        return 'WiFi Direct';
+      case 'hotspot':
+        return 'Hotspot';
+      case 'hotspot_enhanced':
+        return 'Hotspot+';
+      case 'mdns':
+        return 'mDNS';
+      case 'mdns_enhanced':
+        return 'mDNS+';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  void _showDeviceDetails(BuildContext context, Map<String, dynamic> device) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Device Details'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildDetailRow('Name', device['deviceName'] ?? 'Unknown'),
+            _buildDetailRow('Address', device['deviceAddress'] ?? 'Unknown'),
+            _buildDetailRow('Type', _getConnectionTypeLabel(device['connectionType'] ?? 'unknown')),
+            _buildDetailRow('Signal', '${device['signalLevel'] ?? 'Unknown'} dBm'),
+            _buildDetailRow('Status', device['isConnected'] == true ? 'Connected' : 'Available'),
+            if (device['lastSeen'] != null)
+              _buildDetailRow('Last Seen', DateTime.fromMillisecondsSinceEpoch(device['lastSeen']).toString()),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
           ),
-          SizedBox(width: 12),
-          ElevatedButton.icon(
-            onPressed: () => controller.connectToDevice(device),
-            icon: Icon(Icons.link, size: 16),
-            label: Text('Connect'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              '$label:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(fontFamily: value.contains(':') ? 'monospace' : null),
             ),
           ),
         ],
