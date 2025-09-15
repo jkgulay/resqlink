@@ -9,26 +9,71 @@ import androidx.core.content.ContextCompat
 import io.flutter.plugin.common.MethodChannel
 
 class PermissionHelper(private val activity: Activity) {
-    
+
+    companion object {
+        private const val TAG = "PermissionHelper"
+    }
+
     fun checkWifiDirectSupport(): Boolean {
-        return activity.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)
+        val hasFeature = activity.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)
+        android.util.Log.d(TAG, "WiFi Direct hardware support: $hasFeature")
+        return hasFeature
     }
 
     fun hasLocationPermission(): Boolean {
         val fineLocation = ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarseLocation = ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        return fineLocation && coarseLocation
+        val hasLocation = fineLocation && coarseLocation
+        android.util.Log.d(TAG, "Location permission - Fine: $fineLocation, Coarse: $coarseLocation, Has Both: $hasLocation")
+        return hasLocation
     }
 
     fun hasNearbyDevicesPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(activity, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
         } else {
             true // Not required on older versions
         }
+        android.util.Log.d(TAG, "Nearby devices permission (API ${Build.VERSION.SDK_INT}): $hasPermission")
+        return hasPermission
+    }
+
+    fun requestWifiDirectPermissions(): Boolean {
+        android.util.Log.d(TAG, "=== WiFi Direct Permission Check ===")
+
+        val permissionsToRequest = mutableListOf<String>()
+
+        // Always request location permissions for WiFi Direct
+        if (!hasLocationPermission()) {
+            android.util.Log.d(TAG, "Adding location permissions to request")
+            permissionsToRequest.addAll(listOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+        }
+
+        // Add nearby devices permission for Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNearbyDevicesPermission()) {
+            android.util.Log.d(TAG, "Adding NEARBY_WIFI_DEVICES permission to request (API 33+)")
+            permissionsToRequest.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            android.util.Log.d(TAG, "Requesting ${permissionsToRequest.size} permissions: ${permissionsToRequest.joinToString(", ")}")
+            ActivityCompat.requestPermissions(
+                activity,
+                permissionsToRequest.toTypedArray(),
+                MainActivity.REQUEST_CODE_WIFI
+            )
+            return false // Permissions requested, wait for callback
+        } else {
+            android.util.Log.d(TAG, "All WiFi Direct permissions already granted")
+            return true // All permissions already granted
+        }
     }
 
     fun requestLocationPermission() {
+        android.util.Log.d(TAG, "Requesting location permissions individually")
         if (!hasLocationPermission()) {
             ActivityCompat.requestPermissions(
                 activity,
@@ -42,6 +87,7 @@ class PermissionHelper(private val activity: Activity) {
     }
 
     fun requestNearbyDevicesPermission() {
+        android.util.Log.d(TAG, "Requesting nearby devices permission individually")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNearbyDevicesPermission()) {
             ActivityCompat.requestPermissions(
                 activity,
@@ -51,42 +97,29 @@ class PermissionHelper(private val activity: Activity) {
         }
     }
 
-    fun requestAllPermissions() {
-        val permissionsToRequest = mutableListOf<String>()
-        
-        if (!hasLocationPermission()) {
-            permissionsToRequest.addAll(listOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ))
-        }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNearbyDevicesPermission()) {
-            permissionsToRequest.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        }
-        
-        if (permissionsToRequest.isNotEmpty()) {
-            ActivityCompat.requestPermissions(
-                activity,
-                permissionsToRequest.toTypedArray(),
-                MainActivity.REQUEST_CODE_WIFI
-            )
-        }
+    fun hasAllWifiDirectPermissions(): Boolean {
+        val hasLocation = hasLocationPermission()
+        val hasNearbyDevices = hasNearbyDevicesPermission()
+        val hasSupport = checkWifiDirectSupport()
+
+        android.util.Log.d(TAG, "WiFi Direct readiness - Location: $hasLocation, NearbyDevices: $hasNearbyDevices, HWSupport: $hasSupport")
+        return hasLocation && hasNearbyDevices && hasSupport
     }
 
     fun checkAllPermissions(): Map<String, Boolean> {
+        android.util.Log.d(TAG, "Checking all permissions...")
         val permissions = mutableMapOf<String, Boolean>()
-        
+
         permissions["location"] = hasLocationPermission()
         permissions["wifi"] = true // WiFi permission is automatically granted
         permissions["wifiDirect"] = checkWifiDirectSupport()
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions["nearbyDevices"] = hasNearbyDevicesPermission()
         } else {
             permissions["nearbyDevices"] = true
         }
-        
+
         // Additional permissions for emergency features
         permissions["camera"] = ContextCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         permissions["microphone"] = ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -95,7 +128,8 @@ class PermissionHelper(private val activity: Activity) {
         } else {
             ContextCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         }
-        
+
+        android.util.Log.d(TAG, "Permission status: $permissions")
         return permissions
     }
 
@@ -104,33 +138,62 @@ class PermissionHelper(private val activity: Activity) {
         permissions: Array<out String>,
         grantResults: IntArray
     ) {
+        android.util.Log.d(TAG, "=== Permission Results ===")
+        android.util.Log.d(TAG, "Request code: $requestCode")
+        android.util.Log.d(TAG, "Permissions: ${permissions.joinToString(", ")}")
+        android.util.Log.d(TAG, "Grant results: ${grantResults.joinToString(", ")}")
+
         when (requestCode) {
             MainActivity.REQUEST_CODE_LOCATION -> {
-                val locationGranted = grantResults.isNotEmpty() && 
+                val locationGranted = grantResults.isNotEmpty() &&
                     grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+                android.util.Log.d(TAG, "Location permission result: $locationGranted")
                 sendPermissionResult("location", locationGranted)
             }
             MainActivity.REQUEST_CODE_NEARBY_DEVICES -> {
-                val nearbyDevicesGranted = grantResults.isNotEmpty() && 
+                val nearbyDevicesGranted = grantResults.isNotEmpty() &&
                     grantResults[0] == PackageManager.PERMISSION_GRANTED
+                android.util.Log.d(TAG, "Nearby devices permission result: $nearbyDevicesGranted")
                 sendPermissionResult("nearbyDevices", nearbyDevicesGranted)
             }
             MainActivity.REQUEST_CODE_WIFI -> {
-                // Handle multiple permissions
+                android.util.Log.d(TAG, "Processing WiFi Direct permissions batch result...")
+
+                // Track results for each permission type
+                var locationPermissionsGranted = true
+                var nearbyDevicesGranted = true
+
                 for (i in permissions.indices) {
                     val permission = permissions[i]
-                    val granted = grantResults[i] == PackageManager.PERMISSION_GRANTED
-                    
+                    val granted = grantResults.getOrNull(i) == PackageManager.PERMISSION_GRANTED
+
+                    android.util.Log.d(TAG, "Permission $permission: $granted")
+
                     when (permission) {
                         Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.ACCESS_COARSE_LOCATION -> {
-                            sendPermissionResult("location", hasLocationPermission())
+                            if (!granted) locationPermissionsGranted = false
                         }
                         Manifest.permission.NEARBY_WIFI_DEVICES -> {
-                            sendPermissionResult("nearbyDevices", granted)
+                            nearbyDevicesGranted = granted
                         }
                     }
                 }
+
+                // Re-check actual permission status (in case of partial grants)
+                val finalLocationStatus = hasLocationPermission()
+                val finalNearbyDevicesStatus = hasNearbyDevicesPermission()
+
+                android.util.Log.d(TAG, "Final status - Location: $finalLocationStatus, NearbyDevices: $finalNearbyDevicesStatus")
+
+                // Send individual results
+                sendPermissionResult("location", finalLocationStatus)
+                sendPermissionResult("nearbyDevices", finalNearbyDevicesStatus)
+
+                // Send overall WiFi Direct readiness
+                val wifiDirectReady = hasAllWifiDirectPermissions()
+                android.util.Log.d(TAG, "WiFi Direct ready: $wifiDirectReady")
+                sendPermissionResult("wifiDirectReady", wifiDirectReady)
             }
         }
     }

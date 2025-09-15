@@ -59,47 +59,63 @@ class WiFiDirectService {
     try {
       debugPrint('🔐 Checking WiFi Direct permissions...');
 
-      final permissions = await _permissionChannel.invokeMethod<Map>('checkAllPermissions');
-      if (permissions == null) {
-        debugPrint('❌ Failed to check permissions');
-        return false;
+      // First check if all permissions are already granted
+      final hasAllPermissions = await _permissionChannel.invokeMethod<bool>('hasAllWifiDirectPermissions') ?? false;
+
+      if (hasAllPermissions) {
+        debugPrint('✅ All WiFi Direct permissions already granted');
+        return true;
       }
 
-      final locationGranted = permissions['location'] == true;
-      final nearbyDevicesGranted = permissions['nearbyDevices'] == true;
-      final wifiDirectSupported = permissions['wifiDirect'] == true;
+      debugPrint('📱 Requesting WiFi Direct permissions...');
 
-      debugPrint('📊 Permission Status:');
-      debugPrint('  - Location: $locationGranted');
-      debugPrint('  - Nearby Devices: $nearbyDevicesGranted');
-      debugPrint('  - WiFi Direct Support: $wifiDirectSupported');
+      // Request all required permissions at once
+      final permissionsGranted = await _permissionChannel.invokeMethod<bool>('requestWifiDirectPermissions') ?? false;
 
-      if (!wifiDirectSupported) {
-        debugPrint('❌ WiFi Direct not supported');
-        return false;
+      if (permissionsGranted) {
+        debugPrint('✅ All WiFi Direct permissions granted immediately');
+        return true;
       }
 
-      if (!locationGranted) {
-        debugPrint('📱 Requesting location permission...');
-        await _permissionChannel.invokeMethod('requestLocationPermission');
-        // Wait for result via callback
-        await Future.delayed(Duration(seconds: 2));
+      debugPrint('⏳ Waiting for permission dialog results...');
+
+      // Wait for permission results through callbacks
+      final completer = Completer<bool>();
+      Timer? timeoutTimer;
+
+      // Set up timeout
+      timeoutTimer = Timer(Duration(seconds: 10), () {
+        if (!completer.isCompleted) {
+          debugPrint('⏰ Permission request timed out');
+          completer.complete(false);
+        }
+      });
+
+      // Monitor for permission result callback
+      late StreamSubscription subscription;
+      subscription = _stateController.stream.listen((data) async {
+        if (data['wifiDirectReady'] == true) {
+          timeoutTimer?.cancel();
+          subscription.cancel();
+          if (!completer.isCompleted) {
+            debugPrint('✅ WiFi Direct permissions confirmed via callback');
+            completer.complete(true);
+          }
+        }
+      });
+
+      final result = await completer.future;
+
+      // Final verification
+      if (result) {
+        final verified = await _permissionChannel.invokeMethod<bool>('hasAllWifiDirectPermissions') ?? false;
+        debugPrint('🔍 Final verification: $verified');
+        return verified;
       }
 
-      if (!nearbyDevicesGranted) {
-        debugPrint('📱 Requesting nearby devices permission...');
-        await _permissionChannel.invokeMethod('requestNearbyDevicesPermission');
-        // Wait for result via callback
-        await Future.delayed(Duration(seconds: 2));
-      }
+      debugPrint('❌ WiFi Direct permissions not granted');
+      return false;
 
-      // Re-check permissions after requests
-      final finalPermissions = await _permissionChannel.invokeMethod<Map>('checkAllPermissions');
-      final allGranted = (finalPermissions?['location'] == true) &&
-                        (finalPermissions?['nearbyDevices'] == true);
-
-      debugPrint('✅ Final permission status: $allGranted');
-      return allGranted;
     } catch (e) {
       debugPrint('❌ Permission check failed: $e');
       return false;
@@ -316,6 +332,13 @@ class WiFiDirectService {
         final permission = args['permission'] as String?;
         final granted = args['granted'] as bool? ?? false;
         debugPrint('📋 Permission result: $permission = $granted');
+
+        // Forward to state controller for listeners
+        _stateController.add({
+          'permission': permission,
+          'granted': granted,
+          'wifiDirectReady': permission == 'wifiDirectReady' ? granted : null,
+        });
         break;
     }
   }
@@ -323,6 +346,34 @@ class WiFiDirectService {
   List<WiFiDirectPeer> get discoveredPeers => List.from(_discoveredPeers);
   bool get isDiscovering => _isDiscovering;
   WiFiDirectConnectionState get connectionState => _connectionState;
+
+  /// Run comprehensive WiFi Direct diagnostic
+  Future<Map<String, dynamic>?> runDiagnostic() async {
+    if (!_isInitialized) {
+      debugPrint('❌ WiFiDirectService not initialized for diagnostic');
+      return null;
+    }
+
+    try {
+      debugPrint('🔍 Running WiFi Direct diagnostic...');
+      final diagnostic = await _wifiChannel.invokeMethod<Map>('runDiagnostic');
+      return diagnostic?.cast<String, dynamic>();
+    } catch (e) {
+      debugPrint('❌ Diagnostic failed: $e');
+      return null;
+    }
+  }
+
+  /// Get service status summary
+  Map<String, dynamic> getServiceStatus() {
+    return {
+      'initialized': _isInitialized,
+      'discovering': _isDiscovering,
+      'connectionState': _connectionState.name,
+      'peersFound': _discoveredPeers.length,
+      'peersDetails': _discoveredPeers.map((p) => p.toMap()).toList(),
+    };
+  }
 
   void dispose() {
     _peersController.close();
