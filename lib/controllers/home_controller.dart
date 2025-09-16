@@ -65,10 +65,20 @@ class HomeController extends ChangeNotifier {
   }
 
   void _onDevicesDiscovered(List<Map<String, dynamic>> devices) {
-    _discoveredDevices = devices;
-    if (_isScanning && devices.isNotEmpty) {
+    // Convert devices map to list format that UI expects
+    final deviceList = p2pService.discoveredDevices.values.toList();
+    _discoveredDevices = deviceList;
+
+    // Stop scanning if we found devices
+    if (_isScanning && deviceList.isNotEmpty) {
       _isScanning = false;
     }
+
+    debugPrint('📱 Devices discovered: ${deviceList.length} devices');
+    for (final device in deviceList) {
+      debugPrint('  - ${device['deviceName']} (${device['connectionType']}) - Signal: ${device['signalLevel']} dBm');
+    }
+
     notifyListeners();
   }
 
@@ -95,14 +105,29 @@ class HomeController extends ChangeNotifier {
       // Start discovery with all methods
       await p2pService.discoverDevices(force: true);
 
+      // Force update devices discovered callback after a short delay
+      Timer(Duration(seconds: 2), () {
+        final deviceList = p2pService.discoveredDevices.values.toList();
+        _discoveredDevices = deviceList;
+        debugPrint("🔄 Force updating discovered devices: ${deviceList.length} devices");
+        notifyListeners();
+      });
+
       // Auto-stop after 20 seconds with results check
       Timer(Duration(seconds: 20), () {
         if (_isScanning) {
           _isScanning = false;
           debugPrint("⏰ Scan timeout reached");
 
+          // Final device update
+          final deviceList = p2pService.discoveredDevices.values.toList();
+          _discoveredDevices = deviceList;
+
           if (_discoveredDevices.isEmpty) {
             debugPrint("📭 No devices found during scan");
+            debugPrint("🔍 Available WiFi Direct peers: ${p2pService.wifiDirectService.discoveredPeers.length}");
+            debugPrint("🔍 ResQLink devices: ${p2pService.discoveredResQLinkDevices.length}");
+            debugPrint("🔍 Available hotspots: ${p2pService.getAvailableHotspots().length}");
           } else {
             debugPrint(
               "✅ Scan completed - found ${_discoveredDevices.length} devices",

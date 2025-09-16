@@ -113,6 +113,7 @@ class P2PMainService extends P2PBaseService {
   ConnectionFallbackManager get connectionFallbackManager =>
       _connectionFallbackManager;
   HotspotManager get hotspotManager => _hotspotManager;
+  WiFiDirectService get wifiDirectService => _wifiDirectService;
   P2PRole _parseRole(String role) {
     switch (role.toLowerCase()) {
       case 'host':
@@ -156,16 +157,22 @@ class P2PMainService extends P2PBaseService {
           isOnline: true,
           createdAt: DateTime.now(),
           lastSeen: DateTime.now(),
-          isConnected: false,
+          isConnected: peer.status == WiFiDirectPeerStatus.connected,
           discoveryMethod: 'wifi_direct',
           deviceAddress: peer.deviceAddress,
         );
 
         // Add to discovered devices if not already present
-        if (!discoveredResQLinkDevices.any((d) => d.deviceId == deviceModel.deviceId)) {
+        final existingIndex = discoveredResQLinkDevices.indexWhere((d) => d.deviceId == deviceModel.deviceId);
+        if (existingIndex >= 0) {
+          discoveredResQLinkDevices[existingIndex] = deviceModel;
+        } else {
           discoveredResQLinkDevices.add(deviceModel);
         }
       }
+
+      // Trigger discovery callback
+      _triggerDevicesDiscoveredCallback();
       notifyListeners();
     });
 
@@ -594,20 +601,87 @@ class P2PMainService extends P2PBaseService {
   Map<String, Map<String, dynamic>> get discoveredDevices {
     final deviceMap = <String, Map<String, dynamic>>{};
 
-    for (final device in discoveredResQLinkDevices) {
-      deviceMap[device.deviceId] = {
-        'deviceId': device.deviceId,
-        'deviceName': device.userName,
-        'deviceAddress': device.deviceAddress ?? device.deviceId,
-        'connectionType': device.discoveryMethod ?? 'unknown',
-        'isAvailable': !device.isConnected,
-        'signalLevel': -50, // Default signal level
-        'lastSeen': device.lastSeen.millisecondsSinceEpoch,
-        'isConnected': device.isConnected,
+    // Add WiFi Direct peers with actual signal strength
+    for (final peer in _wifiDirectService.discoveredPeers) {
+      deviceMap[peer.deviceAddress] = {
+        'deviceId': peer.deviceAddress,
+        'deviceName': peer.deviceName,
+        'deviceAddress': peer.deviceAddress,
+        'connectionType': 'wifi_direct',
+        'isAvailable': peer.status == WiFiDirectPeerStatus.available,
+        'signalLevel': peer.signalLevel ?? -50,
+        'lastSeen': DateTime.now().millisecondsSinceEpoch,
+        'isConnected': peer.status == WiFiDirectPeerStatus.connected,
+        'isEmergency': peer.deviceName.toLowerCase().contains('resqlink') ||
+                      peer.deviceName.toLowerCase().contains('emergency'),
       };
     }
 
+    // Add ResQLink devices from discovery service
+    for (final device in discoveredResQLinkDevices) {
+      // Don't overwrite WiFi Direct devices that have better info
+      if (!deviceMap.containsKey(device.deviceId)) {
+        deviceMap[device.deviceId] = {
+          'deviceId': device.deviceId,
+          'deviceName': device.userName,
+          'deviceAddress': device.deviceAddress ?? device.deviceId,
+          'connectionType': device.discoveryMethod ?? 'unknown',
+          'isAvailable': !device.isConnected,
+          'signalLevel': _calculateSignalStrength(device),
+          'lastSeen': device.lastSeen.millisecondsSinceEpoch,
+          'isConnected': device.isConnected,
+          'isEmergency': device.userName.toLowerCase().contains('emergency'),
+        };
+      }
+    }
+
+    // Add hotspot networks as discoverable devices
+    final networks = getAvailableHotspots();
+    for (final network in networks) {
+      final deviceId = network['ssid'].toString().replaceFirst(P2PBaseService.resqlinkPrefix, '');
+      if (deviceId.isNotEmpty && !deviceMap.containsKey(deviceId)) {
+        deviceMap[deviceId] = {
+          'deviceId': deviceId,
+          'deviceName': network['ssid'],
+          'deviceAddress': network['bssid'] ?? deviceId,
+          'connectionType': 'hotspot',
+          'isAvailable': true,
+          'signalLevel': network['signalLevel'] ?? -70,
+          'lastSeen': DateTime.now().millisecondsSinceEpoch,
+          'isConnected': false,
+          'isEmergency': network['ssid'].toString().toLowerCase().contains('emergency'),
+        };
+      }
+    }
+
     return deviceMap;
+  }
+
+  /// Calculate signal strength for non-WiFi Direct devices
+  int _calculateSignalStrength(DeviceModel device) {
+    // Base signal strength on discovery method and recency
+    final timeDiff = DateTime.now().difference(device.lastSeen).inMinutes;
+
+    switch (device.discoveryMethod) {
+      case 'mdns':
+      case 'mdns_enhanced':
+        return -45 - (timeDiff * 2); // Strong for local network
+      case 'broadcast':
+        return -55 - (timeDiff * 3); // Medium for broadcast
+      case 'hotspot':
+      case 'hotspot_enhanced':
+        return -60 - (timeDiff * 2); // Medium for hotspot
+      default:
+        return -70 - (timeDiff * 5); // Weak for unknown
+    }
+  }
+
+  /// Trigger devices discovered callback
+  void _triggerDevicesDiscoveredCallback() {
+    if (onDevicesDiscovered != null) {
+      final allDevices = discoveredDevices.values.toList();
+      onDevicesDiscovered!(allDevices);
+    }
   }
 
   List<Map<String, dynamic>> getAvailableHotspots() {
@@ -687,7 +761,12 @@ class P2PMainService extends P2PBaseService {
   @override
   Future<void> discoverDevices({bool force = false}) async {
     try {
-      debugPrint('🔍 Starting device discovery...');
+      debugPrint('🔍 Starting enhanced device discovery...');
+
+      // Clear old devices if forcing discovery
+      if (force) {
+        discoveredResQLinkDevices.clear();
+      }
 
       // Use WiFi Direct discovery
       await _wifiDirectService.startDiscovery();
@@ -695,7 +774,13 @@ class P2PMainService extends P2PBaseService {
       // Also use existing discovery service
       await _discoveryService.discoverDevices(force: force);
 
-      debugPrint('✅ Device discovery completed');
+      // Scan for available networks/hotspots
+      await _networkService.scanForResQLinkNetworks();
+
+      // Trigger callback with all discovered devices
+      _triggerDevicesDiscoveredCallback();
+
+      debugPrint('✅ Enhanced device discovery completed - found ${discoveredDevices.length} devices');
     } catch (e) {
       debugPrint('❌ Device discovery failed: $e');
     }

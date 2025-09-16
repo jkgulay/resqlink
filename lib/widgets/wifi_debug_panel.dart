@@ -215,7 +215,7 @@ class _WiFiDebugPanelState extends State<WiFiDebugPanel> {
                           children: [
                             Text('Address: ${peer.deviceAddress}'),
                             Text('Type: ${peer.primaryDeviceType}'),
-                            Text('Status: ${_getStatusText(peer.status)}'),
+                            Text('Status: ${_getStatusText(peer.status as int)}'),
                           ],
                         ),
                         trailing: ElevatedButton(

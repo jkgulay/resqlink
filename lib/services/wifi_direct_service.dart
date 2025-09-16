@@ -26,6 +26,9 @@ class WiFiDirectService {
   List<WiFiDirectPeer> _discoveredPeers = [];
   WiFiDirectConnectionState _connectionState = WiFiDirectConnectionState.disconnected;
 
+  // Getters for discovered peers
+  List<WiFiDirectPeer> get discoveredPeers => List.from(_discoveredPeers);
+
   Future<bool> initialize() async {
     if (_isInitialized) return true;
 
@@ -291,11 +294,9 @@ class WiFiDirectService {
       case 'onStateChanged':
         final args = call.arguments as Map<String, dynamic>;
         _stateController.add(args);
-        break;
 
       case 'onPeersChanged':
         await _refreshPeerList();
-        break;
 
       case 'onPeersAvailable':
         final args = call.arguments as Map<String, dynamic>;
@@ -305,7 +306,6 @@ class WiFiDirectService {
           _discoveredPeers = peers;
           _peersController.add(peers);
         }
-        break;
 
       case 'onConnectionChanged':
         final args = call.arguments as Map<String, dynamic>;
@@ -314,11 +314,9 @@ class WiFiDirectService {
           ? WiFiDirectConnectionState.connected
           : WiFiDirectConnectionState.disconnected;
         _connectionController.add(_connectionState);
-        break;
 
       case 'onSystemConnectionDetected':
         await _handleSystemConnection(call.arguments as Map<String, dynamic>);
-        break;
 
       case 'onSocketEstablished':
         final args = call.arguments as Map<String, dynamic>;
@@ -327,12 +325,10 @@ class WiFiDirectService {
           'socketEstablished': true,
           'connectionInfo': args,
         });
-        break;
 
       case 'onDeviceChanged':
         final args = call.arguments as Map<String, dynamic>;
         debugPrint('📱 Device info: ${args['deviceName']} (${args['deviceAddress']})');
-        break;
     }
   }
 
@@ -352,7 +348,6 @@ class WiFiDirectService {
           'granted': granted,
           'wifiDirectReady': permission == 'wifiDirectReady' ? granted : null,
         });
-        break;
     }
   }
 
@@ -456,7 +451,6 @@ class WiFiDirectService {
     }
   }
 
-  List<WiFiDirectPeer> get discoveredPeers => List.from(_discoveredPeers);
   bool get isDiscovering => _isDiscovering;
   WiFiDirectConnectionState get connectionState => _connectionState;
 
@@ -500,17 +494,19 @@ class WiFiDirectPeer {
   final String deviceAddress;
   final String primaryDeviceType;
   final String secondaryDeviceType;
-  final int status;
+  final int _statusInt;
   final bool supportsWps;
+  final int? signalLevel;
 
   WiFiDirectPeer({
     required this.deviceName,
     required this.deviceAddress,
     required this.primaryDeviceType,
     required this.secondaryDeviceType,
-    required this.status,
+    required int status,
     required this.supportsWps,
-  });
+    this.signalLevel,
+  }) : _statusInt = status;
 
   factory WiFiDirectPeer.fromMap(Map<String, dynamic> map) {
     return WiFiDirectPeer(
@@ -520,7 +516,27 @@ class WiFiDirectPeer {
       secondaryDeviceType: map['secondaryDeviceType'] as String? ?? 'Unknown Secondary Type',
       status: map['status'] as int? ?? 0,
       supportsWps: map['supportsWps'] as bool? ?? false,
+      signalLevel: map['signalLevel'] as int?,
     );
+  }
+
+  WiFiDirectPeerStatus get status => _intToStatus(_statusInt);
+
+  WiFiDirectPeerStatus _intToStatus(int statusInt) {
+    switch (statusInt) {
+      case 0:
+        return WiFiDirectPeerStatus.connected;
+      case 1:
+        return WiFiDirectPeerStatus.invited;
+      case 2:
+        return WiFiDirectPeerStatus.failed;
+      case 3:
+        return WiFiDirectPeerStatus.available;
+      case 4:
+        return WiFiDirectPeerStatus.unavailable;
+      default:
+        return WiFiDirectPeerStatus.unknown;
+    }
   }
 
   Map<String, dynamic> toMap() {
@@ -529,14 +545,15 @@ class WiFiDirectPeer {
       'deviceAddress': deviceAddress,
       'primaryDeviceType': primaryDeviceType,
       'secondaryDeviceType': secondaryDeviceType,
-      'status': status,
+      'status': _statusInt,
       'supportsWps': supportsWps,
+      'signalLevel': signalLevel,
     };
   }
 
   @override
   String toString() {
-    return 'WiFiDirectPeer{name: $deviceName, address: $deviceAddress, status: $status}';
+    return 'WiFiDirectPeer{name: $deviceName, address: $deviceAddress, status: ${status.name}}';
   }
 }
 
@@ -545,4 +562,13 @@ enum WiFiDirectConnectionState {
   connecting,
   connected,
   error,
+}
+
+enum WiFiDirectPeerStatus {
+  connected,
+  invited,
+  failed,
+  available,
+  unavailable,
+  unknown,
 }
