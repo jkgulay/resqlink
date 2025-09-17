@@ -1,5 +1,4 @@
 package com.example.resqlink
-
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -10,6 +9,8 @@ import android.os.Vibrator
 import android.provider.Settings
 import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pManager
+import android.net.wifi.p2p.WifiP2pDevice 
+import android.net.wifi.p2p.WifiP2pConfig  
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
