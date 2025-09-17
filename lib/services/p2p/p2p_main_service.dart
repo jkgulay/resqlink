@@ -127,7 +127,6 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  /// Setup WiFi Direct state synchronization
   void _setupWiFiDirectSync() {
     // Listen for WiFi Direct connection changes
     _wifiDirectService.connectionStream.listen((connectionState) {
@@ -136,53 +135,47 @@ class P2PMainService extends P2PBaseService {
       if (connectionState == WiFiDirectConnectionState.connected) {
         _currentConnectionMode = P2PConnectionMode.wifiDirect;
         updateConnectionStatus(true);
+
+        // CRITICAL FIX: Request peer list immediately after connection
+        _refreshConnectedPeers();
       } else if (connectionState == WiFiDirectConnectionState.disconnected) {
         if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
           _currentConnectionMode = P2PConnectionMode.none;
           updateConnectionStatus(false);
+
+          // Clear WiFi Direct connected devices
+          _clearWiFiDirectDevices();
         }
       }
       notifyListeners();
     });
 
-    // Listen for peer discoveries
+    // Listen for peer discoveries - ENHANCED
     _wifiDirectService.peersStream.listen((peers) {
       debugPrint('👥 WiFi Direct peers updated: ${peers.length} peers found');
 
-      // Convert WiFi Direct peers to device models
-      for (final peer in peers) {
-        final deviceModel = DeviceModel(
-          id: peer.deviceAddress,
-          deviceId: peer.deviceAddress,
-          userName: peer.deviceName,
-          isHost: false,
-          isOnline: true,
-          createdAt: DateTime.now(),
-          lastSeen: DateTime.now(),
-          isConnected: peer.status == WiFiDirectPeerStatus.connected,
-          discoveryMethod: 'wifi_direct',
-          deviceAddress: peer.deviceAddress,
-        );
+      // Convert WiFi Direct peers to device models and update discovery
+      _updateDiscoveredPeersFromWiFiDirect(peers);
 
-        // Add to discovered devices if not already present
-        final existingIndex = discoveredResQLinkDevices.indexWhere(
-          (d) => d.deviceId == deviceModel.deviceId,
-        );
-        if (existingIndex >= 0) {
-          discoveredResQLinkDevices[existingIndex] = deviceModel;
-        } else {
-          discoveredResQLinkDevices.add(deviceModel);
-        }
-      }
+      // Check for newly connected peers
+      _checkForNewConnectedPeers(peers);
 
       // Trigger discovery callback
       _triggerDevicesDiscoveredCallback();
       notifyListeners();
     });
 
-    // Listen for state changes (socket establishment, etc.)
+    // Listen for state changes (socket establishment, etc.) - ENHANCED
     _wifiDirectService.stateStream.listen((state) {
       debugPrint('📡 WiFi Direct state update: $state');
+
+      // Handle connection changes
+      if (state['connectionChanged'] == true) {
+        final connectionInfo = state['connectionInfo'] as Map<String, dynamic>?;
+        if (connectionInfo != null) {
+          _handleWiFiDirectConnectionChange(connectionInfo);
+        }
+      }
 
       if (state['socketReady'] == true) {
         debugPrint('🔌 WiFi Direct socket communication ready');
@@ -214,6 +207,168 @@ class P2PMainService extends P2PBaseService {
         }
       }
     });
+  }
+
+  void _updateDiscoveredPeersFromWiFiDirect(List<WiFiDirectPeer> peers) {
+    for (final peer in peers) {
+      final deviceModel = DeviceModel(
+        id: peer.deviceAddress,
+        deviceId: peer.deviceAddress,
+        userName: peer.deviceName,
+        isHost: false,
+        isOnline: true,
+        createdAt: DateTime.now(),
+        lastSeen: DateTime.now(),
+        isConnected: peer.status == WiFiDirectPeerStatus.connected,
+        discoveryMethod: 'wifi_direct',
+        deviceAddress: peer.deviceAddress,
+      );
+
+      // Update or add to discovered devices
+      final existingIndex = discoveredResQLinkDevices.indexWhere(
+        (d) => d.deviceId == deviceModel.deviceId,
+      );
+
+      if (existingIndex >= 0) {
+        discoveredResQLinkDevices[existingIndex] = deviceModel;
+      } else {
+        discoveredResQLinkDevices.add(deviceModel);
+      }
+
+      // CRITICAL FIX: Add connected peers to connectedDevices
+      if (peer.status == WiFiDirectPeerStatus.connected) {
+        debugPrint('➕ Adding connected WiFi Direct peer: ${peer.deviceName}');
+        addConnectedDevice(peer.deviceAddress, peer.deviceName);
+      }
+    }
+  }
+
+  /// NEW METHOD: Check for newly connected peers
+  void _checkForNewConnectedPeers(List<WiFiDirectPeer> peers) {
+    for (final peer in peers) {
+      if (peer.status == WiFiDirectPeerStatus.connected) {
+        // Check if this peer is already in connected devices
+        if (!connectedDevices.containsKey(peer.deviceAddress)) {
+          debugPrint(
+            '🆕 New WiFi Direct connection detected: ${peer.deviceName}',
+          );
+          addConnectedDevice(peer.deviceAddress, peer.deviceName);
+
+          // Trigger connection callback
+          onDeviceConnected?.call(peer.deviceAddress, peer.deviceName);
+        }
+      }
+    }
+  }
+
+  /// NEW METHOD: Handle WiFi Direct connection changes
+  void _handleWiFiDirectConnectionChange(Map<String, dynamic> connectionInfo) {
+    final isConnected = connectionInfo['isConnected'] as bool? ?? false;
+    final groupFormed = connectionInfo['groupFormed'] as bool? ?? false;
+
+    debugPrint(
+      '🔄 WiFi Direct connection change: connected=$isConnected, groupFormed=$groupFormed',
+    );
+
+    if (isConnected && groupFormed) {
+      _currentConnectionMode = P2PConnectionMode.wifiDirect;
+      updateConnectionStatus(true);
+
+      // Refresh peer list to get connected devices
+      _refreshConnectedPeers();
+    } else {
+      if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
+        _currentConnectionMode = P2PConnectionMode.none;
+        updateConnectionStatus(false);
+        _clearWiFiDirectDevices();
+      }
+    }
+
+    notifyListeners();
+  }
+
+  /// NEW METHOD: Refresh connected peers from WiFi Direct
+  Future<void> _refreshConnectedPeers() async {
+    try {
+      debugPrint('🔄 Refreshing connected WiFi Direct peers...');
+
+      // Get current peer list
+      final peers = await _wifiDirectService.getPeerList();
+
+      // Process connected peers
+      for (final peerData in peers) {
+        final deviceAddress = peerData['deviceAddress'] as String? ?? '';
+        final deviceName =
+            peerData['deviceName'] as String? ?? 'Unknown Device';
+        final status = peerData['status'] as String? ?? '';
+
+        if (status == 'connected' && deviceAddress.isNotEmpty) {
+          debugPrint('✅ Found connected peer: $deviceName ($deviceAddress)');
+
+          // Add to connected devices if not already there
+          if (!connectedDevices.containsKey(deviceAddress)) {
+            addConnectedDevice(deviceAddress, deviceName);
+          }
+
+          // Update discovered devices with connected status
+          final existingIndex = discoveredResQLinkDevices.indexWhere(
+            (d) => d.deviceId == deviceAddress,
+          );
+
+          if (existingIndex >= 0) {
+            discoveredResQLinkDevices[existingIndex] =
+                discoveredResQLinkDevices[existingIndex].copyWith(
+                  isConnected: true,
+                  lastSeen: DateTime.now(),
+                );
+          } else {
+            // Add as new discovered device
+            final deviceModel = DeviceModel(
+              id: deviceAddress,
+              deviceId: deviceAddress,
+              userName: deviceName,
+              isHost: false,
+              isOnline: true,
+              createdAt: DateTime.now(),
+              lastSeen: DateTime.now(),
+              isConnected: true,
+              discoveryMethod: 'wifi_direct',
+              deviceAddress: deviceAddress,
+            );
+            discoveredResQLinkDevices.add(deviceModel);
+          }
+        }
+      }
+
+      // Trigger callbacks
+      _triggerDevicesDiscoveredCallback();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ Error refreshing connected peers: $e');
+    }
+  }
+
+  /// NEW METHOD: Clear WiFi Direct devices on disconnection
+  void _clearWiFiDirectDevices() {
+    // Remove WiFi Direct devices from connected devices
+    final wifiDirectDevices = connectedDevices.entries
+        .where((entry) => entry.value.discoveryMethod == 'wifi_direct')
+        .map((entry) => entry.key)
+        .toList();
+
+    for (final deviceId in wifiDirectDevices) {
+      removeConnectedDevice(deviceId);
+    }
+
+    // Update discovered devices connection status
+    for (int i = 0; i < discoveredResQLinkDevices.length; i++) {
+      final device = discoveredResQLinkDevices[i];
+      if (device.discoveryMethod == 'wifi_direct') {
+        discoveredResQLinkDevices[i] = device.copyWith(isConnected: false);
+      }
+    }
+
+    debugPrint('🧹 Cleared WiFi Direct devices from connected list');
   }
 
   /// Handle socket establishment
@@ -307,47 +462,15 @@ class P2PMainService extends P2PBaseService {
       final connectionInfo = await _wifiDirectService.getConnectionInfo();
 
       if (connectionInfo != null && connectionInfo['groupFormed'] == true) {
-        debugPrint('✅ Existing connection found!');
+        debugPrint('✅ Existing WiFi Direct connection found!');
         debugPrint('  - Group Owner: ${connectionInfo['isGroupOwner']}');
         debugPrint('  - Group Address: ${connectionInfo['groupOwnerAddress']}');
 
         _currentConnectionMode = P2PConnectionMode.wifiDirect;
         updateConnectionStatus(true);
 
-        // Request peer list to update connected devices
-        final peers = await _wifiDirectService.getPeerList();
-
-        // Update discovered devices from peer list
-        for (final peer in peers) {
-          final deviceModel = DeviceModel(
-            id: peer['deviceAddress'] ?? '',
-            deviceId: peer['deviceAddress'] ?? '',
-            userName: peer['deviceName'] ?? 'Unknown Device',
-            isHost: false,
-            isOnline: true,
-            createdAt: DateTime.now(),
-            lastSeen: DateTime.now(),
-            isConnected: peer['status'] == 'connected',
-            discoveryMethod: 'wifi_direct',
-            deviceAddress: peer['deviceAddress'],
-          );
-
-          // Add to discovered devices if not already present
-          final existingIndex = discoveredResQLinkDevices.indexWhere(
-            (d) => d.deviceId == deviceModel.deviceId,
-          );
-
-          if (existingIndex >= 0) {
-            discoveredResQLinkDevices[existingIndex] = deviceModel;
-          } else {
-            discoveredResQLinkDevices.add(deviceModel);
-          }
-
-          // If connected, add to connected devices
-          if (deviceModel.isConnected) {
-            addConnectedDevice(deviceModel.deviceId, deviceModel.userName);
-          }
-        }
+        // CRITICAL FIX: Get and process peer list
+        await _refreshConnectedPeers();
 
         // Establish socket if needed
         final socketEstablished = connectionInfo['socketEstablished'] ?? false;
@@ -767,26 +890,29 @@ class P2PMainService extends P2PBaseService {
   Map<String, Map<String, dynamic>> get discoveredDevices {
     final deviceMap = <String, Map<String, dynamic>>{};
 
-    // Add WiFi Direct peers with actual signal strength
+    // Add WiFi Direct peers with actual signal strength and connection status
     for (final peer in _wifiDirectService.discoveredPeers) {
+      final isConnected = peer.status == WiFiDirectPeerStatus.connected;
+
       deviceMap[peer.deviceAddress] = {
         'deviceId': peer.deviceAddress,
         'deviceName': peer.deviceName,
         'deviceAddress': peer.deviceAddress,
         'connectionType': 'wifi_direct',
-        'isAvailable': peer.status == WiFiDirectPeerStatus.available,
+        'isAvailable':
+            peer.status == WiFiDirectPeerStatus.available || isConnected,
         'signalLevel': peer.signalLevel ?? -50,
         'lastSeen': DateTime.now().millisecondsSinceEpoch,
-        'isConnected': peer.status == WiFiDirectPeerStatus.connected,
+        'isConnected': isConnected,
+        'status': peer.status.name, // Add WiFi Direct status
         'isEmergency':
             peer.deviceName.toLowerCase().contains('resqlink') ||
             peer.deviceName.toLowerCase().contains('emergency'),
       };
     }
 
-    // Add ResQLink devices from discovery service
+    // Add ResQLink devices from discovery service (don't overwrite WiFi Direct devices)
     for (final device in discoveredResQLinkDevices) {
-      // Don't overwrite WiFi Direct devices that have better info
       if (!deviceMap.containsKey(device.deviceId)) {
         deviceMap[device.deviceId] = {
           'deviceId': device.deviceId,
@@ -798,6 +924,14 @@ class P2PMainService extends P2PBaseService {
           'lastSeen': device.lastSeen.millisecondsSinceEpoch,
           'isConnected': device.isConnected,
           'isEmergency': device.userName.toLowerCase().contains('emergency'),
+        };
+      } else {
+        // Merge information if device exists in both lists
+        final existing = deviceMap[device.deviceId]!;
+        deviceMap[device.deviceId] = {
+          ...existing,
+          'isConnected': device.isConnected || existing['isConnected'],
+          'lastSeen': device.lastSeen.millisecondsSinceEpoch,
         };
       }
     }
