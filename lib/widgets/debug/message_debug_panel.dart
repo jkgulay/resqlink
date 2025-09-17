@@ -281,9 +281,9 @@ class _MessageDebugPanelState extends State<MessageDebugPanel> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: _lastTestResult!.success 
-                      ? Colors.green.withOpacity(0.1)
-                      : Colors.red.withOpacity(0.1),
+                  color: _lastTestResult!.success
+                      ? Colors.green.withValues(alpha: 0.1)
+                      : Colors.red.withValues(alpha: 0.1),
                   border: Border.all(
                     color: _lastTestResult!.success ? Colors.green : Colors.red,
                   ),

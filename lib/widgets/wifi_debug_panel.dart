@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/wifi_direct_service.dart';
+import '../services/p2p/wifi_direct_service.dart';
 import '../services/hotspot_service.dart';
 
 class WiFiDebugPanel extends StatefulWidget {
@@ -215,7 +215,7 @@ class _WiFiDebugPanelState extends State<WiFiDebugPanel> {
                           children: [
                             Text('Address: ${peer.deviceAddress}'),
                             Text('Type: ${peer.primaryDeviceType}'),
-                            Text('Status: ${_getStatusText(peer.status)}'),
+                            Text('Status: ${_getStatusText(peer.status as int)}'),
                           ],
                         ),
                         trailing: ElevatedButton(

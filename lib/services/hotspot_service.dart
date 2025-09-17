@@ -301,21 +301,17 @@ class HotspotService {
         switch (event) {
           case 'hotspot_started':
             _currentState = HotspotState.enabled;
-            break;
           case 'hotspot_stopped':
             _currentState = HotspotState.disabled;
             _currentSSID = null;
             _currentPassword = null;
             _connectedClients.clear();
             _clientsController.add(_connectedClients);
-            break;
           case 'hotspot_failed':
             _currentState = HotspotState.error;
-            break;
         }
 
         _stateController.add(_currentState);
-        break;
 
       case 'onClientConnected':
         final args = call.arguments as Map<String, dynamic>;
@@ -323,7 +319,6 @@ class HotspotService {
         _connectedClients.add(client);
         _clientsController.add(_connectedClients);
         debugPrint('📱 Client connected: ${client.deviceName} (${client.ipAddress})');
-        break;
 
       case 'onClientDisconnected':
         final args = call.arguments as Map<String, dynamic>;
@@ -333,7 +328,6 @@ class HotspotService {
           _clientsController.add(_connectedClients);
           debugPrint('📱 Client disconnected: $ipAddress');
         }
-        break;
     }
   }
 

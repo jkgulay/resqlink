@@ -147,10 +147,11 @@ class P2PDiscoveryService {
             isOnline: false,
             lastSeen: DateTime.now(),
             createdAt: DateTime.now(),
+            discoveryMethod: 'hotspot',
           );
 
           _addDiscoveredDevice(device);
-          debugPrint('📡 ResQLink network found: ${network.ssid}');
+          debugPrint('📡 ResQLink network found: ${network.ssid} (Signal: ${network.level} dBm)');
 
           // Optionally try to connect
           if (_shouldAttemptConnection(deviceId)) {
@@ -158,6 +159,8 @@ class P2PDiscoveryService {
           }
         }
       }
+
+      debugPrint('✅ ResQLink network discovery completed - found ${networks.length} total networks');
 
     } catch (e) {
       debugPrint('❌ Network discovery failed: $e');
@@ -218,6 +221,7 @@ class P2PDiscoveryService {
               isOnline: false,
               lastSeen: DateTime.now(),
               createdAt: DateTime.now(),
+              discoveryMethod: 'mdns',
             );
             _addDiscoveredDevice(device);
             debugPrint('📡 mDNS ResQLink device found: ${device.userName}');
@@ -314,6 +318,7 @@ class P2PDiscoveryService {
           isOnline: false,
           lastSeen: DateTime.now(),
           createdAt: DateTime.now(),
+          discoveryMethod: 'broadcast',
         );
         
         _addDiscoveredDevice(device);
@@ -328,11 +333,11 @@ class P2PDiscoveryService {
   void _addDiscoveredDevice(DeviceModel device) {
     // Update last seen time
     _lastSeenDevices[device.deviceId] = DateTime.now();
-    
+
     // Add to discovered devices if not already there
     final existingIndex = _baseService.discoveredResQLinkDevices
         .indexWhere((d) => d.deviceId == device.deviceId);
-    
+
     if (existingIndex >= 0) {
       // Update existing device
       _baseService.discoveredResQLinkDevices[existingIndex] = device;
@@ -340,13 +345,44 @@ class P2PDiscoveryService {
       // Add new device
       _baseService.discoveredResQLinkDevices.add(device);
     }
-    
-    // Notify discovery callback
-    _baseService.onDevicesDiscovered?.call([{
+
+    // Notify discovery callback with all discovered devices
+    _triggerDevicesDiscoveredCallback();
+  }
+
+  /// Trigger the devices discovered callback with current device list
+  void _triggerDevicesDiscoveredCallback() {
+    final deviceList = _baseService.discoveredResQLinkDevices.map((device) => {
       "deviceId": device.deviceId,
       "deviceName": device.userName,
+      "deviceAddress": device.deviceAddress ?? device.deviceId,
+      "connectionType": device.discoveryMethod ?? 'unknown',
+      "isAvailable": !device.isConnected,
+      "signalLevel": _calculateDeviceSignal(device),
       "lastSeen": device.lastSeen.millisecondsSinceEpoch,
-    }]);
+      "isConnected": device.isConnected,
+      "isEmergency": device.userName.toLowerCase().contains('emergency'),
+    }).toList();
+
+    _baseService.onDevicesDiscovered?.call(deviceList);
+  }
+
+  /// Calculate signal strength for discovered device
+  int _calculateDeviceSignal(DeviceModel device) {
+    final timeDiff = DateTime.now().difference(device.lastSeen).inMinutes;
+
+    switch (device.discoveryMethod) {
+      case 'mdns':
+      case 'mdns_enhanced':
+        return -45 - (timeDiff * 2); // Strong for local network
+      case 'broadcast':
+        return -55 - (timeDiff * 3); // Medium for broadcast
+      case 'hotspot':
+      case 'hotspot_enhanced':
+        return -60 - (timeDiff * 2); // Medium for hotspot
+      default:
+        return -70 - (timeDiff * 5); // Weak for unknown
+    }
   }
   /// Check if we should attempt connection to this device
   bool _shouldAttemptConnection(String deviceId) {

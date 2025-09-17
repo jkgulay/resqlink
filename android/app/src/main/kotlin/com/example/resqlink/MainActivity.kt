@@ -28,6 +28,10 @@ class MainActivity : FlutterActivity() {
         const val REQUEST_CODE_NEARBY_DEVICES = 1003
     }
 
+    private var serverSocket: ServerSocket? = null
+    private var clientSocket: Socket? = null
+    private var isSocketEstablished = false
+
     private lateinit var wifiMethodChannel: MethodChannel
     private lateinit var hotspotMethodChannel: MethodChannel
     private lateinit var permissionMethodChannel: MethodChannel
@@ -106,6 +110,10 @@ class MainActivity : FlutterActivity() {
                 "getGroupInfo" -> getWifiDirectGroupInfo(result)
                 "getConnectionInfo" -> getWifiDirectConnectionInfo(result)
                 "establishSocketConnection" -> establishSocketConnection(result)
+                "sendMessage" -> {
+                    val message = call.argument<String>("message") ?: ""
+                    sendMessage(message, result)
+                }
                 "runDiagnostic" -> {
                     val diagnostic = wifiDirectDiagnostic.runFullDiagnostic()
                     wifiDirectDiagnostic.logDetailedStatus()
@@ -246,6 +254,141 @@ class MainActivity : FlutterActivity() {
             android.util.Log.e("WiFiDirect", "WiFi P2P channel not initialized")
             result.error("NOT_INITIALIZED", "WiFi P2P channel not initialized", null)
         }
+    }
+
+    private fun establishSocketConnection(result: MethodChannel.Result?) {
+        channel?.let { ch ->
+            wifiP2pManager.requestConnectionInfo(ch) { info ->
+                if (info?.groupFormed == true) {
+                    Thread {
+                        try {
+                            if (info.isGroupOwner) {
+                                // Start server socket
+                                startServerSocket()
+                            } else {
+                                // Connect to group owner
+                                connectToGroupOwner(info.groupOwnerAddress?.hostAddress ?: "")
+                            }
+                            
+                            isSocketEstablished = true
+                            
+                            runOnUiThread {
+                                val socketData = mapOf(
+                                    "success" to true,
+                                    "isGroupOwner" to info.isGroupOwner,
+                                    "groupOwnerAddress" to (info.groupOwnerAddress?.hostAddress ?: ""),
+                                    "socketPort" to 8888
+                                )
+                                wifiMethodChannel.invokeMethod("onSocketEstablished", socketData)
+                                result?.success(socketData)
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                result?.error("SOCKET_ERROR", "Failed to establish socket: ${e.message}", null)
+                            }
+                        }
+                    }.start()
+                } else {
+                    result?.error("NO_GROUP", "No WiFi Direct group formed", null)
+                }
+            }
+        } ?: result?.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun startServerSocket() {
+        try {
+            serverSocket = ServerSocket(8888)
+            android.util.Log.d("WiFiDirect", "Server socket started on port 8888")
+            
+            // Accept client connections
+            Thread {
+                while (true) {
+                    try {
+                        val client = serverSocket?.accept()
+                        client?.let {
+                            handleClientConnection(it)
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("WiFiDirect", "Error accepting client", e)
+                        break
+                    }
+                }
+            }.start()
+        } catch (e: Exception) {
+            android.util.Log.e("WiFiDirect", "Failed to start server socket", e)
+        }
+    }
+
+    private fun connectToGroupOwner(address: String) {
+        try {
+            clientSocket = Socket()
+            clientSocket?.connect(InetSocketAddress(address, 8888), 5000)
+            android.util.Log.d("WiFiDirect", "Connected to group owner at $address")
+            
+            // Start message handling
+            handleClientConnection(clientSocket!!)
+        } catch (e: Exception) {
+            android.util.Log.e("WiFiDirect", "Failed to connect to group owner", e)
+        }
+    }
+
+    private fun handleClientConnection(socket: Socket) {
+        Thread {
+            try {
+                val input = BufferedReader(InputStreamReader(socket.getInputStream()))
+                val output = PrintWriter(socket.getOutputStream(), true)
+                
+                // Send handshake
+                val handshake = JSONObject().apply {
+                    put("type", "handshake")
+                    put("deviceId", android.provider.Settings.Secure.getString(
+                        contentResolver, 
+                        android.provider.Settings.Secure.ANDROID_ID
+                    ))
+                    put("timestamp", System.currentTimeMillis())
+                }
+                output.println(handshake.toString())
+                
+                // Listen for messages
+                var line: String?
+                while (input.readLine().also { line = it } != null) {
+                    runOnUiThread {
+                        wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
+                            "message" to line,
+                            "from" to socket.remoteSocketAddress.toString()
+                        ))
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("WiFiDirect", "Error handling client connection", e)
+            }
+        }.start()
+    }
+
+    fun sendMessage(message: String, result: MethodChannel.Result) {
+        Thread {
+            try {
+                val output = when {
+                    clientSocket?.isConnected == true -> 
+                        PrintWriter(clientSocket!!.getOutputStream(), true)
+                    serverSocket != null -> {
+                        // Send to all connected clients
+                        // You'd need to maintain a list of connected client sockets
+                        null
+                    }
+                    else -> null
+                }
+                
+                output?.println(message)
+                runOnUiThread {
+                    result.success(true)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    result.error("SEND_ERROR", "Failed to send message: ${e.message}", null)
+                }
+            }
+        }.start()
     }
 
     private fun startDiscoveryWithRetry(
@@ -436,9 +579,10 @@ class MainActivity : FlutterActivity() {
         } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
     }
 
-    // Receivers
     override fun onResume() {
         super.onResume()
+        
+        // Register receiver
         val intentFilter = IntentFilter().apply {
             addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
             addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
@@ -447,7 +591,79 @@ class MainActivity : FlutterActivity() {
         }
         wifiDirectReceiver = WifiDirectBroadcastReceiver(wifiP2pManager, channel, this)
         registerReceiver(wifiDirectReceiver, intentFilter)
+        
+        // CRITICAL: Check for existing connections
+        checkExistingWiFiDirectConnection()
     }
+
+    private fun checkExistingWiFiDirectConnection() {
+        channel?.let { ch ->
+            // Check connection info
+            wifiP2pManager.requestConnectionInfo(ch) { info ->
+                if (info?.groupFormed == true) {
+                    android.util.Log.d("WiFiDirect", "Existing connection detected!")
+                    
+                    // Notify Flutter about existing connection
+                    val connectionData = mapOf(
+                        "isConnected" to true,
+                        "isGroupOwner" to info.isGroupOwner,
+                        "groupOwnerAddress" to (info.groupOwnerAddress?.hostAddress ?: ""),
+                        "groupFormed" to true
+                    )
+                    wifiMethodChannel.invokeMethod("onExistingConnectionFound", connectionData)
+                    
+                    // Request peer list
+                    requestPeerList()
+                    
+                    // Establish socket if not already done
+                    if (!isSocketEstablished) {
+                        establishSocketConnection(result = null)
+                    }
+                }
+            }
+            
+            // Also request group info
+            wifiP2pManager.requestGroupInfo(ch) { group ->
+                if (group != null) {
+                    val groupData = mapOf(
+                        "networkName" to group.networkName,
+                        "passphrase" to group.passphrase,
+                        "isGroupOwner" to group.isGroupOwner,
+                        "clients" to group.clientList.map { client ->
+                            mapOf(
+                                "deviceName" to client.deviceName,
+                                "deviceAddress" to client.deviceAddress
+                            )
+                        }
+                    )
+                    wifiMethodChannel.invokeMethod("onGroupInfoAvailable", groupData)
+                }
+            }
+        }
+    }
+
+    private fun requestPeerList() {
+        channel?.let { ch ->
+            wifiP2pManager.requestPeers(ch) { peers ->
+                val peersList = peers.deviceList.map { device ->
+                    mapOf(
+                        "deviceName" to device.deviceName,
+                        "deviceAddress" to device.deviceAddress,
+                        "status" to when(device.status) {
+                            WifiP2pDevice.AVAILABLE -> "available"
+                            WifiP2pDevice.INVITED -> "invited"
+                            WifiP2pDevice.CONNECTED -> "connected"
+                            WifiP2pDevice.FAILED -> "failed"
+                            WifiP2pDevice.UNAVAILABLE -> "unavailable"
+                            else -> "unknown"
+                        }
+                    )
+                }
+                wifiMethodChannel.invokeMethod("onPeersUpdated", mapOf("peers" to peersList))
+            }
+        }
+    }
+
 
     override fun onPause() {
         super.onPause()

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,7 +7,7 @@ import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_discovery_service.dart';
 import '../../models/message_model.dart';
 import '../../services/database_service.dart';
-import '../../services/wifi_direct_service.dart';
+import 'wifi_direct_service.dart';
 import '../../services/hotspot_service.dart';
 import 'p2p_base_service.dart';
 import 'p2p_network_service.dart';
@@ -113,6 +114,8 @@ class P2PMainService extends P2PBaseService {
   ConnectionFallbackManager get connectionFallbackManager =>
       _connectionFallbackManager;
   HotspotManager get hotspotManager => _hotspotManager;
+  WiFiDirectService get wifiDirectService => _wifiDirectService;
+  HotspotService get hotspotService => _hotspotService;
   P2PRole _parseRole(String role) {
     switch (role.toLowerCase()) {
       case 'host':
@@ -156,16 +159,24 @@ class P2PMainService extends P2PBaseService {
           isOnline: true,
           createdAt: DateTime.now(),
           lastSeen: DateTime.now(),
-          isConnected: false,
+          isConnected: peer.status == WiFiDirectPeerStatus.connected,
           discoveryMethod: 'wifi_direct',
           deviceAddress: peer.deviceAddress,
         );
 
         // Add to discovered devices if not already present
-        if (!discoveredResQLinkDevices.any((d) => d.deviceId == deviceModel.deviceId)) {
+        final existingIndex = discoveredResQLinkDevices.indexWhere(
+          (d) => d.deviceId == deviceModel.deviceId,
+        );
+        if (existingIndex >= 0) {
+          discoveredResQLinkDevices[existingIndex] = deviceModel;
+        } else {
           discoveredResQLinkDevices.add(deviceModel);
         }
       }
+
+      // Trigger discovery callback
+      _triggerDevicesDiscoveredCallback();
       notifyListeners();
     });
 
@@ -185,22 +196,185 @@ class P2PMainService extends P2PBaseService {
           _handleSocketEstablished(connectionInfo);
         }
       }
+
+      if (state['existingConnection'] == true) {
+        final connectionInfo = state['connectionInfo'] as Map<String, dynamic>?;
+        if (connectionInfo != null) {
+          debugPrint('🔗 Existing connection detected: $connectionInfo');
+          _handleExistingConnection(connectionInfo);
+        }
+      }
+
+      if (state['messageReceived'] == true) {
+        final message = state['message'] as String?;
+        final from = state['from'] as String?;
+        if (message != null) {
+          debugPrint('📨 WiFi Direct message received: $message from $from');
+          _handleIncomingMessage(message, from);
+        }
+      }
     });
   }
 
   /// Handle socket establishment
   void _handleSocketEstablished(Map<String, dynamic> connectionInfo) {
     final isGroupOwner = connectionInfo['isGroupOwner'] as bool? ?? false;
-    final groupOwnerAddress = connectionInfo['groupOwnerAddress'] as String? ?? '';
+    final groupOwnerAddress =
+        connectionInfo['groupOwnerAddress'] as String? ?? '';
 
-    debugPrint('🔌 Socket established - Group Owner: $isGroupOwner, Address: $groupOwnerAddress');
+    debugPrint(
+      '🔌 Socket established - Group Owner: $isGroupOwner, Address: $groupOwnerAddress',
+    );
 
     // Update connection mode and status
     _currentConnectionMode = P2PConnectionMode.wifiDirect;
     updateConnectionStatus(true);
 
-    _addMessageTrace('Socket communication established (Group Owner: $isGroupOwner)');
+    _addMessageTrace(
+      'Socket communication established (Group Owner: $isGroupOwner)',
+    );
     notifyListeners();
+  }
+
+  /// Handle existing connection detection
+  void _handleExistingConnection(Map<String, dynamic> connectionInfo) {
+    final isGroupOwner = connectionInfo['isGroupOwner'] as bool? ?? false;
+    final groupOwnerAddress =
+        connectionInfo['groupOwnerAddress'] as String? ?? '';
+
+    debugPrint(
+      '🔗 Existing connection - Group Owner: $isGroupOwner, Address: $groupOwnerAddress',
+    );
+
+    // Update connection mode and status
+    _currentConnectionMode = P2PConnectionMode.wifiDirect;
+    updateConnectionStatus(true);
+
+    _addMessageTrace(
+      'Existing WiFi Direct connection detected (Group Owner: $isGroupOwner)',
+    );
+    notifyListeners();
+  }
+
+  /// Handle incoming WiFi Direct messages
+  Future<void> _handleIncomingMessage(String message, String? from) async {
+    try {
+      debugPrint('📨 Processing WiFi Direct message: $message from: $from');
+
+      // Try to parse as JSON message
+      final messageData = Map<String, dynamic>.from(json.decode(message));
+
+      // Extract message details
+      final messageText = messageData['message'] as String? ?? message;
+      final senderName =
+          messageData['senderName'] as String? ?? 'WiFi Direct User';
+      final messageType = MessageType.values.firstWhere(
+        (type) => type.name == messageData['type'],
+        orElse: () => MessageType.text,
+      );
+
+      // Create message model
+      final messageModel = MessageModel.createDirectMessage(
+        fromUser: senderName,
+        message: messageText,
+        deviceId: messageData['deviceId'] ?? 'unknown',
+        targetDeviceId: deviceId ?? 'unknown',
+        type: messageType,
+        isEmergency:
+            messageType == MessageType.emergency ||
+            messageType == MessageType.sos,
+      );
+
+      // Save to database
+      await DatabaseService.insertMessage(messageModel);
+
+      // Add to message history
+      saveMessageToHistory(messageModel);
+
+      _addMessageTrace('WiFi Direct message processed: $messageText');
+      debugPrint('✅ WiFi Direct message processed successfully');
+    } catch (e) {
+      debugPrint('❌ Failed to process WiFi Direct message: $e');
+      _addMessageTrace('Failed to process WiFi Direct message: $e');
+    }
+  }
+
+  Future<void> checkForExistingConnections() async {
+    try {
+      debugPrint('🔍 Checking for existing WiFi Direct connections...');
+
+      // Check connection info
+      final connectionInfo = await _wifiDirectService.getConnectionInfo();
+
+      if (connectionInfo != null && connectionInfo['groupFormed'] == true) {
+        debugPrint('✅ Existing connection found!');
+        debugPrint('  - Group Owner: ${connectionInfo['isGroupOwner']}');
+        debugPrint('  - Group Address: ${connectionInfo['groupOwnerAddress']}');
+
+        _currentConnectionMode = P2PConnectionMode.wifiDirect;
+        updateConnectionStatus(true);
+
+        // Request peer list to update connected devices
+        final peers = await _wifiDirectService.getPeerList();
+
+        // Update discovered devices from peer list
+        for (final peer in peers) {
+          final deviceModel = DeviceModel(
+            id: peer['deviceAddress'] ?? '',
+            deviceId: peer['deviceAddress'] ?? '',
+            userName: peer['deviceName'] ?? 'Unknown Device',
+            isHost: false,
+            isOnline: true,
+            createdAt: DateTime.now(),
+            lastSeen: DateTime.now(),
+            isConnected: peer['status'] == 'connected',
+            discoveryMethod: 'wifi_direct',
+            deviceAddress: peer['deviceAddress'],
+          );
+
+          // Add to discovered devices if not already present
+          final existingIndex = discoveredResQLinkDevices.indexWhere(
+            (d) => d.deviceId == deviceModel.deviceId,
+          );
+
+          if (existingIndex >= 0) {
+            discoveredResQLinkDevices[existingIndex] = deviceModel;
+          } else {
+            discoveredResQLinkDevices.add(deviceModel);
+          }
+
+          // If connected, add to connected devices
+          if (deviceModel.isConnected) {
+            addConnectedDevice(deviceModel.deviceId, deviceModel.userName);
+          }
+        }
+
+        // Establish socket if needed
+        final socketEstablished = connectionInfo['socketEstablished'] ?? false;
+        if (!socketEstablished) {
+          debugPrint('🔌 Socket not established, creating now...');
+          final success = await _wifiDirectService.establishSocketConnection();
+          if (success) {
+            debugPrint('✅ Socket connection established successfully');
+            _addMessageTrace(
+              'Socket connection established after system connection',
+            );
+          } else {
+            debugPrint('❌ Failed to establish socket connection');
+            _addMessageTrace('Socket establishment failed');
+          }
+        } else {
+          debugPrint('✅ Socket already established');
+        }
+
+        notifyListeners();
+      } else {
+        debugPrint('ℹ️ No existing WiFi Direct connection found');
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking existing connections: $e');
+      _addMessageTrace('Error checking connections: $e');
+    }
   }
 
   /// Check for system-level WiFi Direct connections (call when returning from settings)
@@ -374,7 +548,6 @@ class P2PMainService extends P2PBaseService {
       _hotspotCreationInProgress = false;
     }
   }
-
 
   Future<bool> connectToDevice(Map<String, dynamic> device) async {
     try {
@@ -594,20 +767,93 @@ class P2PMainService extends P2PBaseService {
   Map<String, Map<String, dynamic>> get discoveredDevices {
     final deviceMap = <String, Map<String, dynamic>>{};
 
-    for (final device in discoveredResQLinkDevices) {
-      deviceMap[device.deviceId] = {
-        'deviceId': device.deviceId,
-        'deviceName': device.userName,
-        'deviceAddress': device.deviceAddress ?? device.deviceId,
-        'connectionType': device.discoveryMethod ?? 'unknown',
-        'isAvailable': !device.isConnected,
-        'signalLevel': -50, // Default signal level
-        'lastSeen': device.lastSeen.millisecondsSinceEpoch,
-        'isConnected': device.isConnected,
+    // Add WiFi Direct peers with actual signal strength
+    for (final peer in _wifiDirectService.discoveredPeers) {
+      deviceMap[peer.deviceAddress] = {
+        'deviceId': peer.deviceAddress,
+        'deviceName': peer.deviceName,
+        'deviceAddress': peer.deviceAddress,
+        'connectionType': 'wifi_direct',
+        'isAvailable': peer.status == WiFiDirectPeerStatus.available,
+        'signalLevel': peer.signalLevel ?? -50,
+        'lastSeen': DateTime.now().millisecondsSinceEpoch,
+        'isConnected': peer.status == WiFiDirectPeerStatus.connected,
+        'isEmergency':
+            peer.deviceName.toLowerCase().contains('resqlink') ||
+            peer.deviceName.toLowerCase().contains('emergency'),
       };
     }
 
+    // Add ResQLink devices from discovery service
+    for (final device in discoveredResQLinkDevices) {
+      // Don't overwrite WiFi Direct devices that have better info
+      if (!deviceMap.containsKey(device.deviceId)) {
+        deviceMap[device.deviceId] = {
+          'deviceId': device.deviceId,
+          'deviceName': device.userName,
+          'deviceAddress': device.deviceAddress ?? device.deviceId,
+          'connectionType': device.discoveryMethod ?? 'unknown',
+          'isAvailable': !device.isConnected,
+          'signalLevel': _calculateSignalStrength(device),
+          'lastSeen': device.lastSeen.millisecondsSinceEpoch,
+          'isConnected': device.isConnected,
+          'isEmergency': device.userName.toLowerCase().contains('emergency'),
+        };
+      }
+    }
+
+    // Add hotspot networks as discoverable devices
+    final networks = getAvailableHotspots();
+    for (final network in networks) {
+      final deviceId = network['ssid'].toString().replaceFirst(
+        P2PBaseService.resqlinkPrefix,
+        '',
+      );
+      if (deviceId.isNotEmpty && !deviceMap.containsKey(deviceId)) {
+        deviceMap[deviceId] = {
+          'deviceId': deviceId,
+          'deviceName': network['ssid'],
+          'deviceAddress': network['bssid'] ?? deviceId,
+          'connectionType': 'hotspot',
+          'isAvailable': true,
+          'signalLevel': network['signalLevel'] ?? -70,
+          'lastSeen': DateTime.now().millisecondsSinceEpoch,
+          'isConnected': false,
+          'isEmergency': network['ssid'].toString().toLowerCase().contains(
+            'emergency',
+          ),
+        };
+      }
+    }
+
     return deviceMap;
+  }
+
+  /// Calculate signal strength for non-WiFi Direct devices
+  int _calculateSignalStrength(DeviceModel device) {
+    // Base signal strength on discovery method and recency
+    final timeDiff = DateTime.now().difference(device.lastSeen).inMinutes;
+
+    switch (device.discoveryMethod) {
+      case 'mdns':
+      case 'mdns_enhanced':
+        return -45 - (timeDiff * 2); // Strong for local network
+      case 'broadcast':
+        return -55 - (timeDiff * 3); // Medium for broadcast
+      case 'hotspot':
+      case 'hotspot_enhanced':
+        return -60 - (timeDiff * 2); // Medium for hotspot
+      default:
+        return -70 - (timeDiff * 5); // Weak for unknown
+    }
+  }
+
+  /// Trigger devices discovered callback
+  void _triggerDevicesDiscoveredCallback() {
+    if (onDevicesDiscovered != null) {
+      final allDevices = discoveredDevices.values.toList();
+      onDevicesDiscovered!(allDevices);
+    }
   }
 
   List<Map<String, dynamic>> getAvailableHotspots() {
@@ -646,7 +892,6 @@ class P2PMainService extends P2PBaseService {
 
     return knownMap;
   }
-
 
   /// Verify hotspot is working
   Future<bool> _verifyHotspotWorking() async {
@@ -687,7 +932,12 @@ class P2PMainService extends P2PBaseService {
   @override
   Future<void> discoverDevices({bool force = false}) async {
     try {
-      debugPrint('🔍 Starting device discovery...');
+      debugPrint('🔍 Starting enhanced device discovery...');
+
+      // Clear old devices if forcing discovery
+      if (force) {
+        discoveredResQLinkDevices.clear();
+      }
 
       // Use WiFi Direct discovery
       await _wifiDirectService.startDiscovery();
@@ -695,7 +945,15 @@ class P2PMainService extends P2PBaseService {
       // Also use existing discovery service
       await _discoveryService.discoverDevices(force: force);
 
-      debugPrint('✅ Device discovery completed');
+      // Scan for available networks/hotspots
+      await _networkService.scanForResQLinkNetworks();
+
+      // Trigger callback with all discovered devices
+      _triggerDevicesDiscoveredCallback();
+
+      debugPrint(
+        '✅ Enhanced device discovery completed - found ${discoveredDevices.length} devices',
+      );
     } catch (e) {
       debugPrint('❌ Device discovery failed: $e');
     }
@@ -754,16 +1012,49 @@ class P2PMainService extends P2PBaseService {
       // Send via network
       await _networkService.broadcastMessage(messageModel);
 
-      // Update status to sent
-      if (messageModel.messageId != null) {
-        await DatabaseService.updateMessageStatus(
-          messageModel.messageId!,
-          MessageStatus.sent,
-        );
+      if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
+        // Create message JSON for WiFi Direct
+        final messageJson = jsonEncode({
+          'type': 'message',
+          'messageId': messageModel.messageId,
+          'message': message,
+          'from': actualSenderName,
+          'senderName': actualSenderName,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+          'messageType': type.name,
+          'isEmergency':
+              type == MessageType.emergency || type == MessageType.sos,
+          'latitude': latitude,
+          'longitude': longitude,
+        });
+
+        // Send via WiFi Direct socket
+        final success = await _wifiDirectService.sendMessage(messageJson);
+
+        if (success) {
+          debugPrint('✅ Message sent via WiFi Direct');
+          _addMessageTrace(
+            'Message sent via WiFi Direct: ${messageModel.messageId}',
+          );
+
+          // Update message status
+          if (messageModel.messageId != null) {
+            await DatabaseService.updateMessageStatus(
+              messageModel.messageId!,
+              MessageStatus.sent,
+            );
+          }
+        } else {
+          debugPrint('❌ WiFi Direct send failed, falling back to broadcast');
+          // Fallback to network service
+          await _networkService.broadcastMessage(messageModel);
+        }
+      } else {
+        // Use existing network service for other connection types
+        await _networkService.broadcastMessage(messageModel);
       }
 
-      _addMessageTrace('Message sent successfully: ${messageModel.messageId}');
-      debugPrint('✅ Message sent successfully');
+      debugPrint('✅ Message processing completed');
     } catch (e) {
       _addMessageTrace('Message send failed: $e');
       debugPrint('❌ Message send failed: $e');
@@ -822,13 +1113,17 @@ ${_messageTrace.take(5).join('\n')}
   /// Get available ResQLink networks
   List<Map<String, dynamic>> get availableNetworks {
     try {
-      return _networkService.availableNetworks.map((network) => {
-        'ssid': network.ssid,
-        'bssid': network.bssid,
-        'level': network.level,
-        'frequency': network.frequency,
-        'capabilities': network.capabilities,
-      }).toList();
+      return _networkService.availableNetworks
+          .map(
+            (network) => {
+              'ssid': network.ssid,
+              'bssid': network.bssid,
+              'level': network.level,
+              'frequency': network.frequency,
+              'capabilities': network.capabilities,
+            },
+          )
+          .toList();
     } catch (e) {
       debugPrint('❌ Error getting available networks: $e');
       return [];
