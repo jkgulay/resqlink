@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:path/path.dart';
-import 'package:resqlink/services/p2p/p2p_base_service.dart';
 import 'package:resqlink/services/p2p/wifi_direct_service.dart';
 import '../../controllers/home_controller.dart';
-import '../../utils/resqlink_theme.dart';
+import '../../models/message_model.dart';
 
 class ConnectionDiscoveryCard extends StatelessWidget {
   final HomeController controller;
@@ -50,8 +49,6 @@ class ConnectionDiscoveryCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildConnectionHeader(isNarrow),
-        SizedBox(height: 24),
-        _buildActionButtons(context, isNarrow),
         SizedBox(height: 20),
         _buildConnectionStats(isNarrow),
         if (controller.discoveredDevices.isNotEmpty) ...[
@@ -127,174 +124,6 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, bool isNarrow) {
-    return Row(
-      children: [
-        Expanded(
-          child: Container(
-            height: isNarrow ? 50 : 56,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: controller.isScanning
-                    ? [Colors.orange, Colors.orange.shade700]
-                    : [Colors.blue, Colors.blue.shade700],
-              ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: (controller.isScanning ? Colors.orange : Colors.blue)
-                      .withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: Offset(0, 3),
-                ),
-              ],
-            ),
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                shadowColor: Colors.transparent,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              onPressed: controller.isScanning
-                  ? null
-                  : () => controller.startScan(),
-              icon: controller.isScanning
-                  ? SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : Icon(Icons.search, size: isNarrow ? 18 : 20),
-              label: Text(
-                controller.isScanning ? 'Scanning' : 'Find Devices',
-                style: TextStyle(
-                  fontSize: isNarrow ? 13 : 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ),
-        SizedBox(width: 12),
-        Expanded(
-          child: Container(
-            height: isNarrow ? 50 : 56,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                // ✅ FIX: Better role-based color logic
-                colors: _getRoleButtonColors(controller),
-              ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: _getRoleButtonColor(controller).withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: Offset(0, 3),
-                ),
-              ],
-            ),
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                shadowColor: Colors.transparent,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              onPressed: _getRoleButtonAction(controller, context),
-              icon: _getRoleButtonIcon(controller, isNarrow),
-              label: Text(
-                _getRoleButtonText(controller),
-                style: TextStyle(
-                  fontSize: isNarrow ? 13 : 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  List<Color> _getRoleButtonColors(HomeController controller) {
-    if (controller.p2pService.isHotspotEnabled) {
-      return [Colors.green, Colors.green.shade700];
-    }
-
-    if (controller.p2pService.wifiDirectService.connectionState ==
-        WiFiDirectConnectionState.connected) {
-      return [Colors.blue, Colors.blue.shade700];
-    }
-
-    if (controller.isConnected) {
-      return [Colors.orange, Colors.orange.shade700];
-    }
-
-    return [Colors.purple, Colors.purple.shade700];
-  }
-
-  Color _getRoleButtonColor(HomeController controller) {
-    // Check actual status instead of role
-    if (controller.p2pService.isHotspotEnabled) {
-      return Colors.green; // Hosting hotspot
-    }
-
-    if (controller.p2pService.wifiDirectService.connectionState ==
-        WiFiDirectConnectionState.connected) {
-      return Colors.blue; // WiFi Direct connected
-    }
-
-    if (controller.isConnected) {
-      return Colors.orange; // General connection
-    }
-
-    return Colors.purple; // Default create network
-  }
-
-  String _getRoleButtonText(HomeController controller) {
-    // Check actual hotspot status first
-    if (controller.p2pService.isHotspotEnabled) {
-      return 'Hosting Hotspot';
-    }
-
-    // Check WiFi Direct connection
-    if (controller.p2pService.wifiDirectService.connectionState ==
-        WiFiDirectConnectionState.connected) {
-      return 'WiFi Direct Connected';
-    }
-
-    // Check if connected to any network
-    if (controller.isConnected) {
-      return 'Connected';
-    }
-
-    // Default state
-    return 'Create Network';
-  }
-
-  Widget _getRoleButtonIcon(HomeController controller, bool isNarrow) {
-    IconData iconData;
-
-    // Choose icon based on actual status
-    if (controller.p2pService.isHotspotEnabled) {
-      iconData = Icons.wifi_tethering; // Hosting hotspot
-    } else if (controller.p2pService.wifiDirectService.connectionState ==
-        WiFiDirectConnectionState.connected) {
-      iconData = Icons.wifi; // WiFi Direct connected
-    } else if (controller.isConnected) {
-      iconData = Icons.link; // General connection
-    } else {
-      iconData = Icons.add_circle; // Create network
-    }
-
-    return Icon(iconData, size: isNarrow ? 18 : 20);
-  }
 
   String _getConnectionStatusText(HomeController controller) {
     if (controller.p2pService.isHotspotEnabled) {
@@ -317,128 +146,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     return 'Ready to connect';
   }
 
-  VoidCallback? _getRoleButtonAction(
-    HomeController controller,
-    BuildContext context,
-  ) {
-    // Actions based on actual status
-    if (controller.p2pService.isHotspotEnabled) {
-      return () =>
-          _showHotspotDetails(context, controller); // Show hotspot info
-    }
 
-    if (controller.p2pService.wifiDirectService.connectionState ==
-            WiFiDirectConnectionState.connected ||
-        controller.isConnected) {
-      return () =>
-          _showConnectionDetails(context, controller); // Show connection info
-    }
-
-    // Default: show create network dialog
-    return () => _showCreateNetworkDialog(context);
-  }
-
-  void _showConnectionDetails(BuildContext context, HomeController controller) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Connection Details'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Role: ${controller.p2pService.currentRole.name.toUpperCase()}',
-            ),
-            Text(
-              'Connected Devices: ${controller.p2pService.connectedDevices.length}',
-            ),
-            Text(
-              'Connection Mode: ${controller.p2pService.currentConnectionMode.name}',
-            ),
-            if (controller.p2pService.connectedHotspotSSID != null)
-              Text('Network: ${controller.p2pService.connectedHotspotSSID}'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('OK'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              controller.p2pService.disconnect();
-            },
-            child: Text('Disconnect'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showHotspotDetails(BuildContext context, HomeController controller) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.wifi_tethering, color: Colors.green),
-            SizedBox(width: 8),
-            Text('Hotspot Details'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'SSID: ${controller.p2pService.hotspotService.currentSSID ?? "Unknown"}',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 8),
-            Text('Status: Active', style: TextStyle(color: Colors.green)),
-            SizedBox(height: 8),
-            Text(
-              'Connected Devices: ${controller.p2pService.connectedDevices.length}',
-            ),
-            if (controller.p2pService.connectedDevices.isNotEmpty) ...[
-              SizedBox(height: 8),
-              Text('Devices:', style: TextStyle(fontWeight: FontWeight.bold)),
-              ...controller.p2pService.connectedDevices.values.map(
-                (device) => Padding(
-                  padding: EdgeInsets.only(left: 16, top: 4),
-                  child: Text('• ${device.userName}'),
-                ),
-              ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('OK'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _stopHotspot(controller);
-            },
-            child: Text('Stop Hotspot', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _stopHotspot(HomeController controller) async {
-    try {
-      await controller.p2pService.disconnect();
-      debugPrint('✅ Hotspot stopped successfully');
-    } catch (e) {
-      debugPrint('❌ Failed to stop hotspot: $e');
-    }
-  }
 
   Widget _buildConnectionStats(bool isNarrow) {
     return Container(
@@ -547,7 +255,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                 SizedBox(height: isNarrow ? 8 : 12),
             itemBuilder: (context, index) {
               final device = controller.discoveredDevices[index];
-              return _buildDeviceItem(device, isNarrow);
+              return _buildDeviceItem(context, device, isNarrow);
             },
           ),
         ],
@@ -555,22 +263,21 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     );
   }
 
-  Widget _buildDeviceItem(Map<String, dynamic> device, bool isNarrow) {
-    // Fix: Check if device is actually connected via WiFi Direct
-    final isWiFiDirectConnected = device['status'] == 'connected';
-    final isConnected = device['isConnected'] as bool? ?? isWiFiDirectConnected;
+  Widget _buildDeviceItem(BuildContext context, Map<String, dynamic> device, bool isNarrow) {
+    // CRITICAL FIX: Better connection status detection for WiFi Direct
+    final deviceStatus = device['status'] as String? ?? 'unknown';
+    final isWiFiDirectConnected = deviceStatus == 'connected';
+    final isGenerallyConnected = device['isConnected'] as bool? ?? false;
+    final isConnected = isWiFiDirectConnected || isGenerallyConnected;
 
-    // Fix: Properly parse signal strength
-    final signalStrength =
-        device['signalLevel'] as int? ??
-        device['rssi'] as int? ??
-        (-45 - (device.hashCode % 40)); // Fallback calculation
+    // ENHANCED: Better signal strength parsing
+    final signalStrength = _parseSignalStrength(device);
     final signalLevel = _getSignalLevel(signalStrength);
     final signalColor = _getSignalColor(signalLevel);
 
     // Get connection type
     final connectionType = device['connectionType'] as String? ?? 'unknown';
-    final isAvailable = device['isAvailable'] as bool? ?? true;
+    final isAvailable = device['isAvailable'] as bool? ?? !isConnected;
 
     return Container(
       padding: EdgeInsets.all(isNarrow ? 16 : 18),
@@ -617,28 +324,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (isConnected)
-                          Container(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: Colors.green.withValues(alpha: 0.4),
-                              ),
-                            ),
-                            child: Text(
-                              'CONNECTED',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.green,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
+                        _buildConnectionStatusBadge(isConnected, deviceStatus),
                       ],
                     ),
                     SizedBox(height: 4),
@@ -653,59 +339,12 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                     SizedBox(height: 6),
                     Row(
                       children: [
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _getConnectionTypeColor(
-                              connectionType,
-                            ).withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: _getConnectionTypeColor(
-                                connectionType,
-                              ).withValues(alpha: 0.3),
-                            ),
-                          ),
-                          child: Text(
-                            _getConnectionTypeLabel(connectionType),
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: _getConnectionTypeColor(connectionType),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
+                        _buildConnectionTypeBadge(connectionType),
                         SizedBox(width: 8),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: signalColor.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: signalColor.withValues(alpha: 0.3),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _buildSignalBars(signalLevel, signalColor),
-                              SizedBox(width: 4),
-                              Text(
-                                '$signalStrength dBm',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: signalColor,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
+                        _buildSignalBadge(
+                          signalLevel,
+                          signalStrength,
+                          signalColor,
                         ),
                       ],
                     ),
@@ -716,40 +355,184 @@ class ConnectionDiscoveryCard extends StatelessWidget {
           ),
           if (!isConnected) ...[
             SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: isAvailable
-                        ? () => _connectToDevice(device)
-                        : null,
-                    icon: Icon(Icons.link, size: 16),
-                    label: Text(isAvailable ? 'Connect' : 'Unavailable'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isAvailable ? Colors.blue : Colors.grey,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(width: 8),
-                IconButton(
-                  onPressed: () =>
-                      _showDeviceDetails(context as BuildContext, device),
-                  icon: Icon(Icons.info_outline, color: Colors.blue, size: 20),
-                  tooltip: 'Device Details',
-                ),
-              ],
-            ),
+            _buildActionButtons(context, device, isAvailable),
+          ] else ...[
+            SizedBox(height: 12),
+            _buildConnectedActions(context, device),
           ],
         ],
       ),
+    );
+  }
+
+  int _parseSignalStrength(Map<String, dynamic> device) {
+    // Try different signal strength fields
+    if (device['signalLevel'] != null) {
+      return device['signalLevel'] as int;
+    }
+    if (device['rssi'] != null) {
+      return device['rssi'] as int;
+    }
+    if (device['level'] != null) {
+      return device['level'] as int;
+    }
+
+    // Generate reasonable fallback based on connection type
+    final connectionType = device['connectionType'] as String? ?? 'unknown';
+    switch (connectionType) {
+      case 'wifi_direct':
+        return -45; // Strong signal for direct connection
+      case 'hotspot':
+        return -55; // Medium signal for hotspot
+      default:
+        return -65; // Weak signal for unknown
+    }
+  }
+
+  Widget _buildConnectionStatusBadge(bool isConnected, String deviceStatus) {
+    if (!isConnected) return SizedBox.shrink();
+
+    Color badgeColor;
+    String badgeText;
+
+    if (deviceStatus == 'connected') {
+      badgeColor = Colors.green;
+      badgeText = 'CONNECTED';
+    } else {
+      badgeColor = Colors.orange;
+      badgeText = 'LINKED';
+    }
+
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: badgeColor.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: badgeColor.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        badgeText,
+        style: TextStyle(
+          fontSize: 10,
+          color: badgeColor,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  /// NEW: Build connection type badge
+  Widget _buildConnectionTypeBadge(String connectionType) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: _getConnectionTypeColor(connectionType).withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: _getConnectionTypeColor(connectionType).withValues(alpha: 0.3),
+        ),
+      ),
+      child: Text(
+        _getConnectionTypeLabel(connectionType),
+        style: TextStyle(
+          fontSize: 10,
+          color: _getConnectionTypeColor(connectionType),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  /// NEW: Build signal strength badge
+  Widget _buildSignalBadge(
+    int signalLevel,
+    int signalStrength,
+    Color signalColor,
+  ) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: signalColor.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: signalColor.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildSignalBars(signalLevel, signalColor),
+          SizedBox(width: 4),
+          Text(
+            '$signalStrength dBm',
+            style: TextStyle(
+              fontSize: 10,
+              color: signalColor,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtons(BuildContext context, Map<String, dynamic> device, bool isAvailable) {
+    return Row(
+      children: [
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: isAvailable ? () => _connectToDevice(device) : null,
+            icon: Icon(Icons.link, size: 16),
+            label: Text(isAvailable ? 'Connect' : 'Unavailable'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isAvailable ? Colors.blue : Colors.grey,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+        SizedBox(width: 8),
+        IconButton(
+          onPressed: () => _showDeviceDetails(context, device),
+          icon: Icon(Icons.info_outline, color: Colors.blue, size: 20),
+          tooltip: 'Device Details',
+        ),
+      ],
+    );
+  }
+
+  /// NEW: Build actions for connected devices
+  Widget _buildConnectedActions(BuildContext context, Map<String, dynamic> device) {
+    return Row(
+      children: [
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: () => _sendTestMessage(device),
+            icon: Icon(Icons.message, size: 16),
+            label: Text('Send Message'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+        SizedBox(width: 8),
+        IconButton(
+          onPressed: () => _disconnectDevice(device),
+          icon: Icon(Icons.link_off, color: Colors.red, size: 20),
+          tooltip: 'Disconnect',
+        ),
+        IconButton(
+          onPressed: () => _showDeviceDetails(context, device),
+          icon: Icon(Icons.info_outline, color: Colors.blue, size: 20),
+          tooltip: 'Device Details',
+        ),
+      ],
     );
   }
 
@@ -998,318 +781,74 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     }
   }
 
-  void _showCreateNetworkDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: ResQLinkTheme.cardDark,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: Row(
-            children: [
-              Icon(Icons.add_circle, color: ResQLinkTheme.primaryRed),
-              SizedBox(width: 8),
-              Text('Create Network', style: TextStyle(color: Colors.white)),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Choose how to create your emergency network:',
-                style: TextStyle(color: Colors.white70),
-              ),
-              SizedBox(height: 20),
 
-              // WiFi Direct Option
-              Container(
-                margin: EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: ListTile(
-                  leading: Container(
-                    padding: EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(Icons.wifi, color: Colors.blue),
-                  ),
-                  title: Text(
-                    'WiFi Direct',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Direct device-to-device connection (200m range)',
-                    style: TextStyle(color: Colors.white60, fontSize: 12),
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _createWiFiDirectNetwork();
-                  },
-                ),
-              ),
-
-              // Emergency Hotspot Option
-              Container(
-                margin: EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: Colors.purple.withValues(alpha: 0.3),
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: ListTile(
-                  leading: Container(
-                    padding: EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.purple.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(Icons.router, color: Colors.purple),
-                  ),
-                  title: Text(
-                    'Emergency Hotspot',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Create WiFi hotspot for multiple devices',
-                    style: TextStyle(color: Colors.white60, fontSize: 12),
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _createHotspotNetwork();
-                  },
-                ),
-              ),
-
-              // Smart Network Option (your existing one, enhanced)
-              Container(
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: Colors.green.withValues(alpha: 0.3),
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  color: Colors.green.withValues(alpha: 0.1),
-                ),
-                child: ListTile(
-                  leading: Container(
-                    padding: EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(Icons.auto_awesome, color: Colors.green),
-                  ),
-                  title: Text(
-                    'Smart Network (Recommended)',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Automatically choose the best method',
-                    style: TextStyle(color: Colors.white60, fontSize: 12),
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _createSmartNetwork();
-                  },
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel', style: TextStyle(color: Colors.white70)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _createWiFiDirectNetwork() async {
-    try {
-      debugPrint('🔗 Creating WiFi Direct network...');
-
-      // Disable hotspot fallback for pure WiFi Direct
-      controller.p2pService.setHotspotFallbackEnabled(false);
-
-      // Check and request permissions
-      final hasPermissions = await controller.p2pService
-          .checkAndRequestPermissions();
-      if (!hasPermissions) {
-        debugPrint('❌ WiFi Direct permissions not granted');
-        return;
-      }
-
-      // Create WiFi Direct group (become group owner)
-      final groupCreated = await controller.p2pService.wifiDirectService
-          .createGroup();
-
-      if (groupCreated) {
-        // Set role to host
-        controller.p2pService.setRole(P2PRole.host);
-
-        // Start discovery for peers
-        await controller.startScan();
-
-        debugPrint('✅ WiFi Direct group created successfully');
-      } else {
-        debugPrint('❌ Failed to create WiFi Direct group');
-      }
-    } catch (e) {
-      debugPrint('❌ Failed to create WiFi Direct network: $e');
-    }
-  }
-
-  Future<void> _createHotspotNetwork() async {
-    try {
-      debugPrint('📶 Creating emergency hotspot...');
-
-      // Check and request permissions
-      final hasPermissions = await controller.p2pService
-          .checkAndRequestPermissions();
-      if (!hasPermissions) {
-        debugPrint('❌ Hotspot permissions not granted');
-        return;
-      }
-
-      // Actually create the emergency hotspot
-      final hotspotCreated = await controller.p2pService
-          .createEmergencyHotspot();
-
-      if (hotspotCreated) {
-        // Set role to host
-        controller.p2pService.setRole(P2PRole.host);
-
-        // Start scanning for connecting devices
-        await controller.startScan();
-
-        debugPrint('✅ Emergency hotspot created successfully');
-      } else {
-        debugPrint('❌ Failed to create emergency hotspot');
-      }
-    } catch (e) {
-      debugPrint('❌ Failed to create hotspot: $e');
-    }
-  }
-
-  Future<void> _createSmartNetwork() async {
-    try {
-      debugPrint('🤖 Creating smart network...');
-
-      // Check and request permissions
-      final hasPermissions = await controller.p2pService
-          .checkAndRequestPermissions();
-      if (!hasPermissions) {
-        debugPrint('❌ Smart network permissions not granted');
-        return;
-      }
-
-      // Enable hybrid mode for fallback capability
-      controller.p2pService.setHotspotFallbackEnabled(true);
-
-      // Try WiFi Direct first
-      debugPrint('📡 Attempting WiFi Direct group creation...');
-      final wifiDirectSuccess = await controller.p2pService.wifiDirectService
-          .createGroup();
-
-      if (wifiDirectSuccess) {
-        debugPrint('✅ WiFi Direct group created successfully');
-        controller.p2pService.setRole(P2PRole.host);
-      } else {
-        debugPrint('📶 WiFi Direct failed, falling back to hotspot...');
-
-        // Fallback to hotspot creation
-        final hotspotSuccess = await controller.p2pService
-            .createEmergencyHotspot();
-
-        if (hotspotSuccess) {
-          debugPrint('✅ Emergency hotspot created as fallback');
-          controller.p2pService.setRole(P2PRole.host);
-        } else {
-          debugPrint('❌ Both WiFi Direct and hotspot creation failed');
-          return;
-        }
-      }
-
-      // Start scanning for connecting devices
-      await controller.startScan();
-
-      debugPrint('✅ Smart network created successfully');
-    } catch (e) {
-      debugPrint('❌ Failed to create smart network: $e');
-    }
-  }
 
   Future<void> _connectToDevice(Map<String, dynamic> device) async {
     try {
       debugPrint('🔗 Connecting to device: ${device['deviceName']}');
 
-      final connectionType = device['connectionType'] as String? ?? 'unknown';
+      final connectionType = device['connectionType'] as String?;
+
+      // Show connecting state
+      ScaffoldMessenger.of(context as BuildContext).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+              SizedBox(width: 12),
+              Text('Connecting to ${device['deviceName']}...'),
+            ],
+          ),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.blue,
+        ),
+      );
+
       bool success = false;
 
       switch (connectionType) {
         case 'wifi_direct':
-          final deviceAddress = device['deviceAddress'] as String?;
-          if (deviceAddress != null) {
-            success = await controller.p2pService.wifiDirectService
-                .connectToPeer(deviceAddress);
-
-            if (success) {
-              debugPrint('✅ WiFi Direct peer connection successful');
-              await Future.delayed(Duration(seconds: 2));
-
-              try {
-                await controller.p2pService.wifiDirectService
-                    .establishSocketConnection();
-                debugPrint('✅ Socket connection established');
-              } catch (e) {
-                debugPrint('⚠️ Socket establishment failed: $e');
-              }
-            }
-          }
-
+          success = await _connectViaWifiDirect(device);
         case 'hotspot':
         case 'hotspot_enhanced':
-          await controller.connectToDevice(device);
-          success = true;
-
+          success = await _connectViaHotspot(device);
         default:
           await controller.connectToDevice(device);
           success = true;
       }
 
+      // Show result
       if (success) {
-        debugPrint('✅ Successfully connected to ${device['deviceName']}');
-        // Show success feedback - FIXED (removed mounted check)
         ScaffoldMessenger.of(context as BuildContext).showSnackBar(
           SnackBar(
-            content: Text('Connected to ${device['deviceName']}'),
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Text('Connected to ${device['deviceName']}'),
+              ],
+            ),
             backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
+            duration: Duration(seconds: 3),
           ),
         );
       } else {
-        debugPrint('❌ Failed to connect to ${device['deviceName']}');
-        // Show error feedback - FIXED (removed mounted check)
         ScaffoldMessenger.of(context as BuildContext).showSnackBar(
           SnackBar(
-            content: Text('Failed to connect to ${device['deviceName']}'),
+            content: Row(
+              children: [
+                Icon(Icons.error, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Text('Failed to connect to ${device['deviceName']}'),
+              ],
+            ),
             backgroundColor: Colors.red,
             duration: Duration(seconds: 3),
           ),
@@ -1317,7 +856,6 @@ class ConnectionDiscoveryCard extends StatelessWidget {
       }
     } catch (e) {
       debugPrint('❌ Connection error: $e');
-      // Show error feedback - FIXED (removed mounted check)
       ScaffoldMessenger.of(context as BuildContext).showSnackBar(
         SnackBar(
           content: Text('Connection error: ${e.toString()}'),
@@ -1325,6 +863,109 @@ class ConnectionDiscoveryCard extends StatelessWidget {
           duration: Duration(seconds: 3),
         ),
       );
+    }
+  }
+
+  Future<bool> _connectViaHotspot(Map<String, dynamic> device) async {
+    final ssid = device['deviceName'] as String?;
+    if (ssid == null) return false;
+
+    return await controller.p2pService.connectToResQLinkNetwork(ssid);
+  }
+
+  Future<bool> _connectViaWifiDirect(Map<String, dynamic> device) async {
+    final deviceAddress = device['deviceAddress'] as String?;
+    if (deviceAddress == null) return false;
+
+    try {
+      debugPrint('📡 Connecting via WiFi Direct to: $deviceAddress');
+
+      // Use WiFiDirectService for actual connection
+      final success = await controller.p2pService.wifiDirectService
+          .connectToPeer(deviceAddress);
+
+      if (success) {
+        debugPrint('✅ WiFi Direct connection initiated');
+
+        // Wait for connection to establish
+        await Future.delayed(Duration(seconds: 3));
+
+        // Check connection status
+        final connectionInfo = await controller.p2pService.wifiDirectService
+            .getConnectionInfo();
+        final isConnected = connectionInfo?['isConnected'] ?? false;
+
+        if (isConnected) {
+          // Update P2P service state
+          controller.p2pService.updateConnectionStatus(true);
+
+          // Try to establish socket communication
+          await controller.p2pService.wifiDirectService
+              .establishSocketConnection();
+
+          debugPrint('✅ WiFi Direct connection and socket established');
+          return true;
+        }
+      }
+
+      return false;
+    } catch (e) {
+      debugPrint('❌ WiFi Direct connection failed: $e');
+      return false;
+    }
+  }
+
+  Future<void> _sendTestMessage(Map<String, dynamic> device) async {
+    try {
+      final deviceName = device['deviceName'] ?? 'Unknown Device';
+      final testMessage = 'Hello from ResQLink! This is a test message.';
+
+      await controller.p2pService.sendMessage(
+        message: testMessage,
+        type: MessageType.text,
+        targetDeviceId: device['deviceId'],
+        senderName: controller.p2pService.userName ?? 'User',
+      );
+
+      ScaffoldMessenger.of(context as BuildContext).showSnackBar(
+        SnackBar(
+          content: Text('Test message sent to $deviceName'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Failed to send test message: $e');
+      ScaffoldMessenger.of(context as BuildContext).showSnackBar(
+        SnackBar(
+          content: Text('Failed to send message'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _disconnectDevice(Map<String, dynamic> device) async {
+    try {
+      final deviceName = device['deviceName'] ?? 'Unknown Device';
+      final connectionType = device['connectionType'] as String? ?? 'unknown';
+
+      if (connectionType == 'wifi_direct') {
+        await controller.p2pService.wifiDirectService.removeGroup();
+      } else {
+        await controller.p2pService.disconnect();
+      }
+
+      ScaffoldMessenger.of(context as BuildContext).showSnackBar(
+        SnackBar(
+          content: Text('Disconnected from $deviceName'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Failed to disconnect: $e');
     }
   }
 }
