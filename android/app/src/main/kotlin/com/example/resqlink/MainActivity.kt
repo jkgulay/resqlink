@@ -565,31 +565,6 @@ class MainActivity : FlutterActivity() {
         } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
     }
 
-    private fun establishSocketConnection(result: MethodChannel.Result) {
-        channel?.let { ch ->
-            wifiP2pManager.requestConnectionInfo(ch) { info ->
-                if (info?.groupFormed == true) {
-                    // Connection established at system level
-                    android.util.Log.d("WiFiDirect", "Group formed, establishing socket connection")
-
-                    val connectionData = mapOf(
-                        "success" to true,
-                        "isGroupOwner" to info.isGroupOwner,
-                        "groupOwnerAddress" to (info.groupOwnerAddress?.hostAddress ?: ""),
-                        "socketPort" to 8888 // Default socket port
-                    )
-
-                    // Notify Flutter about successful socket connection
-                    sendToFlutter("wifi_direct", "onSocketEstablished", connectionData)
-                    result.success(connectionData)
-                } else {
-                    android.util.Log.e("WiFiDirect", "No WiFi Direct group formed for socket connection")
-                    result.error("NO_GROUP", "No WiFi Direct group formed", null)
-                }
-            }
-        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
-    }
-
     override fun onResume() {
         super.onResume()
         
@@ -608,50 +583,60 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun checkExistingWiFiDirectConnection() {
-        channel?.let { ch ->
-            // Check connection info
-            wifiP2pManager.requestConnectionInfo(ch) { info ->
-                if (info?.groupFormed == true) {
-                    android.util.Log.d("WiFiDirect", "Existing connection detected!")
-                    
-                    // Notify Flutter about existing connection
-                    val connectionData = mapOf(
-                        "isConnected" to true,
-                        "isGroupOwner" to info.isGroupOwner,
-                        "groupOwnerAddress" to (info.groupOwnerAddress?.hostAddress ?: ""),
-                        "groupFormed" to true
-                    )
-                    wifiMethodChannel.invokeMethod("onExistingConnectionFound", connectionData)
-                    
-                    // Request peer list
-                    requestPeerList()
-                    
-                    // Establish socket if not already done
-                    if (!isSocketEstablished) {
-                        establishSocketConnection(result = null)
-                    }
-                }
-            }
-            
-            // Also request group info
-            wifiP2pManager.requestGroupInfo(ch) { group ->
-                if (group != null) {
-                    val groupData = mapOf(
-                        "networkName" to group.networkName,
-                        "passphrase" to group.passphrase,
-                        "isGroupOwner" to group.isGroupOwner,
-                        "clients" to group.clientList.map { client ->
-                            mapOf(
-                                "deviceName" to client.deviceName,
-                                "deviceAddress" to client.deviceAddress
-                            )
+    channel?.let { ch ->
+        // Check connection info
+        wifiP2pManager.requestConnectionInfo(ch) { info ->
+            if (info?.groupFormed == true) {
+                android.util.Log.d("WiFiDirect", "Existing connection detected!")
+                
+                // Notify Flutter about existing connection
+                val connectionData = mapOf(
+                    "isConnected" to true,
+                    "isGroupOwner" to info.isGroupOwner,
+                    "groupOwnerAddress" to (info.groupOwnerAddress?.hostAddress ?: ""),
+                    "groupFormed" to true
+                )
+                wifiMethodChannel.invokeMethod("onExistingConnectionFound", connectionData)
+                
+                // Request peer list
+                requestPeerList()
+                
+                // Establish socket if not already done
+                if (!isSocketEstablished) {
+                    // Create a dummy MethodChannel.Result for internal calls
+                    val dummyResult = object : MethodChannel.Result {
+                        override fun success(result: Any?) {
+                            android.util.Log.d("WiFiDirect", "Socket established on app resume")
                         }
-                    )
-                    wifiMethodChannel.invokeMethod("onGroupInfoAvailable", groupData)
+                        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                            android.util.Log.e("WiFiDirect", "Socket establishment failed: $errorMessage")
+                        }
+                        override fun notImplemented() {}
+                    }
+                    establishSocketConnection(dummyResult)
                 }
             }
         }
+        
+        // Also request group info
+        wifiP2pManager.requestGroupInfo(ch) { group ->
+            if (group != null) {
+                val groupData = mapOf(
+                    "networkName" to group.networkName,
+                    "passphrase" to group.passphrase,
+                    "isGroupOwner" to group.isGroupOwner,
+                    "clients" to group.clientList.map { client ->
+                        mapOf(
+                            "deviceName" to client.deviceName,
+                            "deviceAddress" to client.deviceAddress
+                        )
+                    }
+                )
+                wifiMethodChannel.invokeMethod("onGroupInfoAvailable", groupData)
+            }
+        }
     }
+}
 
   private fun requestPeerList() {
     channel?.let { ch ->
