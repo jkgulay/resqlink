@@ -81,67 +81,70 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Widget _buildHomePage() {
-  return MultiProvider(
-    providers: [
-      ChangeNotifierProvider.value(value: _homeController),
-      ChangeNotifierProvider.value(value: LocationStateService()),
-      ChangeNotifierProvider.value(value: _gpsController), // Add GPS controller
-    ],
-    child: Consumer3<HomeController, LocationStateService, GpsController>(
-      builder: (context, controller, locationState, gpsController, child) {
-        return RefreshIndicator(
-          onRefresh: () async {
-            await controller.refreshLocation();
-            await locationState.refreshLocation();
-            await gpsController.getCurrentLocation(); // Also refresh GPS location
-          },
-          child: SingleChildScrollView(
-            physics: AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                // Emergency Mode Card
-                EmergencyModeCard(
-                  p2pService: _p2pService,
-                  onToggle: controller.toggleEmergencyMode,
-                ),
-                SizedBox(height: 16),
-
-                // Connection & Discovery Card
-                ConnectionDiscoveryCard(controller: controller),
-                SizedBox(height: 16),
-
-                // Emergency Actions (only when connected)
-                if (controller.isConnected) ...[
-                  EmergencyActionsCard(
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: _homeController),
+        ChangeNotifierProvider.value(value: LocationStateService()),
+        ChangeNotifierProvider.value(
+          value: _gpsController,
+        ), // Add GPS controller
+      ],
+      child: Consumer3<HomeController, LocationStateService, GpsController>(
+        builder: (context, controller, locationState, gpsController, child) {
+          return RefreshIndicator(
+            onRefresh: () async {
+              await controller.refreshLocation();
+              await locationState.refreshLocation();
+              await gpsController
+                  .getCurrentLocation(); // Also refresh GPS location
+            },
+            child: SingleChildScrollView(
+              physics: AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                children: [
+                  // Emergency Mode Card
+                  EmergencyModeCard(
                     p2pService: _p2pService,
-                    onEmergencyMessage: _sendEmergencyMessage,
+                    onToggle: controller.toggleEmergencyMode,
                   ),
                   SizedBox(height: 16),
+
+                  // Connection & Discovery Card
+                  ConnectionDiscoveryCard(controller: controller),
+                  SizedBox(height: 16),
+
+                  // Emergency Actions (only when connected)
+                  if (controller.isConnected) ...[
+                    EmergencyActionsCard(
+                      p2pService: _p2pService,
+                      onEmergencyMessage: _sendEmergencyMessage,
+                    ),
+                    SizedBox(height: 16),
+                  ],
+
+                  // Location Status Card - Now properly connected
+                  LocationStatusCard(
+                    location: locationState.currentLocation,
+                    isLoading: locationState.isLoadingLocation,
+                    unsyncedCount: locationState.unsyncedCount,
+                    onRefresh: () async {
+                      await locationState.refreshLocation();
+                      await gpsController.getCurrentLocation();
+                    },
+                    onShare: locationState.shareLocation,
+                  ),
+                  SizedBox(height: 16),
+
+                  // Instructions Card
+                  InstructionsCard(),
                 ],
-
-                // Location Status Card - Now properly connected
-                LocationStatusCard(
-                  location: locationState.currentLocation,
-                  isLoading: locationState.isLoadingLocation,
-                  unsyncedCount: locationState.unsyncedCount,
-                  onRefresh: () async {
-                    await locationState.refreshLocation();
-                    await gpsController.getCurrentLocation();
-                  },
-                  onShare: locationState.shareLocation,
-                ),
-                SizedBox(height: 16),
-
-                // Instructions Card
-                InstructionsCard(),
-              ],
+              ),
             ),
-          ),
-        );
-      },
-    ),
-  );
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -197,9 +200,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return null;
   }
 
-  Future<void> _onAppResumed() async {
-    debugPrint('App resumed - restoring state');
+Future<void> _onAppResumed() async {
+  debugPrint('App resumed - restoring state');
+  
+  if (_isP2PInitialized) {
+    try {
+      debugPrint('🔍 Checking for existing connections...');
+      
+      await _p2pService.checkForExistingConnections();
+      await _p2pService.checkForSystemConnections();
+      
+      debugPrint('✅ Connection check completed');
+    } catch (e) {
+      debugPrint('❌ Error checking connections on app resume: $e');
+    }
+  } else {
+    debugPrint('⚠️ P2P service not initialized, skipping connection check');
   }
+}
 
   Future<void> _onAppPaused() async {
     debugPrint('App paused - saving state');
@@ -220,8 +238,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _initializeP2P() async {
     // Get display name from temporary identity service (from landing page)
-    String? displayName = await TemporaryIdentityService.getTemporaryDisplayName();
-    final userName = displayName ?? "User_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
+    String? displayName =
+        await TemporaryIdentityService.getTemporaryDisplayName();
+    final userName =
+        displayName ??
+        "User_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
 
     debugPrint('🆔 Initializing P2P with username: $userName');
 

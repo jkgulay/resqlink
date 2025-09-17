@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/wifi_direct_service.dart';
+import '../services/p2p/wifi_direct_service.dart';
 import '../services/hotspot_service.dart';
 
 class WiFiDebugPanel extends StatefulWidget {
