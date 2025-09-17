@@ -14,6 +14,16 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugins.GeneratedPluginRegistrant
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.InetSocketAddress
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.PrintWriter
+import org.json.JSONObject
+
+import android.os.Handler
+import android.os.Looper
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -332,64 +342,64 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun handleClientConnection(socket: Socket) {
-        Thread {
-            try {
-                val input = BufferedReader(InputStreamReader(socket.getInputStream()))
-                val output = PrintWriter(socket.getOutputStream(), true)
-                
-                // Send handshake
-                val handshake = JSONObject().apply {
-                    put("type", "handshake")
-                    put("deviceId", android.provider.Settings.Secure.getString(
-                        contentResolver, 
-                        android.provider.Settings.Secure.ANDROID_ID
+   private fun handleClientConnection(socket: Socket) {
+    Thread {
+        try {
+            val input = BufferedReader(InputStreamReader(socket.getInputStream()))
+            val output = PrintWriter(socket.getOutputStream(), true)
+            
+            // Send handshake
+            val handshake = JSONObject().apply {
+                put("type", "handshake")
+                put("deviceId", android.provider.Settings.Secure.getString(
+                    contentResolver, 
+                    android.provider.Settings.Secure.ANDROID_ID
+                ))
+                put("timestamp", System.currentTimeMillis())
+            }
+            output.println(handshake.toString())
+            
+            // Listen for messages
+            var line: String?
+            while (input.readLine().also { line = it } != null) {
+                runOnUiThread {
+                    wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
+                        "message" to line,
+                        "from" to socket.remoteSocketAddress.toString()
                     ))
-                    put("timestamp", System.currentTimeMillis())
                 }
-                output.println(handshake.toString())
-                
-                // Listen for messages
-                var line: String?
-                while (input.readLine().also { line = it } != null) {
-                    runOnUiThread {
-                        wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
-                            "message" to line,
-                            "from" to socket.remoteSocketAddress.toString()
-                        ))
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("WiFiDirect", "Error handling client connection", e)
             }
-        }.start()
-    }
+        } catch (e: Exception) {
+            android.util.Log.e("WiFiDirect", "Error handling client connection", e)
+        }
+    }.start()
+}
 
-    fun sendMessage(message: String, result: MethodChannel.Result) {
-        Thread {
-            try {
-                val output = when {
-                    clientSocket?.isConnected == true -> 
-                        PrintWriter(clientSocket!!.getOutputStream(), true)
-                    serverSocket != null -> {
-                        // Send to all connected clients
-                        // You'd need to maintain a list of connected client sockets
-                        null
-                    }
-                    else -> null
+  private fun sendMessage(message: String, result: MethodChannel.Result) {
+    Thread {
+        try {
+            val output = when {
+                clientSocket?.isConnected == true -> 
+                    PrintWriter(clientSocket!!.getOutputStream(), true)
+                serverSocket != null -> {
+                    // Send to all connected clients
+                    // You'd need to maintain a list of connected client sockets
+                    null
                 }
-                
-                output?.println(message)
-                runOnUiThread {
-                    result.success(true)
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    result.error("SEND_ERROR", "Failed to send message: ${e.message}", null)
-                }
+                else -> null
             }
-        }.start()
-    }
+            
+            output?.println(message)
+            runOnUiThread {
+                result.success(true)
+            }
+        } catch (e: Exception) {
+            runOnUiThread {
+                result.error("SEND_ERROR", "Failed to send message: ${e.message}", null)
+            }
+        }
+    }.start()
+}
 
     private fun startDiscoveryWithRetry(
         channel: WifiP2pManager.Channel,
@@ -642,27 +652,27 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun requestPeerList() {
-        channel?.let { ch ->
-            wifiP2pManager.requestPeers(ch) { peers ->
-                val peersList = peers.deviceList.map { device ->
-                    mapOf(
-                        "deviceName" to device.deviceName,
-                        "deviceAddress" to device.deviceAddress,
-                        "status" to when(device.status) {
-                            WifiP2pDevice.AVAILABLE -> "available"
-                            WifiP2pDevice.INVITED -> "invited"
-                            WifiP2pDevice.CONNECTED -> "connected"
-                            WifiP2pDevice.FAILED -> "failed"
-                            WifiP2pDevice.UNAVAILABLE -> "unavailable"
-                            else -> "unknown"
-                        }
-                    )
-                }
-                wifiMethodChannel.invokeMethod("onPeersUpdated", mapOf("peers" to peersList))
+  private fun requestPeerList() {
+    channel?.let { ch ->
+        wifiP2pManager.requestPeers(ch) { peers ->
+            val peersList = peers.deviceList.map { device ->
+                mapOf(
+                    "deviceName" to device.deviceName,
+                    "deviceAddress" to device.deviceAddress,
+                    "status" to when(device.status) {
+                        WifiP2pDevice.AVAILABLE -> "available"
+                        WifiP2pDevice.INVITED -> "invited"
+                        WifiP2pDevice.CONNECTED -> "connected"
+                        WifiP2pDevice.FAILED -> "failed"
+                        WifiP2pDevice.UNAVAILABLE -> "unavailable"
+                        else -> "unknown"
+                    }
+                )
             }
+            wifiMethodChannel.invokeMethod("onPeersUpdated", mapOf("peers" to peersList))
         }
     }
+}
 
 
     override fun onPause() {
