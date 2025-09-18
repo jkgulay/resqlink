@@ -21,7 +21,7 @@ class P2PMainService extends P2PBaseService {
   late P2PDiscoveryService _discoveryService;
   late ConnectionFallbackManager _connectionFallbackManager;
   late HotspotManager _hotspotManager;
-  late WiFiDirectService _wifiDirectService;
+  WiFiDirectService? _wifiDirectService;
   late HotspotService _hotspotService;
 
   // Enhanced state
@@ -91,11 +91,13 @@ class P2PMainService extends P2PBaseService {
       _wifiDirectService = WiFiDirectService.instance;
       _hotspotService = HotspotService.instance;
 
-      await _wifiDirectService.initialize();
+      await _wifiDirectService?.initialize();
       await _hotspotService.initialize();
 
       // Setup WiFi Direct state synchronization
-      _setupWiFiDirectSync();
+      if (_wifiDirectService != null) {
+        _setupWiFiDirectSync();
+      }
 
       _addMessageTrace('Main service initialized with userName: $userName');
       debugPrint('✅ P2P Main Service initialized successfully');
@@ -114,7 +116,7 @@ class P2PMainService extends P2PBaseService {
   ConnectionFallbackManager get connectionFallbackManager =>
       _connectionFallbackManager;
   HotspotManager get hotspotManager => _hotspotManager;
-  WiFiDirectService get wifiDirectService => _wifiDirectService;
+  WiFiDirectService? get wifiDirectService => _wifiDirectService;
   HotspotService get hotspotService => _hotspotService;
   P2PRole _parseRole(String role) {
     switch (role.toLowerCase()) {
@@ -128,15 +130,13 @@ class P2PMainService extends P2PBaseService {
   }
 
   void _setupWiFiDirectSync() {
-    // Listen for WiFi Direct connection changes
-    _wifiDirectService.connectionStream.listen((connectionState) {
+    _wifiDirectService?.connectionStream.listen((connectionState) {
       debugPrint('🔗 WiFi Direct connection state changed: $connectionState');
 
       if (connectionState == WiFiDirectConnectionState.connected) {
         _currentConnectionMode = P2PConnectionMode.wifiDirect;
         updateConnectionStatus(true);
 
-        // CRITICAL FIX: Request peer list immediately after connection
         _refreshConnectedPeers();
       } else if (connectionState == WiFiDirectConnectionState.disconnected) {
         if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
@@ -150,23 +150,18 @@ class P2PMainService extends P2PBaseService {
       notifyListeners();
     });
 
-    // Listen for peer discoveries - ENHANCED
-    _wifiDirectService.peersStream.listen((peers) {
+    _wifiDirectService?.peersStream.listen((peers) {
       debugPrint('👥 WiFi Direct peers updated: ${peers.length} peers found');
 
-      // Convert WiFi Direct peers to device models and update discovery
       _updateDiscoveredPeersFromWiFiDirect(peers);
 
-      // Check for newly connected peers
       _checkForNewConnectedPeers(peers);
 
-      // Trigger discovery callback
       _triggerDevicesDiscoveredCallback();
       notifyListeners();
     });
 
-    // Listen for state changes (socket establishment, etc.) - ENHANCED
-    _wifiDirectService.stateStream.listen((state) {
+    _wifiDirectService?.stateStream.listen((state) {
       debugPrint('📡 WiFi Direct state update: $state');
 
       // Handle connection changes
@@ -222,6 +217,7 @@ class P2PMainService extends P2PBaseService {
         isConnected: peer.status == WiFiDirectPeerStatus.connected,
         discoveryMethod: 'wifi_direct',
         deviceAddress: peer.deviceAddress,
+        messageCount: 0,
       );
 
       // Update or add to discovered devices
@@ -293,7 +289,7 @@ class P2PMainService extends P2PBaseService {
       debugPrint('🔄 Refreshing connected WiFi Direct peers...');
 
       // Get current peer list
-      final peers = await _wifiDirectService.getPeerList();
+      final peers = await _wifiDirectService?.getPeerList() ?? [];
 
       // Process connected peers
       for (final peerData in peers) {
@@ -459,7 +455,7 @@ class P2PMainService extends P2PBaseService {
       debugPrint('🔍 Checking for existing WiFi Direct connections...');
 
       // Check connection info
-      final connectionInfo = await _wifiDirectService.getConnectionInfo();
+      final connectionInfo = await _wifiDirectService?.getConnectionInfo();
 
       if (connectionInfo != null && connectionInfo['groupFormed'] == true) {
         debugPrint('✅ Existing WiFi Direct connection found!');
@@ -476,7 +472,7 @@ class P2PMainService extends P2PBaseService {
         final socketEstablished = connectionInfo['socketEstablished'] ?? false;
         if (!socketEstablished) {
           debugPrint('🔌 Socket not established, creating now...');
-          final success = await _wifiDirectService.establishSocketConnection();
+          final success = await _wifiDirectService?.establishSocketConnection() ?? false;
           if (success) {
             debugPrint('✅ Socket connection established successfully');
             _addMessageTrace(
@@ -504,7 +500,7 @@ class P2PMainService extends P2PBaseService {
   Future<void> checkForSystemConnections() async {
     try {
       debugPrint('🔍 Checking for system-level connections...');
-      await _wifiDirectService.checkForSystemConnection();
+      await _wifiDirectService?.checkForSystemConnection();
     } catch (e) {
       debugPrint('❌ Error checking system connections: $e');
     }
@@ -705,7 +701,7 @@ class P2PMainService extends P2PBaseService {
       debugPrint('📡 Connecting via WiFi Direct to: $deviceAddress');
 
       // Use WiFiDirectService for actual connection
-      final success = await _wifiDirectService.connectToPeer(deviceAddress);
+      final success = await _wifiDirectService?.connectToPeer(deviceAddress) ?? false;
 
       if (success) {
         // Update P2P service state
@@ -891,7 +887,7 @@ class P2PMainService extends P2PBaseService {
     final deviceMap = <String, Map<String, dynamic>>{};
 
     // Add WiFi Direct peers with actual signal strength and connection status
-    for (final peer in _wifiDirectService.discoveredPeers) {
+    for (final peer in (_wifiDirectService?.discoveredPeers ?? <dynamic>[])) {
       final isConnected = peer.status == WiFiDirectPeerStatus.connected;
 
       deviceMap[peer.deviceAddress] = {
@@ -1074,7 +1070,7 @@ class P2PMainService extends P2PBaseService {
       }
 
       // Use WiFi Direct discovery
-      await _wifiDirectService.startDiscovery();
+      await _wifiDirectService?.startDiscovery();
 
       // Also use existing discovery service
       await _discoveryService.discoverDevices(force: force);
@@ -1163,7 +1159,7 @@ class P2PMainService extends P2PBaseService {
         });
 
         // Send via WiFi Direct socket
-        final success = await _wifiDirectService.sendMessage(messageJson);
+        final success = await _wifiDirectService?.sendMessage(messageJson) ?? false;
 
         if (success) {
           debugPrint('✅ Message sent via WiFi Direct');

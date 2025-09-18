@@ -36,6 +36,7 @@ class WiFiDirectService {
 
   bool _isInitialized = false;
   bool _isDiscovering = false;
+  bool _isRefreshingPeers = false;
   List<WiFiDirectPeer> _discoveredPeers = [];
   WiFiDirectConnectionState _connectionState =
       WiFiDirectConnectionState.disconnected;
@@ -223,93 +224,139 @@ class WiFiDirectService {
   }
 
   Future<void> _refreshPeerList() async {
-  try {
-    final result = await _wifiChannel.invokeMethod<Map>('getPeerList');
-    if (result != null && result['peers'] != null) {
-      final peerList = result['peers'] as List;
-      final peers = peerList
-          .map((peer) => WiFiDirectPeer.fromMap(peer as Map<String, dynamic>))
-          .toList();
+    if (_isRefreshingPeers) return;
+    _isRefreshingPeers = true;
 
-      _discoveredPeers = peers;
-      _peersController.add(peers);
+    try {
+      final result = await _wifiChannel.invokeMethod<Map>('getPeerList');
+      if (result != null && result['peers'] != null) {
+        final peerList = result['peers'] as List;
+        final peers = peerList
+            .map((peer) => WiFiDirectPeer.fromMap(peer as Map<String, dynamic>))
+            .toList();
 
-      debugPrint('📡 Found ${peers.length} WiFi Direct peers');
-      for (final peer in peers) {
-        final statusName = peer.status.name;
-        debugPrint('  - ${peer.deviceName} (${peer.deviceAddress}) - Status: $statusName');
-        
-        if (peer.status == WiFiDirectPeerStatus.connected) {
-          debugPrint('    ✅ CONNECTED PEER: ${peer.deviceName}');
+        if (!_peersEqual(_discoveredPeers, peers)) {
+          _discoveredPeers = peers;
+          _peersController.add(peers);
+
+          final hasConnectedPeers = peers.any(
+            (p) => p.status == WiFiDirectPeerStatus.connected,
+          );
+          if (hasConnectedPeers !=
+              (_connectionState == WiFiDirectConnectionState.connected)) {
+            _updateConnectionState(
+              hasConnectedPeers
+                  ? WiFiDirectConnectionState.connected
+                  : WiFiDirectConnectionState.disconnected,
+            );
+          }
         }
       }
-      
-      // CRITICAL FIX: Update connection state based on peer status
-      final hasConnectedPeers = peers.any((p) => p.status == WiFiDirectPeerStatus.connected);
-      final newConnectionState = hasConnectedPeers
-          ? WiFiDirectConnectionState.connected
-          : WiFiDirectConnectionState.disconnected;
-          
-      if (_connectionState != newConnectionState) {
-        debugPrint('🔄 Updating connection state to: ${newConnectionState.name}');
-        _connectionState = newConnectionState;
-        _connectionController.add(_connectionState);
-      }
+    } finally {
+      _isRefreshingPeers = false;
     }
-  } catch (e) {
-    debugPrint('❌ Failed to refresh peer list: $e');
   }
-}
-Future<List<Map<String, dynamic>>> getPeerList() async {
-  try {
-    debugPrint('📡 Requesting WiFi Direct peer list...');
 
-    final result = await _channel.invokeMethod('getPeerList');
+  void _updateConnectionState(WiFiDirectConnectionState newState) {
+    if (_connectionState != newState) {
+      final previousState = _connectionState;
+      _connectionState = newState;
 
-    if (result != null && result['peers'] != null) {
-      final peers = List<Map<String, dynamic>>.from(
-        (result['peers'] as List).map(
-          (peer) => Map<String, dynamic>.from(peer),
-        ),
+      debugPrint(
+        '🔄 WiFi Direct connection state: ${previousState.name} → ${newState.name}',
       );
 
-      debugPrint('✅ Found ${peers.length} WiFi Direct peers');
+      // Notify connection state listeners
+      _connectionController.add(_connectionState);
 
-      final wifiDirectPeers = <WiFiDirectPeer>[];
-      for (final peerData in peers) {
-        final peer = WiFiDirectPeer(
-          deviceName: peerData['deviceName'] ?? 'Unknown',
-          deviceAddress: peerData['deviceAddress'] ?? '',
-          primaryDeviceType: peerData['primaryDeviceType'] ?? 'Unknown Type',
-          secondaryDeviceType: peerData['secondaryDeviceType'] ?? 'Unknown Secondary Type',
-          status: peerData['status'] ?? 0,
-          supportsWps: peerData['supportsWps'] ?? false,
-          signalLevel: peerData['signalLevel'],
+      // Send detailed state information
+      _stateController.add({
+        'connectionStateChanged': true,
+        'previousState': previousState.name,
+        'currentState': newState.name,
+        'isConnected': newState == WiFiDirectConnectionState.connected,
+        'isConnecting': newState == WiFiDirectConnectionState.connecting,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      // Log connection events for debugging
+      switch (newState) {
+        case WiFiDirectConnectionState.connected:
+          debugPrint('✅ WiFi Direct connected successfully');
+        case WiFiDirectConnectionState.connecting:
+          debugPrint('🔄 WiFi Direct connecting...');
+        case WiFiDirectConnectionState.disconnected:
+          debugPrint('❌ WiFi Direct disconnected');
+        case WiFiDirectConnectionState.error:
+          debugPrint('💥 WiFi Direct connection error');
+      }
+    }
+  }
+
+  bool _peersEqual(List<WiFiDirectPeer> list1, List<WiFiDirectPeer> list2) {
+    if (list1.length != list2.length) return false;
+    for (int i = 0; i < list1.length; i++) {
+      if (list1[i].deviceAddress != list2[i].deviceAddress ||
+          list1[i].status != list2[i].status) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<List<Map<String, dynamic>>> getPeerList() async {
+    try {
+      debugPrint('📡 Requesting WiFi Direct peer list...');
+
+      final result = await _channel.invokeMethod('getPeerList');
+
+      if (result != null && result['peers'] != null) {
+        final peers = List<Map<String, dynamic>>.from(
+          (result['peers'] as List).map(
+            (peer) => Map<String, dynamic>.from(peer),
+          ),
         );
-        
-        wifiDirectPeers.add(peer);
-        
-        // Log connection status
-        if (peer.status == WiFiDirectPeerStatus.connected) {
-          debugPrint('🔗 CONNECTED: ${peer.deviceName} (${peer.deviceAddress})');
+
+        debugPrint('✅ Found ${peers.length} WiFi Direct peers');
+
+        final wifiDirectPeers = <WiFiDirectPeer>[];
+        for (final peerData in peers) {
+          final peer = WiFiDirectPeer(
+            deviceName: peerData['deviceName'] ?? 'Unknown',
+            deviceAddress: peerData['deviceAddress'] ?? '',
+            primaryDeviceType: peerData['primaryDeviceType'] ?? 'Unknown Type',
+            secondaryDeviceType:
+                peerData['secondaryDeviceType'] ?? 'Unknown Secondary Type',
+            status: peerData['status'] ?? 0,
+            supportsWps: peerData['supportsWps'] ?? false,
+            signalLevel: peerData['signalLevel'],
+          );
+
+          wifiDirectPeers.add(peer);
+
+          // Log connection status
+          if (peer.status == WiFiDirectPeerStatus.connected) {
+            debugPrint(
+              '🔗 CONNECTED: ${peer.deviceName} (${peer.deviceAddress})',
+            );
+          }
         }
+
+        _discoveredPeers = wifiDirectPeers;
+        _peersController.add(wifiDirectPeers);
+
+        // Check connection state
+        _checkForConnectionStatusChanges(wifiDirectPeers);
+
+        return peers;
       }
 
-      _discoveredPeers = wifiDirectPeers;
-      _peersController.add(wifiDirectPeers);
-      
-      // Check connection state
-      _checkForConnectionStatusChanges(wifiDirectPeers);
-
-      return peers;
+      return [];
+    } catch (e) {
+      debugPrint('❌ Error getting peer list: $e');
+      return [];
     }
-
-    return [];
-  } catch (e) {
-    debugPrint('❌ Error getting peer list: $e');
-    return [];
   }
-}
 
   Future<bool> establishSocketConnection() async {
     try {
@@ -517,38 +564,40 @@ Future<List<Map<String, dynamic>>> getPeerList() async {
   }
 
   Future<void> _handleConnectionChanged(Map<String, dynamic> args) async {
-  final isConnected = args['isConnected'] as bool? ?? false;
-  final groupFormed = args['groupFormed'] as bool? ?? false;
-  
-  debugPrint('🔄 WiFi Direct connection changed: connected=$isConnected, groupFormed=$groupFormed');
-  
-  final newState = (isConnected && groupFormed)
-      ? WiFiDirectConnectionState.connected
-      : WiFiDirectConnectionState.disconnected;
-      
-  if (_connectionState != newState) {
-    _connectionState = newState;
-    _connectionController.add(_connectionState);
-    
-    // Send detailed connection info
-    _stateController.add({
-      'connectionChanged': true,
-      'connectionInfo': {
-        'isConnected': isConnected,
-        'groupFormed': groupFormed,
-        'isGroupOwner': args['isGroupOwner'] ?? false,
-        'groupOwnerAddress': args['groupOwnerAddress'] ?? '',
-      },
-    });
-    
-    // If connected, refresh peer list to get connected devices
-    if (isConnected && groupFormed) {
-      debugPrint('🔄 Connection established, refreshing peer list...');
-      await Future.delayed(Duration(milliseconds: 500));
-      await _refreshPeerList();
+    final isConnected = args['isConnected'] as bool? ?? false;
+    final groupFormed = args['groupFormed'] as bool? ?? false;
+
+    debugPrint(
+      '🔄 WiFi Direct connection changed: connected=$isConnected, groupFormed=$groupFormed',
+    );
+
+    final newState = (isConnected && groupFormed)
+        ? WiFiDirectConnectionState.connected
+        : WiFiDirectConnectionState.disconnected;
+
+    if (_connectionState != newState) {
+      _connectionState = newState;
+      _connectionController.add(_connectionState);
+
+      // Send detailed connection info
+      _stateController.add({
+        'connectionChanged': true,
+        'connectionInfo': {
+          'isConnected': isConnected,
+          'groupFormed': groupFormed,
+          'isGroupOwner': args['isGroupOwner'] ?? false,
+          'groupOwnerAddress': args['groupOwnerAddress'] ?? '',
+        },
+      });
+
+      // If connected, refresh peer list to get connected devices
+      if (isConnected && groupFormed) {
+        debugPrint('🔄 Connection established, refreshing peer list...');
+        await Future.delayed(Duration(milliseconds: 500));
+        await _refreshPeerList();
+      }
     }
   }
-}
 
   void _checkForConnectionStatusChanges(List<WiFiDirectPeer> peers) {
     bool hasConnectedPeers = false;
