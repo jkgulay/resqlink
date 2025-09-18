@@ -41,6 +41,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late GpsController _gpsController;
 
   late final List<Widget> pages;
+  GlobalKey? _messagePageKey;
 
   @override
   void initState() {
@@ -59,6 +60,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _initializeP2P();
     _initializeMapService();
 
+    // Create MessagePage with key for external control
+    _messagePageKey = GlobalKey();
+
     pages = [
       _buildHomePage(),
       ChangeNotifierProvider<GpsController>.value(
@@ -70,6 +74,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       ),
       MessagePage(
+        key: _messagePageKey,
         p2pService: _p2pService,
         currentLocation: _homeController.currentLocation,
       ),
@@ -111,7 +116,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   SizedBox(height: 16),
 
                   // Connection & Discovery Card
-                  ConnectionDiscoveryCard(controller: controller),
+                  ConnectionDiscoveryCard(
+                    controller: controller,
+                    onDeviceChatTap: _onDeviceChatTap,
+                  ),
                   SizedBox(height: 16),
 
                   // Emergency Actions (only when connected)
@@ -414,6 +422,43 @@ Future<void> _onAppResumed() async {
 
   void _onLocationShare(LocationModel location) {
     // Handle location sharing
+  }
+
+  void _onDeviceChatTap(Map<String, dynamic> device) {
+    // Extract device information
+    final deviceId = device['deviceAddress'] ?? device['deviceId'] ?? '';
+    final deviceName = device['deviceName'] ?? 'Unknown Device';
+
+    if (deviceId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cannot start chat: Device ID not available'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Navigate to Messages tab
+    setState(() {
+      selectedIndex = 2;
+    });
+
+    // Set the selected device in MessagePage after a brief delay to ensure navigation completes
+    Future.delayed(Duration(milliseconds: 100), () {
+      if (_messagePageKey != null) {
+        MessagePage.selectDeviceFor(_messagePageKey!, deviceId, deviceName);
+      }
+    });
+
+    // Show feedback
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Opening chat with $deviceName'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 1),
+      ),
+    );
   }
 
   Future<void> _sendEmergencyMessage(EmergencyTemplate template) async {

@@ -6,8 +6,13 @@ import '../../models/message_model.dart';
 
 class ConnectionDiscoveryCard extends StatelessWidget {
   final HomeController controller;
+  final Function(Map<String, dynamic>)? onDeviceChatTap;
 
-  const ConnectionDiscoveryCard({super.key, required this.controller});
+  const ConnectionDiscoveryCard({
+    super.key,
+    required this.controller,
+    this.onDeviceChatTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -130,7 +135,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
       return 'Hosting hotspot - ${controller.p2pService.connectedDevices.length} connected';
     }
 
-    if (controller.p2pService.wifiDirectService.connectionState ==
+    if (controller.p2pService.wifiDirectService?.connectionState ==
         WiFiDirectConnectionState.connected) {
       return 'WiFi Direct active - ${controller.p2pService.connectedDevices.length} connected';
     }
@@ -315,12 +320,16 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            device['deviceName'] ?? 'Unknown Device',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                              color: isConnected ? Colors.green : Colors.white,
+                          child: GestureDetector(
+                            onTap: isConnected ? () => _navigateToChat(context, device) : null,
+                            child: Text(
+                              device['deviceName'] ?? 'Unknown Device',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                                color: isConnected ? Colors.green : Colors.white,
+                                decoration: isConnected ? TextDecoration.underline : null,
+                              ),
                             ),
                           ),
                         ),
@@ -508,9 +517,9 @@ class ConnectionDiscoveryCard extends StatelessWidget {
       children: [
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: () => _sendTestMessage(device),
-            icon: Icon(Icons.message, size: 16),
-            label: Text('Send Message'),
+            onPressed: () => _navigateToChat(context, device),
+            icon: Icon(Icons.chat, size: 16),
+            label: Text('Chat'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green,
               foregroundColor: Colors.white,
@@ -523,13 +532,18 @@ class ConnectionDiscoveryCard extends StatelessWidget {
         ),
         SizedBox(width: 8),
         IconButton(
+          onPressed: () => _sendTestMessage(device),
+          icon: Icon(Icons.send, color: Colors.blue, size: 20),
+          tooltip: 'Send Test Message',
+        ),
+        IconButton(
           onPressed: () => _disconnectDevice(device),
           icon: Icon(Icons.link_off, color: Colors.red, size: 20),
           tooltip: 'Disconnect',
         ),
         IconButton(
           onPressed: () => _showDeviceDetails(context, device),
-          icon: Icon(Icons.info_outline, color: Colors.blue, size: 20),
+          icon: Icon(Icons.info_outline, color: Colors.grey, size: 20),
           tooltip: 'Device Details',
         ),
       ],
@@ -882,7 +896,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
 
       // Use WiFiDirectService for actual connection
       final success = await controller.p2pService.wifiDirectService
-          .connectToPeer(deviceAddress);
+          ?.connectToPeer(deviceAddress) ?? false;
 
       if (success) {
         debugPrint('✅ WiFi Direct connection initiated');
@@ -892,7 +906,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
 
         // Check connection status
         final connectionInfo = await controller.p2pService.wifiDirectService
-            .getConnectionInfo();
+            ?.getConnectionInfo();
         final isConnected = connectionInfo?['isConnected'] ?? false;
 
         if (isConnected) {
@@ -901,7 +915,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
 
           // Try to establish socket communication
           await controller.p2pService.wifiDirectService
-              .establishSocketConnection();
+              ?.establishSocketConnection();
 
           debugPrint('✅ WiFi Direct connection and socket established');
           return true;
@@ -946,13 +960,28 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     }
   }
 
+  void _navigateToChat(BuildContext context, Map<String, dynamic> device) {
+    if (onDeviceChatTap != null) {
+      onDeviceChatTap!(device);
+    } else {
+      // Fallback: Show a message if no navigation callback is provided
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Chat with ${device['deviceName'] ?? 'device'}'),
+          backgroundColor: Colors.blue,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   Future<void> _disconnectDevice(Map<String, dynamic> device) async {
     try {
       final deviceName = device['deviceName'] ?? 'Unknown Device';
       final connectionType = device['connectionType'] as String? ?? 'unknown';
 
       if (connectionType == 'wifi_direct') {
-        await controller.p2pService.wifiDirectService.removeGroup();
+        await controller.p2pService.wifiDirectService?.removeGroup();
       } else {
         await controller.p2pService.disconnect();
       }

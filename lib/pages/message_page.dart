@@ -135,6 +135,14 @@ class MessagePage extends StatefulWidget {
 
   @override
   State<MessagePage> createState() => _MessagePageState();
+
+  // Static method to access the state externally
+  static void selectDeviceFor(GlobalKey key, String deviceId, String deviceName) {
+    final state = key.currentState;
+    if (state != null && state is _MessagePageState) {
+      state.selectDevice(deviceId, deviceName);
+    }
+  }
 }
 
 class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
@@ -879,6 +887,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       _isChatView = true;
     });
     _loadMessagesForDevice(endpointId);
+  }
+
+  // Public method for external navigation
+  void selectDevice(String deviceId, String deviceName) {
+    _openConversation(deviceId, deviceName);
   }
 
   void _scrollToBottom() {
