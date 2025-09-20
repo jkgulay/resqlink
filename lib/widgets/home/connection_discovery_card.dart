@@ -16,61 +16,88 @@ class ConnectionDiscoveryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 8,
-      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          gradient: LinearGradient(
-            colors: [
-              Color(0xFF0B192C).withValues(alpha: 0.08),
-              Color(0xFF1E3A5F).withValues(alpha: 0.05),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = MediaQuery.of(context).size.width;
+        final isTablet = screenWidth >= 768;
+        final isDesktop = screenWidth >= 1024;
+
+        // Responsive margins and padding
+        final horizontalMargin = isDesktop ? 24.0 : (isTablet ? 16.0 : 12.0);
+        final cardPadding = isDesktop ? 32.0 : (isTablet ? 28.0 : 24.0);
+
+        return Card(
+          elevation: 8,
+          margin: EdgeInsets.symmetric(horizontal: horizontalMargin, vertical: 6),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Container(
+            constraints: isDesktop ? BoxConstraints(maxWidth: 1200) : null,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFF0B192C).withValues(alpha: 0.08),
+                  Color(0xFF1E3A5F).withValues(alpha: 0.05),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              border: Border.all(
+                color: Color(0xFF1E3A5F).withValues(alpha: 0.15),
+                width: 1,
+              ),
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(cardPadding),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return _buildConnectionContent(context, constraints);
+                },
+              ),
+            ),
           ),
-          border: Border.all(
-            color: Color(0xFF1E3A5F).withValues(alpha: 0.15),
-            width: 1,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isNarrow = constraints.maxWidth < 400;
-              return _buildConnectionContent(context, isNarrow);
-            },
-          ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildConnectionContent(BuildContext context, bool isNarrow) {
+  Widget _buildConnectionContent(BuildContext context, BoxConstraints constraints) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isNarrow = constraints.maxWidth < 400;
+    final isTablet = screenWidth >= 768;
+    final isDesktop = screenWidth >= 1024;
+
+    final sectionSpacing = isDesktop ? 32.0 : (isTablet ? 28.0 : 24.0);
+    final contentSpacing = isDesktop ? 24.0 : (isTablet ? 22.0 : 20.0);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildConnectionHeader(isNarrow),
-        SizedBox(height: 20),
-        _buildConnectionStats(isNarrow),
+        _buildConnectionHeader(isNarrow, isTablet, isDesktop),
+        SizedBox(height: contentSpacing),
+        _buildConnectionStats(isNarrow, isTablet, isDesktop),
         if (controller.discoveredDevices.isNotEmpty) ...[
-          SizedBox(height: 24),
-          _buildDevicesList(isNarrow),
+          SizedBox(height: sectionSpacing),
+          _buildDevicesList(isNarrow, isTablet, isDesktop),
         ],
         if (controller.isConnected) ...[
-          SizedBox(height: 20),
-          _buildConnectedDevices(isNarrow),
+          SizedBox(height: contentSpacing),
+          _buildConnectedDevices(isNarrow, isTablet, isDesktop),
         ],
       ],
     );
   }
 
-  Widget _buildConnectionHeader(bool isNarrow) {
+  Widget _buildConnectionHeader(bool isNarrow, bool isTablet, bool isDesktop) {
+    final headerPadding = isDesktop ? 26.0 : (isTablet ? 24.0 : (isNarrow ? 18.0 : 22.0));
+    final iconPadding = isDesktop ? 16.0 : (isTablet ? 14.0 : 12.0);
+    final iconSize = isDesktop ? 32.0 : (isTablet ? 30.0 : (isNarrow ? 24.0 : 28.0));
+    final titleSize = isDesktop ? 24.0 : (isTablet ? 22.0 : (isNarrow ? 18.0 : 20.0));
+    final subtitleSize = isDesktop ? 16.0 : (isTablet ? 15.0 : (isNarrow ? 13.0 : 14.0));
+    final spacing = isDesktop ? 22.0 : (isTablet ? 20.0 : (isNarrow ? 14.0 : 18.0));
+
     return Container(
-      padding: EdgeInsets.all(isNarrow ? 18 : 22),
+      padding: EdgeInsets.all(headerPadding),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(18),
@@ -82,7 +109,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            padding: EdgeInsets.all(12),
+            padding: EdgeInsets.all(iconPadding),
             decoration: BoxDecoration(
               color: controller.isConnected
                   ? Colors.green.withValues(alpha: 0.15)
@@ -97,10 +124,10 @@ class ConnectionDiscoveryCard extends StatelessWidget {
             child: Icon(
               Icons.network_wifi,
               color: controller.isConnected ? Colors.green : Colors.blue,
-              size: isNarrow ? 24 : 28,
+              size: iconSize,
             ),
           ),
-          SizedBox(width: isNarrow ? 14 : 18),
+          SizedBox(width: spacing),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,7 +135,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                 Text(
                   'Network Connection',
                   style: TextStyle(
-                    fontSize: isNarrow ? 18 : 20,
+                    fontSize: titleSize,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
                   ),
@@ -117,7 +144,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                 Text(
                   _getConnectionStatusText(controller),
                   style: TextStyle(
-                    fontSize: isNarrow ? 13 : 14,
+                    fontSize: subtitleSize,
                     color: Colors.white70,
                   ),
                 ),
@@ -153,9 +180,12 @@ class ConnectionDiscoveryCard extends StatelessWidget {
 
 
 
-  Widget _buildConnectionStats(bool isNarrow) {
+  Widget _buildConnectionStats(bool isNarrow, bool isTablet, bool isDesktop) {
+    final statsPadding = isDesktop ? 20.0 : (isTablet ? 18.0 : 16.0);
+    final dividerHeight = isDesktop ? 40.0 : (isTablet ? 35.0 : 30.0);
+
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: EdgeInsets.all(statsPadding),
       decoration: BoxDecoration(
         color: Colors.blue.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(16),
@@ -164,22 +194,31 @@ class ConnectionDiscoveryCard extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _buildNetworkStat(
-            'Discovered',
-            '${controller.discoveredDevices.length}',
-            Icons.radar,
-            Colors.blue,
+          Expanded(
+            child: _buildNetworkStat(
+              'Discovered',
+              '${controller.discoveredDevices.length}',
+              Icons.radar,
+              Colors.blue,
+              isTablet,
+              isDesktop,
+            ),
           ),
           Container(
             width: 1,
-            height: 30,
+            height: dividerHeight,
             color: Colors.blue.withValues(alpha: 0.3),
+            margin: EdgeInsets.symmetric(horizontal: isDesktop ? 20 : (isTablet ? 16 : 12)),
           ),
-          _buildNetworkStat(
-            'Connected',
-            '${controller.p2pService.connectedDevices.length}',
-            Icons.link,
-            Colors.green,
+          Expanded(
+            child: _buildNetworkStat(
+              'Connected',
+              '${controller.p2pService.connectedDevices.length}',
+              Icons.link,
+              Colors.green,
+              isTablet,
+              isDesktop,
+            ),
           ),
         ],
       ),
@@ -191,30 +230,50 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     String value,
     IconData icon,
     Color color,
+    bool isTablet,
+    bool isDesktop,
   ) {
+    final iconSize = isDesktop ? 28.0 : (isTablet ? 24.0 : 20.0);
+    final valueSize = isDesktop ? 20.0 : (isTablet ? 18.0 : 16.0);
+    final labelSize = isDesktop ? 14.0 : (isTablet ? 12.0 : 11.0);
+    final spacing = isDesktop ? 8.0 : (isTablet ? 6.0 : 4.0);
+
     return Column(
       children: [
-        Icon(icon, color: color, size: 20),
-        SizedBox(height: 4),
+        Icon(icon, color: color, size: iconSize),
+        SizedBox(height: spacing),
         Text(
           value,
           style: TextStyle(
             color: color,
             fontWeight: FontWeight.bold,
-            fontSize: 16,
+            fontSize: valueSize,
           ),
         ),
+        SizedBox(height: 2),
         Text(
           label,
-          style: TextStyle(color: color.withValues(alpha: 0.8), fontSize: 11),
+          style: TextStyle(
+            color: color.withValues(alpha: 0.8),
+            fontSize: labelSize,
+          ),
+          textAlign: TextAlign.center,
         ),
       ],
     );
   }
 
-  Widget _buildDevicesList(bool isNarrow) {
+  Widget _buildDevicesList(bool isNarrow, bool isTablet, bool isDesktop) {
+    final listPadding = isDesktop ? 24.0 : (isTablet ? 22.0 : 20.0);
+    final iconPadding = isDesktop ? 12.0 : (isTablet ? 11.0 : 10.0);
+    final iconSize = isDesktop ? 22.0 : (isTablet ? 21.0 : (isNarrow ? 18.0 : 20.0));
+    final titleSize = isDesktop ? 18.0 : (isTablet ? 17.0 : (isNarrow ? 15.0 : 16.0));
+    final spacing = isDesktop ? 16.0 : (isTablet ? 14.0 : 12.0);
+    final itemSpacing = isDesktop ? 16.0 : (isTablet ? 14.0 : (isNarrow ? 8.0 : 12.0));
+    final contentSpacing = isDesktop ? 24.0 : (isTablet ? 22.0 : (isNarrow ? 16.0 : 20.0));
+
     return Container(
-      padding: EdgeInsets.all(20),
+      padding: EdgeInsets.all(listPadding),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
@@ -226,7 +285,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                padding: EdgeInsets.all(10),
+                padding: EdgeInsets.all(iconPadding),
                 decoration: BoxDecoration(
                   color: Colors.green.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
@@ -237,38 +296,63 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                 child: Icon(
                   Icons.devices,
                   color: Colors.green,
-                  size: isNarrow ? 18 : 20,
+                  size: iconSize,
                 ),
               ),
-              SizedBox(width: 12),
-              Text(
-                'Found ${controller.discoveredDevices.length} device${controller.discoveredDevices.length == 1 ? '' : 's'}',
-                style: TextStyle(
-                  color: Colors.green,
-                  fontWeight: FontWeight.w600,
-                  fontSize: isNarrow ? 15 : 16,
+              SizedBox(width: spacing),
+              Expanded(
+                child: Text(
+                  'Found ${controller.discoveredDevices.length} device${controller.discoveredDevices.length == 1 ? '' : 's'}',
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.w600,
+                    fontSize: titleSize,
+                  ),
                 ),
               ),
             ],
           ),
-          SizedBox(height: isNarrow ? 16 : 20),
-          ListView.separated(
-            shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
-            itemCount: controller.discoveredDevices.length,
-            separatorBuilder: (context, index) =>
-                SizedBox(height: isNarrow ? 8 : 12),
-            itemBuilder: (context, index) {
-              final device = controller.discoveredDevices[index];
-              return _buildDeviceItem(context, device, isNarrow);
-            },
-          ),
+          SizedBox(height: contentSpacing),
+          if (isDesktop && controller.discoveredDevices.length > 2)
+            _buildDevicesGrid(isTablet, isDesktop)
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              itemCount: controller.discoveredDevices.length,
+              separatorBuilder: (context, index) => SizedBox(height: itemSpacing),
+              itemBuilder: (context, index) {
+                final device = controller.discoveredDevices[index];
+                return _buildDeviceItem(context, device, isNarrow, isTablet, isDesktop);
+              },
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildDeviceItem(BuildContext context, Map<String, dynamic> device, bool isNarrow) {
+  Widget _buildDevicesGrid(bool isTablet, bool isDesktop) {
+    final crossAxisCount = isDesktop ? 2 : 1;
+    final spacing = isDesktop ? 16.0 : 12.0;
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: spacing,
+        mainAxisSpacing: spacing,
+        childAspectRatio: isDesktop ? 2.5 : 3.0,
+      ),
+      itemCount: controller.discoveredDevices.length,
+      itemBuilder: (context, index) {
+        final device = controller.discoveredDevices[index];
+        return _buildDeviceItem(context, device, false, isTablet, isDesktop);
+      },
+    );
+  }
+
+  Widget _buildDeviceItem(BuildContext context, Map<String, dynamic> device, bool isNarrow, bool isTablet, bool isDesktop) {
     // CRITICAL FIX: Better connection status detection for WiFi Direct
     final deviceStatus = device['status'] as String? ?? 'unknown';
     final isWiFiDirectConnected = deviceStatus == 'connected';
@@ -284,8 +368,14 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     final connectionType = device['connectionType'] as String? ?? 'unknown';
     final isAvailable = device['isAvailable'] as bool? ?? !isConnected;
 
+    final itemPadding = isDesktop ? 20.0 : (isTablet ? 19.0 : (isNarrow ? 16.0 : 18.0));
+    final avatarRadius = isDesktop ? 28.0 : (isTablet ? 26.0 : 24.0);
+    final iconSize = isDesktop ? 26.0 : (isTablet ? 24.0 : 22.0);
+    final nameSize = isDesktop ? 16.0 : (isTablet ? 15.5 : 15.0);
+    final addressSize = isDesktop ? 12.0 : (isTablet ? 11.5 : 11.0);
+
     return Container(
-      padding: EdgeInsets.all(isNarrow ? 16 : 18),
+      padding: EdgeInsets.all(itemPadding),
       decoration: BoxDecoration(
         color: isConnected
             ? Colors.green.withValues(alpha: 0.08)
@@ -305,14 +395,14 @@ class ConnectionDiscoveryCard extends StatelessWidget {
             children: [
               CircleAvatar(
                 backgroundColor: signalColor.withValues(alpha: 0.2),
-                radius: 24,
+                radius: avatarRadius,
                 child: Icon(
                   _getConnectionTypeIcon(connectionType),
                   color: signalColor,
-                  size: 22,
+                  size: iconSize,
                 ),
               ),
-              SizedBox(width: 14),
+              SizedBox(width: isDesktop ? 16 : (isTablet ? 15 : 14)),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -326,10 +416,11 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                               device['deviceName'] ?? 'Unknown Device',
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
-                                fontSize: 15,
+                                fontSize: nameSize,
                                 color: isConnected ? Colors.green : Colors.white,
                                 decoration: isConnected ? TextDecoration.underline : null,
                               ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ),
@@ -340,10 +431,11 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                     Text(
                       device['deviceAddress'] ?? '',
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: addressSize,
                         color: Colors.grey.shade600,
                         fontFamily: 'monospace',
                       ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 6),
                     Row(
@@ -363,11 +455,11 @@ class ConnectionDiscoveryCard extends StatelessWidget {
             ],
           ),
           if (!isConnected) ...[
-            SizedBox(height: 12),
-            _buildActionButtons(context, device, isAvailable),
+            SizedBox(height: isDesktop ? 16 : (isTablet ? 14 : 12)),
+            _buildActionButtons(context, device, isAvailable, isTablet, isDesktop),
           ] else ...[
-            SizedBox(height: 12),
-            _buildConnectedActions(context, device),
+            SizedBox(height: isDesktop ? 16 : (isTablet ? 14 : 12)),
+            _buildConnectedActions(context, device, isTablet, isDesktop),
           ],
         ],
       ),
@@ -483,28 +575,38 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, Map<String, dynamic> device, bool isAvailable) {
+  Widget _buildActionButtons(BuildContext context, Map<String, dynamic> device, bool isAvailable, bool isTablet, bool isDesktop) {
+    final iconSize = isDesktop ? 18.0 : (isTablet ? 17.0 : 16.0);
+    final fontSize = isDesktop ? 15.0 : (isTablet ? 14.0 : 13.0);
+    final padding = isDesktop ? EdgeInsets.symmetric(horizontal: 20, vertical: 12) :
+                   (isTablet ? EdgeInsets.symmetric(horizontal: 18, vertical: 10) :
+                   EdgeInsets.symmetric(horizontal: 16, vertical: 8));
+    final spacing = isDesktop ? 12.0 : (isTablet ? 10.0 : 8.0);
+
     return Row(
       children: [
         Expanded(
           child: ElevatedButton.icon(
             onPressed: isAvailable ? () => _connectToDevice(device) : null,
-            icon: Icon(Icons.link, size: 16),
-            label: Text(isAvailable ? 'Connect' : 'Unavailable'),
+            icon: Icon(Icons.link, size: iconSize),
+            label: Text(
+              isAvailable ? 'Connect' : 'Unavailable',
+              style: TextStyle(fontSize: fontSize),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: isAvailable ? Colors.blue : Colors.grey,
               foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: padding,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
           ),
         ),
-        SizedBox(width: 8),
+        SizedBox(width: spacing),
         IconButton(
           onPressed: () => _showDeviceDetails(context, device),
-          icon: Icon(Icons.info_outline, color: Colors.blue, size: 20),
+          icon: Icon(Icons.info_outline, color: Colors.blue, size: iconSize + 2),
           tooltip: 'Device Details',
         ),
       ],
@@ -512,40 +614,75 @@ class ConnectionDiscoveryCard extends StatelessWidget {
   }
 
   /// NEW: Build actions for connected devices
-  Widget _buildConnectedActions(BuildContext context, Map<String, dynamic> device) {
-    return Row(
+  Widget _buildConnectedActions(BuildContext context, Map<String, dynamic> device, bool isTablet, bool isDesktop) {
+    final iconSize = isDesktop ? 18.0 : (isTablet ? 17.0 : 16.0);
+    final fontSize = isDesktop ? 15.0 : (isTablet ? 14.0 : 13.0);
+    final padding = isDesktop ? EdgeInsets.symmetric(horizontal: 20, vertical: 12) :
+                   (isTablet ? EdgeInsets.symmetric(horizontal: 18, vertical: 10) :
+                   EdgeInsets.symmetric(horizontal: 16, vertical: 8));
+    final spacing = isDesktop ? 12.0 : (isTablet ? 10.0 : 8.0);
+    final actionIconSize = iconSize + 2;
+
+    return Wrap(
+      spacing: spacing,
+      runSpacing: spacing / 2,
       children: [
-        Expanded(
+        SizedBox(
+          width: isDesktop ? 140 : (isTablet ? 120 : double.infinity),
           child: ElevatedButton.icon(
             onPressed: () => _navigateToChat(context, device),
-            icon: Icon(Icons.chat, size: 16),
-            label: Text('Chat'),
+            icon: Icon(Icons.chat, size: iconSize),
+            label: Text(
+              'Chat',
+              style: TextStyle(fontSize: fontSize),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green,
               foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: padding,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
           ),
         ),
-        SizedBox(width: 8),
-        IconButton(
-          onPressed: () => _sendTestMessage(device),
-          icon: Icon(Icons.send, color: Colors.blue, size: 20),
-          tooltip: 'Send Test Message',
-        ),
-        IconButton(
-          onPressed: () => _disconnectDevice(device),
-          icon: Icon(Icons.link_off, color: Colors.red, size: 20),
-          tooltip: 'Disconnect',
-        ),
-        IconButton(
-          onPressed: () => _showDeviceDetails(context, device),
-          icon: Icon(Icons.info_outline, color: Colors.grey, size: 20),
-          tooltip: 'Device Details',
-        ),
+        if (isDesktop || isTablet) ...[
+          IconButton(
+            onPressed: () => _sendTestMessage(device),
+            icon: Icon(Icons.send, color: Colors.blue, size: actionIconSize),
+            tooltip: 'Send Test Message',
+          ),
+          IconButton(
+            onPressed: () => _disconnectDevice(device),
+            icon: Icon(Icons.link_off, color: Colors.red, size: actionIconSize),
+            tooltip: 'Disconnect',
+          ),
+          IconButton(
+            onPressed: () => _showDeviceDetails(context, device),
+            icon: Icon(Icons.info_outline, color: Colors.grey, size: actionIconSize),
+            tooltip: 'Device Details',
+          ),
+        ] else
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                onPressed: () => _sendTestMessage(device),
+                icon: Icon(Icons.send, color: Colors.blue, size: actionIconSize),
+                tooltip: 'Send Test Message',
+              ),
+              IconButton(
+                onPressed: () => _disconnectDevice(device),
+                icon: Icon(Icons.link_off, color: Colors.red, size: actionIconSize),
+                tooltip: 'Disconnect',
+              ),
+              IconButton(
+                onPressed: () => _showDeviceDetails(context, device),
+                icon: Icon(Icons.info_outline, color: Colors.grey, size: actionIconSize),
+                tooltip: 'Device Details',
+              ),
+            ],
+          ),
       ],
     );
   }
@@ -665,9 +802,19 @@ class ConnectionDiscoveryCard extends StatelessWidget {
     );
   }
 
-  Widget _buildConnectedDevices(bool isNarrow) {
+  Widget _buildConnectedDevices(bool isNarrow, bool isTablet, bool isDesktop) {
+    final containerPadding = isDesktop ? 24.0 : (isTablet ? 22.0 : (isNarrow ? 16.0 : 20.0));
+    final iconPadding = isDesktop ? 12.0 : (isTablet ? 11.0 : 10.0);
+    final iconSize = isDesktop ? 22.0 : (isTablet ? 21.0 : (isNarrow ? 18.0 : 20.0));
+    final deviceIconSize = isDesktop ? 20.0 : (isTablet ? 19.0 : (isNarrow ? 16.0 : 18.0));
+    final titleSize = isDesktop ? 18.0 : (isTablet ? 17.0 : (isNarrow ? 15.0 : 16.0));
+    final deviceNameSize = isDesktop ? 16.0 : (isTablet ? 15.5 : (isNarrow ? 14.0 : 15.0));
+    final badgeSize = isDesktop ? 12.0 : (isTablet ? 11.5 : (isNarrow ? 10.0 : 11.0));
+    final spacing = isDesktop ? 16.0 : (isTablet ? 14.0 : 12.0);
+    final contentSpacing = isDesktop ? 20.0 : (isTablet ? 18.0 : (isNarrow ? 12.0 : 16.0));
+
     return Container(
-      padding: EdgeInsets.all(isNarrow ? 16 : 20),
+      padding: EdgeInsets.all(containerPadding),
       decoration: BoxDecoration(
         color: Colors.green.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(16),
@@ -679,7 +826,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                padding: EdgeInsets.all(10),
+                padding: EdgeInsets.all(iconPadding),
                 decoration: BoxDecoration(
                   color: Colors.green.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
@@ -690,43 +837,49 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                 child: Icon(
                   Icons.check_circle,
                   color: Colors.green,
-                  size: isNarrow ? 18 : 20,
+                  size: iconSize,
                 ),
               ),
-              SizedBox(width: 12),
-              Text(
-                'Connected Devices',
-                style: TextStyle(
-                  color: Colors.green,
-                  fontWeight: FontWeight.w600,
-                  fontSize: isNarrow ? 15 : 16,
+              SizedBox(width: spacing),
+              Expanded(
+                child: Text(
+                  'Connected Devices',
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.w600,
+                    fontSize: titleSize,
+                  ),
                 ),
               ),
             ],
           ),
-          SizedBox(height: isNarrow ? 12 : 16),
+          SizedBox(height: contentSpacing),
           ...controller.p2pService.connectedDevices.values.map(
             (device) => Padding(
-              padding: EdgeInsets.symmetric(vertical: 4),
+              padding: EdgeInsets.symmetric(vertical: isDesktop ? 6 : (isTablet ? 5 : 4)),
               child: Row(
                 children: [
                   Icon(
                     Icons.wifi_tethering,
-                    size: isNarrow ? 16 : 18,
+                    size: deviceIconSize,
                     color: Colors.green,
                   ),
-                  SizedBox(width: 12),
+                  SizedBox(width: spacing),
                   Expanded(
                     child: Text(
                       device.userName,
                       style: TextStyle(
                         fontWeight: FontWeight.w500,
-                        fontSize: isNarrow ? 14 : 15,
+                        fontSize: deviceNameSize,
                       ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   Container(
-                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isDesktop ? 12 : (isTablet ? 11 : 10),
+                      vertical: isDesktop ? 8 : (isTablet ? 7 : 6),
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.green.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(8),
@@ -737,7 +890,7 @@ class ConnectionDiscoveryCard extends StatelessWidget {
                     child: Text(
                       device.isHost ? 'HOST' : 'CLIENT',
                       style: TextStyle(
-                        fontSize: isNarrow ? 10 : 11,
+                        fontSize: badgeSize,
                         color: Colors.green,
                         fontWeight: FontWeight.w600,
                       ),
