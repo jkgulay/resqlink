@@ -425,7 +425,6 @@ Future<void> _onAppResumed() async {
   }
 
   void _onDeviceChatTap(Map<String, dynamic> device) {
-    // Extract device information
     final deviceId = device['deviceAddress'] ?? device['deviceId'] ?? '';
     final deviceName = device['deviceName'] ?? 'Unknown Device';
 
@@ -439,12 +438,10 @@ Future<void> _onAppResumed() async {
       return;
     }
 
-    // Navigate to Messages tab
     setState(() {
       selectedIndex = 2;
     });
 
-    // Set the selected device in MessagePage after a brief delay to ensure navigation completes
     Future.delayed(Duration(milliseconds: 100), () {
       if (_messagePageKey != null) {
         MessagePage.selectDeviceFor(_messagePageKey!, deviceId, deviceName);

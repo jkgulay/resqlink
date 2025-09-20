@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:english_words/english_words.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:resqlink/pages/landing_page.dart';
-import 'package:resqlink/pages/message_page.dart';
+import 'package:resqlink/widgets/message/notification_service.dart';
 import 'firebase_options.dart';
 import 'pages/home_page.dart';
 import 'services/database_service.dart';

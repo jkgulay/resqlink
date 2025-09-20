@@ -8,18 +8,15 @@ import 'package:multicast_dns/multicast_dns.dart';
 import '../../models/message_model.dart';
 import 'p2p_base_service.dart';
 
-/// Network operations for P2P service
 class P2PNetworkService {
   final P2PBaseService _baseService;
 
-  // Network state
   final Map<String, Socket> _deviceSockets = {};
   final Map<String, IOWebSocketChannel> _webSocketConnections = {};
   ServerSocket? _hotspotServer;
   HttpServer? _localServer;
   MDnsClient? _mdnsClient;
 
-  // Network scanning
   bool _isScanning = false;
   Timer? _hotspotScanTimer;
   List<WifiNetwork> _availableHotspots = [];
