@@ -40,9 +40,9 @@ class TemporaryIdentityService {
       final tempUser = await UserRepository.createUser(
         email: tempEmail,
         password: tempId, // Use temp ID as password
-        isOnlineUser: false,
         name: displayName,
         phoneNumber: null,
+        isOnlineUser: false,
       );
       
       if (tempUser != null) {
@@ -63,7 +63,6 @@ class TemporaryIdentityService {
     }
   }
 
-  // Get current temporary user if active
   static Future<UserModel?> getCurrentTemporaryUser() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -158,8 +157,8 @@ class TemporaryIdentityService {
         email: email,
         password: password,
         name: displayName ?? 'User',
-        isOnlineUser: true,
         phoneNumber: null,
+        isOnlineUser: true,
       );
       
       if (permanentUser != null && displayName != null) {

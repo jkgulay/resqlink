@@ -1,107 +1,78 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 class FirebaseAuthHelper {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Get current user
+  static Stream<User?> get authStateChanges => _auth.authStateChanges();
   static User? get currentUser => _auth.currentUser;
 
   // Check if user is logged in
   static bool get isLoggedIn => _auth.currentUser != null;
 
-  // Register user with Firebase
   static Future<User?> registerUser(String email, String password) async {
     try {
-      print("Attempting to register user with email: $email");
-      print("Password length: ${password.length}");
-
-      final UserCredential userCredential = await _auth
-          .createUserWithEmailAndPassword(
-            email: email.trim(),
-            password: password,
-          );
-      print("User registered successfully!");
-      print("User ID: ${userCredential.user?.uid}");
-      return userCredential.user;
+      debugPrint('📝 Firebase registration attempt: $email');
+      
+      final credential = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      
+      debugPrint('✅ Firebase registration successful: ${credential.user?.email}');
+      return credential.user;
     } on FirebaseAuthException catch (e) {
-      print("Firebase Auth Error during registration:");
-      print("Error Code: ${e.code}");
-      print("Error Message: ${e.message}");
-      print("Error Details: $e");
-
-      // Handle specific Firebase Auth errors
-      switch (e.code) {
-        case 'weak-password':
-          throw Exception(
-            'The password provided is too weak. Use at least 6 characters.',
-          );
-        case 'email-already-in-use':
-          throw Exception('An account already exists for this email.');
-        case 'invalid-email':
-          throw Exception('The email address is not valid.');
-        case 'operation-not-allowed':
-          throw Exception(
-            'Email/password accounts are not enabled in Firebase Console.',
-          );
-        case 'network-request-failed':
-          throw Exception(
-            'Network error. Please check your internet connection.',
-          );
-        default:
-          throw Exception('Registration failed: ${e.message ?? e.code}');
-      }
+      debugPrint('❌ Firebase registration error: ${e.code} - ${e.message}');
+      throw _handleAuthException(e);
     } catch (e) {
-      print("General error during registration: $e");
-      print("Error type: ${e.runtimeType}");
-      throw Exception("Failed to register user: $e");
+      debugPrint('❌ Unexpected registration error: $e');
+      throw Exception('Registration failed: $e');
     }
   }
 
-  // Login user with Firebase
-  static Future<User?> loginUser(String email, String password) async {
+ static Future<User?> loginUser(String email, String password) async {
     try {
-      print("Attempting to login user with email: $email");
-
-      final UserCredential userCredential = await _auth
-          .signInWithEmailAndPassword(email: email.trim(), password: password);
-      print("User logged in successfully!");
-      print("User ID: ${userCredential.user?.uid}");
-      return userCredential.user;
+      debugPrint('🔐 Firebase login attempt: $email');
+      
+      final credential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      
+      debugPrint('✅ Firebase login successful: ${credential.user?.email}');
+      return credential.user;
     } on FirebaseAuthException catch (e) {
-      print("Firebase Auth Error during login:");
-      print("Error Code: ${e.code}");
-      print("Error Message: ${e.message}");
-      print("Error Details: $e");
-
-      // Handle specific Firebase Auth errors
-      switch (e.code) {
-        case 'user-not-found':
-          throw Exception('No user found for this email.');
-        case 'wrong-password':
-          throw Exception('Wrong password provided.');
-        case 'invalid-email':
-          throw Exception('The email address is not valid.');
-        case 'user-disabled':
-          throw Exception('This user account has been disabled.');
-        case 'too-many-requests':
-          throw Exception(
-            'Too many failed login attempts. Please try again later.',
-          );
-        case 'invalid-credential':
-          throw Exception('Invalid email or password.');
-        case 'network-request-failed':
-          throw Exception(
-            'Network error. Please check your internet connection.',
-          );
-        default:
-          throw Exception('Login failed: ${e.message ?? e.code}');
-      }
+      debugPrint('❌ Firebase login error: ${e.code} - ${e.message}');
+      throw _handleAuthException(e);
     } catch (e) {
-      print("General error during login: $e");
-      print("Error type: ${e.runtimeType}");
-      throw Exception("Failed to login: $e");
+      debugPrint('❌ Unexpected login error: $e');
+      throw Exception('Login failed: $e');
     }
   }
+
+    static Exception _handleAuthException(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'user-not-found':
+        return Exception('No account found with this email address.');
+      case 'wrong-password':
+        return Exception('Incorrect password. Please try again.');
+      case 'email-already-in-use':
+        return Exception('An account already exists with this email address.');
+      case 'weak-password':
+        return Exception('Password is too weak. Please choose a stronger password.');
+      case 'invalid-email':
+        return Exception('Please enter a valid email address.');
+      case 'user-disabled':
+        return Exception('This account has been disabled.');
+      case 'too-many-requests':
+        return Exception('Too many failed attempts. Please try again later.');
+      case 'network-request-failed':
+        return Exception('Network error. Please check your connection.');
+      default:
+        return Exception('Authentication failed: ${e.message}');
+    }
+  }
+
 
   // Logout user
   static Future<void> logoutUser() async {
@@ -260,6 +231,4 @@ class FirebaseAuthHelper {
     }
   }
 
-  // Listen to auth state changes
-  static Stream<User?> get authStateChanges => _auth.authStateChanges();
 }

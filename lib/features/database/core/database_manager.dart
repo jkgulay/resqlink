@@ -4,11 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
-/// Core database manager responsible only for database initialization and migrations
 class DatabaseManager {
-  static Database? _database;
+static Database? _database;
   static const String _dbName = 'resqlink_enhanced.db';
-  static const int _dbVersion = 5;
+  static const int _dbVersion = 6; 
 
   // Singleton
   static DatabaseManager? _instance;
@@ -256,7 +255,7 @@ class DatabaseManager {
       await db.execute('CREATE INDEX idx_message_queue_session ON message_queue (session_id)');
 
       // Users indexes
-      await db.execute('CREATE INDEX idx_users_device_id ON users (deviceId)');
+      await db.execute('CREATE INDEX idx_users_user_id ON users (userId)');
 
       // Known devices indexes
       await db.execute('CREATE INDEX idx_known_devices_device_id ON known_devices (deviceId)');

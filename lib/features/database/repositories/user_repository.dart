@@ -49,17 +49,19 @@ class UserRepository {
         'additionalInfo': additionalInfo != null ? jsonEncode(additionalInfo) : null,
       };
 
-      await db.insert(_userTable, userData);
+      final insertedId = await db.insert(_userTable, userData);
 
       final user = UserModel(
+        id: insertedId,
         userId: userId,
         email: email,
+        passwordHash: hashedPassword,
         name: name,
         phoneNumber: phoneNumber,
         createdAt: DateTime.now(),
         lastLogin: DateTime.now(),
         isActive: true,
-        additionalInfo: additionalInfo, passwordHash: '',
+        additionalInfo: additionalInfo,
       );
 
       debugPrint('✅ User created: $email');
@@ -98,6 +100,7 @@ class UserRepository {
 
       final userData = results.first;
       final user = UserModel(
+        id: userData['id'] as int?,
         userId: userData['userId'] as String,
         email: userData['email'] as String,
         passwordHash: userData['password'] as String,
@@ -152,6 +155,7 @@ class UserRepository {
 
       final userData = results.first;
       return UserModel(
+        id: userData['id'] as int?,
         userId: userData['userId'] as String,
         email: userData['email'] as String,
         passwordHash: userData['password'] as String,
@@ -187,6 +191,7 @@ class UserRepository {
 
       final userData = results.first;
       return UserModel(
+        id: userData['id'] as int?,
         userId: userData['userId'] as String,
         email: userData['email'] as String,
         passwordHash: userData['password'] as String,
@@ -217,6 +222,7 @@ class UserRepository {
       );
 
       return results.map((userData) => UserModel(
+        id: userData['id'] as int?,
         userId: userData['userId'] as String,
         email: userData['email'] as String,
         passwordHash: userData['password'] as String,

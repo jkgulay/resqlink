@@ -143,38 +143,38 @@ class MessageModel {
     };
   }
 
-  // Create from database Map
+  // Create from database Map (matches database schema with camelCase)
   factory MessageModel.fromMap(Map<String, dynamic> map) {
     return MessageModel(
       id: map['id'],
-      endpointId: map['endpoint_id'] ?? '',
-      fromUser: map['from_user'] ?? '',
+      endpointId: map['endpointId'] ?? '',
+      fromUser: map['fromUser'] ?? '',
       message: map['message'] ?? '',
-      isMe: map['is_me'] == 1,
-      isEmergency: map['is_emergency'] == 1,
+      isMe: map['isMe'] == 1,
+      isEmergency: map['isEmergency'] == 1,
       timestamp: map['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
       latitude: map['latitude']?.toDouble(),
       longitude: map['longitude']?.toDouble(),
       synced: map['synced'] == 1,
-      syncedToFirebase: map['synced_to_firebase'] == 1,
-      messageId: map['message_id'],
+      syncedToFirebase: map['syncedToFirebase'] == 1,
+      messageId: map['messageId'],
       type: map['type'] ?? 'message',
       status: map['status'] != null
           ? MessageStatus.values[map['status']]
           : MessageStatus.pending,
-      routePath: map['route_path'] != null
-          ? (map['route_path'] as String).split(',')
+      routePath: map['routePath'] != null
+          ? (map['routePath'] as String).split(',')
           : null,
       ttl: map['ttl'],
-      connectionType: map['connection_type'],
-      deviceInfo: map['device_info'] != null
-          ? jsonDecode(map['device_info'])
+      connectionType: map['connectionType'],
+      deviceInfo: map['deviceInfo'] != null
+          ? jsonDecode(map['deviceInfo'])
           : null,
-      targetDeviceId: map['target_device_id'],
-      messageType: map['message_type'] != null
-          ? MessageType.values[map['message_type']]
+      targetDeviceId: map['targetDeviceId'],
+      messageType: map['messageType'] != null
+          ? MessageType.values[map['messageType']]
           : MessageType.text,
-      chatSessionId: map['chat_session_id'],
+      chatSessionId: map['chatSessionId'],
     );
   }
 
