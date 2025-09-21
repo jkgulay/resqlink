@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:english_words/english_words.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:resqlink/features/database/repositories/system_repository.dart';
+import 'package:resqlink/features/database/core/database_manager.dart';
 import 'package:resqlink/pages/landing_page.dart';
 import 'package:resqlink/widgets/message/notification_service.dart';
 import 'firebase_options.dart';
 import 'pages/home_page.dart';
-import 'services/database_service.dart';
 import 'services/firebase_debug.dart';
 import 'services/map_service.dart';
 import 'services/settings_service.dart';
@@ -50,7 +51,7 @@ Future<void> _initializeServices() async {
   // FORCE database recreation to fix schema issues
   try {
     debugPrint('🗑️ Deleting old database to fix schema...');
-    await DatabaseService.deleteDatabaseFile();
+    await SystemRepository.deleteDatabaseFile();
     debugPrint('✅ Old database deleted');
   } catch (e) {
     debugPrint('⚠️ Could not delete old database: $e');
@@ -58,7 +59,7 @@ Future<void> _initializeServices() async {
 
   // Initialize database with new schema
   try {
-    await DatabaseService.database;
+    await DatabaseManager.database;
     debugPrint('✅ New database initialized successfully');
   } catch (e) {
     debugPrint('❌ Database initialization failed: $e');

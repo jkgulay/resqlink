@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/models/message_model.dart';
 import '../models/chat_session_model.dart';
-import '../services/database_service.dart';
+import '../features/database/repositories/chat_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../pages/chat_session_page.dart';
 import '../pages/chat_list_page.dart';
@@ -46,7 +46,7 @@ class ChatNavigationService {
       _isNavigating = true;
 
       // Create or update chat session
-      final sessionId = await DatabaseService.createOrUpdateChatSession(
+      final sessionId = await ChatRepository.createOrUpdate(
         deviceId: deviceId,
         deviceName: deviceName,
         currentUserId: _p2pService!.deviceId,
@@ -176,7 +176,7 @@ class ChatNavigationService {
     P2PMainService p2pService,
   ) async {
     try {
-      final sessionId = await DatabaseService.createOrUpdateChatSession(
+      final sessionId = await ChatRepository.createOrUpdate(
         deviceId: deviceId,
         deviceName: deviceName,
         currentUserId: p2pService.deviceId,
@@ -213,11 +213,11 @@ class ChatNavigationService {
       );
 
       // Check if session exists
-      final existingSession = await DatabaseService.getChatSession(sessionId);
+      final existingSession = await ChatRepository.getSession(sessionId);
 
       if (existingSession != null) {
         // Update connection time
-        await DatabaseService.updateChatSessionConnection(
+        await ChatRepository.updateSessionConnection(
           sessionId: sessionId,
           connectionType: ConnectionType.wifiDirect, // or determine actual type
           connectionTime: DateTime.now(),
@@ -299,7 +299,7 @@ class ChatNavigationService {
             onPressed: () async {
               Navigator.pop(context);
               // Quick emergency message
-              final sessionId = await DatabaseService.createOrUpdateChatSession(
+              final sessionId = await ChatRepository.createOrUpdate(
                 deviceId: deviceId,
                 deviceName: deviceName,
                 currentUserId: p2pService.deviceId,

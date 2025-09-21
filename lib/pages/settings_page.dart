@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/pages/landing_page.dart';
 import 'package:resqlink/services/auth_service.dart';
-import 'package:resqlink/services/database_service.dart';
+import 'package:resqlink/features/database/repositories/message_repository.dart';
+import 'package:resqlink/features/database/repositories/system_repository.dart';
 import 'package:resqlink/services/message_sync_service.dart';
 import 'package:resqlink/services/p2p/p2p_base_service.dart';
 import 'package:resqlink/services/p2p/p2p_main_service.dart';
@@ -38,8 +39,8 @@ class SettingsPageState extends State<SettingsPage> {
 
   Future<void> _loadStatistics() async {
     try {
-      final allMessages = await DatabaseService.getAllMessages();
-      final pendingMessages = await DatabaseService.getPendingMessages();
+      final allMessages = await MessageRepository.getAllMessages();
+      final pendingMessages = await MessageRepository.getPendingMessages();
 
       setState(() {
         _totalMessages = allMessages.length;
@@ -127,7 +128,7 @@ class SettingsPageState extends State<SettingsPage> {
 
     if (confirm == true) {
       try {
-        await DatabaseService.clearAllData();
+        await SystemRepository.clearAllData();
         await _loadStatistics();
         if (!mounted) return;
         _showMessage('Chat history cleared successfully', isSuccess: true);

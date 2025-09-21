@@ -5,10 +5,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 import '../models/message_model.dart';
-import '../services/database_service.dart';
 import 'p2p/p2p_main_service.dart';
 
 class MessageSyncService {
@@ -115,7 +115,7 @@ class MessageSyncService {
   // Check if message ID already exists in database
   Future<bool> _messageExists(String messageId) async {
     try {
-      final existing = await DatabaseService.getMessageById(messageId);
+      final existing = await MessageRepository.getById(messageId);
       return existing != null;
     } catch (e) {
       debugPrint('Error checking message existence: $e');
@@ -173,20 +173,20 @@ class MessageSyncService {
 
     try {
       // Save to local database immediately
-      await DatabaseService.insertMessage(messageModel);
+      await MessageRepository.insertMessage(messageModel);
       debugPrint('💾 Message saved locally: $messageId');
 
       // Try to send via Firebase if online
       if (_isOnline) {
         final success = await _sendToFirebase(messageModel);
         if (success) {
-          await DatabaseService.updateMessageStatus(
+          await MessageRepository.updateMessageStatus(
             messageId,
             MessageStatus.sent,
           );
-          await DatabaseService.markMessageSynced(messageId);
+          await MessageRepository.markMessageSynced(messageId);
         } else {
-          await DatabaseService.updateMessageStatus(
+          await MessageRepository.updateMessageStatus(
             messageId,
             MessageStatus.failed,
           );
@@ -195,12 +195,12 @@ class MessageSyncService {
         // Try P2P if offline but P2P is available
         final success = await _sendViaP2P(messageModel, p2pService);
         if (success) {
-          await DatabaseService.updateMessageStatus(
+          await MessageRepository.updateMessageStatus(
             messageId,
             MessageStatus.sent,
           );
         } else {
-          await DatabaseService.updateMessageStatus(
+          await MessageRepository.updateMessageStatus(
             messageId,
             MessageStatus.failed,
           );
@@ -211,7 +211,7 @@ class MessageSyncService {
       }
     } catch (e) {
       debugPrint('❌ Error in sendMessage: $e');
-      await DatabaseService.updateMessageStatus(
+      await MessageRepository.updateMessageStatus(
         messageId,
         MessageStatus.failed,
       );
@@ -299,7 +299,7 @@ class MessageSyncService {
 
     _isSyncing = true;
     try {
-      final pendingMessages = await DatabaseService.getPendingMessages();
+      final pendingMessages = await MessageRepository.getPendingMessages();
       debugPrint('🔄 Syncing ${pendingMessages.length} pending messages...');
 
       int successCount = 0;
@@ -307,15 +307,15 @@ class MessageSyncService {
         if (message.messageId != null) {
           final success = await _sendToFirebase(message);
           if (success) {
-            await DatabaseService.updateMessageStatus(
+            await MessageRepository.updateMessageStatus(
               message.messageId!,
               MessageStatus.synced,
             );
-            await DatabaseService.markMessageSynced(message.messageId!);
+            await MessageRepository.markMessageSynced(message.messageId!);
             successCount++;
             debugPrint('✅ Message ${message.messageId} synced');
           } else {
-            await DatabaseService.incrementRetryCount(message.messageId!);
+            await MessageRepository.incrementRetryCount(message.messageId!);
             debugPrint('❌ Message ${message.messageId} sync failed');
           }
         }
@@ -390,7 +390,7 @@ class MessageSyncService {
             syncedToFirebase: true,
           );
 
-          await DatabaseService.insertMessage(messageModel);
+          await MessageRepository.insertMessage(messageModel);
           newMessagesCount++;
         } catch (e) {
           debugPrint('❌ Error processing message ${doc.id}: $e');
@@ -429,19 +429,19 @@ class MessageSyncService {
     if (!_isOnline) return;
 
     try {
-      final failedMessages = await DatabaseService.getFailedMessages();
+      final failedMessages = await MessageRepository.getFailedMessages();
       final now = DateTime.now().millisecondsSinceEpoch;
 
       for (final message in failedMessages) {
         if (message.messageId != null) {
           // Get retry count from database
-          final retryCount = await DatabaseService.getRetryCount(
+          final retryCount = await MessageRepository.getRetryCount(
             message.messageId!,
           );
 
           // Exponential backoff: 1, 2, 4, 8, 16, 32, 60 minutes max
           final backoffMinutes = (1 << retryCount).clamp(1, 60);
-          final lastRetry = await DatabaseService.getLastRetryTime(
+          final lastRetry = await MessageRepository.getLastRetryTime(
             message.messageId!,
           );
 
@@ -452,15 +452,15 @@ class MessageSyncService {
 
             final success = await _sendToFirebase(message);
             if (success) {
-              await DatabaseService.updateMessageStatus(
+              await MessageRepository.updateMessageStatus(
                 message.messageId!,
                 MessageStatus.synced,
               );
-              await DatabaseService.markMessageSynced(message.messageId!);
+              await MessageRepository.markMessageSynced(message.messageId!);
               debugPrint('✅ Retry successful: ${message.messageId}');
             } else {
-              await DatabaseService.incrementRetryCount(message.messageId!);
-              await DatabaseService.updateLastRetryTime(
+              await MessageRepository.incrementRetryCount(message.messageId!);
+              await MessageRepository.updateLastRetryTime(
                 message.messageId!,
                 now,
               );

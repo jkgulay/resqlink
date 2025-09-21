@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import '../models/chat_session_model.dart';
 import '../models/message_model.dart';
-import '../services/database_service.dart';
+import '../features/database/repositories/chat_repository.dart';
+import '../features/database/repositories/message_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../utils/resqlink_theme.dart';
 import '../widgets/message/chat_view.dart';
@@ -91,8 +92,8 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     if (!mounted) return;
 
     try {
-      final session = await DatabaseService.getChatSession(widget.sessionId);
-      final messages = await DatabaseService.getChatSessionMessages(widget.sessionId);
+      final session = await ChatRepository.getSession(widget.sessionId);
+      final messages = await ChatRepository.getSessionMessages(widget.sessionId);
 
       if (mounted) {
         setState(() {
@@ -112,7 +113,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   }
 
   Future<void> _markMessagesAsRead() async {
-    await DatabaseService.markChatSessionMessagesAsRead(widget.sessionId);
+    await ChatRepository.markSessionMessagesAsRead(widget.sessionId);
   }
 
   void _onMessageReceived(MessageModel message) async {
@@ -125,7 +126,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       // Update message with chat session ID if not set
       if (message.chatSessionId == null) {
         final updatedMessage = message.copyWith(chatSessionId: widget.sessionId);
-        await DatabaseService.insertMessage(updatedMessage);
+        await MessageRepository.insert(updatedMessage);
       }
 
       await _loadChatData();
@@ -159,10 +160,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       );
 
       // Save message to database
-      await DatabaseService.insertMessage(
-        message,
-        currentUserId: widget.p2pService.deviceId,
-      );
+      await MessageRepository.insert(message);
 
       // Send via P2P if connected
       if (_isConnected) {
@@ -175,14 +173,14 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           );
 
           // Update message status to sent
-          await DatabaseService.updateMessageStatus(messageId, MessageStatus.sent);
+          await MessageRepository.updateStatus(messageId, MessageStatus.sent);
         } catch (e) {
           debugPrint('❌ Error sending P2P message: $e');
-          await DatabaseService.updateMessageStatus(messageId, MessageStatus.failed);
+          await MessageRepository.updateStatus(messageId, MessageStatus.failed);
         }
       } else {
         // Mark as failed if not connected
-        await DatabaseService.updateMessageStatus(messageId, MessageStatus.failed);
+        await MessageRepository.updateStatus(messageId, MessageStatus.failed);
       }
 
       _messageController.clear();
@@ -246,7 +244,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       if (targetDevice != null && targetDevice.isNotEmpty) {
         final success = await widget.p2pService.connectToDevice(targetDevice);
         if (success) {
-          await DatabaseService.updateChatSessionConnection(
+          await ChatRepository.updateSessionConnection(
             sessionId: widget.sessionId,
             connectionType: ConnectionType.wifiDirect,
             connectionTime: DateTime.now(),
@@ -553,7 +551,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              await DatabaseService.deleteChatSession(widget.sessionId);
+              await ChatRepository.deleteSession(widget.sessionId);
               if (mounted) {
                 Navigator.pop(context);
               }
@@ -590,7 +588,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             onPressed: () async {
               Navigator.pop(context);
               // Implement device blocking logic here
-              await DatabaseService.archiveChatSession(widget.sessionId);
+              await ChatRepository.archiveSession(widget.sessionId);
               if (mounted) {
                 Navigator.pop(context);
               }

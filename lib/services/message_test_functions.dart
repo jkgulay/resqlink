@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/services/message_debug_service.dart';
 import '../models/message_model.dart';
-import '../services/database_service.dart';
 import 'p2p/p2p_main_service.dart';
 class MessageTestFunctions {
 
@@ -45,7 +45,7 @@ class MessageTestFunctions {
 
       // 4. Verify message was saved to database
       await Future.delayed(Duration(milliseconds: 500));
-      final allMessages = await DatabaseService.getAllMessages();
+      final allMessages = await MessageRepository.getAllMessages();
       final testMessages = allMessages.where((m) => m.message == testMessage).toList();
 
       if (testMessages.isEmpty) {
@@ -112,7 +112,7 @@ class MessageTestFunctions {
       );
 
       await Future.delayed(Duration(milliseconds: 500));
-      final allMessages = await DatabaseService.getAllMessages();
+      final allMessages = await MessageRepository.getAllMessages();
       final emergencyMessages = allMessages.where((m) => 
         m.message == emergencyMessage && m.isEmergency
       ).toList();
@@ -313,7 +313,7 @@ class MessageTestFunctions {
       // Wait for message to be saved
       await Future.delayed(Duration(milliseconds: 500));
       
-      final allMessages = await DatabaseService.getAllMessages();
+      final allMessages = await MessageRepository.getAllMessages();
       final testMessages = allMessages.where((m) => m.message == testMessage).toList();
 
       if (testMessages.isEmpty) {
@@ -454,7 +454,7 @@ class MessageTestFunctions {
     
     try {
       // Get all messages from database
-      final allMessages = await DatabaseService.getAllMessages();
+      final allMessages = await MessageRepository.getAllMessages();
       
       // Check for basic integrity issues
       final issues = <String>[];

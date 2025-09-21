@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:resqlink/features/database/repositories/chat_repository.dart';
+import 'package:resqlink/features/database/repositories/message_repository.dart';
 import '../../models/message_model.dart';
 import '../../models/chat_session_model.dart';
-import '../../services/database_service.dart';
 import '../../utils/resqlink_theme.dart';
 
 class ChatSearchDelegate extends SearchDelegate<MessageModel?> {
@@ -402,10 +403,10 @@ class ChatSearchDelegate extends SearchDelegate<MessageModel?> {
 
       if (sessionId != null) {
         // Search within specific chat session
-        messages = await DatabaseService.getChatSessionMessages(sessionId!);
+        messages = await ChatRepository.getSessionMessages(sessionId!);
       } else {
         // Search all messages
-        messages = await DatabaseService.getAllMessages();
+        messages = await MessageRepository.getAllMessages();
       }
 
       // Filter messages based on search query
@@ -679,7 +680,7 @@ class ChatSessionSearchDelegate extends SearchDelegate<ChatSessionSummary?> {
     if (searchQuery.isEmpty) return [];
 
     try {
-      final sessions = await DatabaseService.getChatSessions();
+      final sessions = await ChatRepository.getChatSessions();
 
       return sessions.where((session) {
         final lowerQuery = searchQuery.toLowerCase();

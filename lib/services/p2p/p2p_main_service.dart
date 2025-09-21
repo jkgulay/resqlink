@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_discovery_service.dart';
 import '../../models/message_model.dart';
-import '../../services/database_service.dart';
 import 'wifi_direct_service.dart';
 import '../../services/hotspot_service.dart';
 import 'p2p_base_service.dart';
@@ -437,7 +437,7 @@ class P2PMainService extends P2PBaseService {
       );
 
       // Save to database
-      await DatabaseService.insertMessage(messageModel);
+      await MessageRepository.insertMessage(messageModel);
 
       // Add to message history
       saveMessageToHistory(messageModel);
@@ -732,7 +732,7 @@ class P2PMainService extends P2PBaseService {
   }
 
   Future<bool> _connectViaMDNS(Map<String, dynamic> device) async {
-    // Implementation for mDNS connection
+ 
     debugPrint('📡 Connecting via mDNS to: ${device['deviceName']}');
     return true; // Placeholder
   }
@@ -1148,7 +1148,7 @@ class P2PMainService extends P2PBaseService {
             );
 
       // Save to database first
-      await DatabaseService.insertMessage(messageModel);
+      await MessageRepository.insertMessage(messageModel);
 
       // Add to message history
       saveMessageToHistory(messageModel);
@@ -1183,7 +1183,7 @@ class P2PMainService extends P2PBaseService {
 
           // Update message status
           if (messageModel.messageId != null) {
-            await DatabaseService.updateMessageStatus(
+            await MessageRepository.updateMessageStatus(
               messageModel.messageId!,
               MessageStatus.sent,
             );

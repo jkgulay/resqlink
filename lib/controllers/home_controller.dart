@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/message_model.dart';
 import 'package:resqlink/services/p2p/p2p_base_service.dart';
 import '../services/p2p/p2p_main_service.dart';
-import '../services/database_service.dart';
 import '../pages/gps_page.dart';
 
 class HomeController extends ChangeNotifier {
@@ -56,7 +56,7 @@ class HomeController extends ChangeNotifier {
 
   Future<void> _checkUnsyncedLocations() async {
     try {
-      final messages = await DatabaseService.getUnsyncedMessages();
+      final messages = await MessageRepository.getUnsyncedMessages();
       _unsyncedCount = messages.length;
       notifyListeners();
     } catch (e) {

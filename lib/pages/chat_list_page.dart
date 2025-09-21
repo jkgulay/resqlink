@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/chat_session_model.dart';
-import '../services/database_service.dart';
+import '../features/database/repositories/chat_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../utils/resqlink_theme.dart';
 import '../widgets/message/empty_chat_view.dart';
@@ -78,7 +78,7 @@ class _ChatListPageState extends State<ChatListPage>
     if (!mounted) return;
 
     try {
-      final sessions = await DatabaseService.getChatSessions();
+      final sessions = await ChatRepository.getChatSessions();
       if (mounted) {
         setState(() {
           _chatSessions = sessions;
@@ -118,7 +118,7 @@ class _ChatListPageState extends State<ChatListPage>
     }
 
     // Mark messages as read
-    await DatabaseService.markChatSessionMessagesAsRead(session.sessionId);
+    await ChatRepository.markSessionMessagesAsRead(session.sessionId);
     _loadChatSessions();
   }
 
@@ -152,7 +152,7 @@ class _ChatListPageState extends State<ChatListPage>
     );
 
     if (confirmed == true) {
-      await DatabaseService.deleteChatSession(session.sessionId);
+      await ChatRepository.deleteSession(session.sessionId);
       _loadChatSessions();
       _showSnackBar('Chat deleted', isError: false);
     }
@@ -183,7 +183,7 @@ class _ChatListPageState extends State<ChatListPage>
       if (targetDevice != null && targetDevice.isNotEmpty) {
         final success = await widget.p2pService.connectToDevice(targetDevice);
         if (success) {
-          await DatabaseService.updateChatSessionConnection(
+          await ChatRepository.updateSessionConnection(
             sessionId: session.sessionId,
             connectionType: ConnectionType.wifiDirect,
             connectionTime: DateTime.now(),

@@ -14,6 +14,7 @@ import '../services/p2p/p2p_base_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';
 import '../services/temporary_identity_service.dart';
+import '../features/chat/services/message_queue_service.dart';
 import '../controllers/home_controller.dart';
 import '../widgets/home/emergency_mode_card.dart';
 import '../widgets/home/emergency_actions_card.dart';
@@ -271,6 +272,11 @@ Future<void> _onAppResumed() async {
       _p2pService.onDeviceDisconnected = _onDeviceDisconnected;
       _p2pService.addListener(_updateUI);
       _p2pService.emergencyMode = true;
+
+      // Initialize message queue service with P2P service
+      MessageQueueService.setP2PService(_p2pService);
+      await MessageQueueService().initialize();
+      debugPrint('✅ Message Queue Service initialized with P2P integration');
     } else {
       setState(() => _isP2PInitialized = false);
       debugPrint("❌ Failed to initialize P2P service");
