@@ -26,6 +26,7 @@ class MessageModel {
   final Map<String, dynamic>? deviceInfo;
   final String? targetDeviceId;
   final MessageType messageType;
+  final String? chatSessionId;
 
   MessageModel({
     this.id,
@@ -48,6 +49,7 @@ class MessageModel {
     this.deviceInfo,
     this.targetDeviceId,
     MessageType? messageType,
+    this.chatSessionId,
   }) : type = type ?? (isEmergency ? 'emergency' : 'message'),
        messageType = messageType ?? (isEmergency ? MessageType.emergency : MessageType.text);
 
@@ -87,6 +89,7 @@ class MessageModel {
     Map<String, dynamic>? deviceInfo,
     String? targetDeviceId,
     MessageType? messageType,
+    String? chatSessionId,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -109,6 +112,7 @@ class MessageModel {
       deviceInfo: deviceInfo ?? this.deviceInfo,
       targetDeviceId: targetDeviceId ?? this.targetDeviceId,
       messageType: messageType ?? this.messageType,
+      chatSessionId: chatSessionId ?? this.chatSessionId,
     );
   }
 
@@ -135,6 +139,7 @@ class MessageModel {
       'device_info': deviceInfo != null ? jsonEncode(deviceInfo!) : null,
       'target_device_id': targetDeviceId,
       'message_type': messageType.index,
+      'chat_session_id': chatSessionId,
     };
   }
 
@@ -157,18 +162,19 @@ class MessageModel {
       status: map['status'] != null
           ? MessageStatus.values[map['status']]
           : MessageStatus.pending,
-      routePath: map['route_path'] != null 
-          ? (map['route_path'] as String).split(',') 
+      routePath: map['route_path'] != null
+          ? (map['route_path'] as String).split(',')
           : null,
       ttl: map['ttl'],
       connectionType: map['connection_type'],
-      deviceInfo: map['device_info'] != null 
-          ? jsonDecode(map['device_info']) 
+      deviceInfo: map['device_info'] != null
+          ? jsonDecode(map['device_info'])
           : null,
       targetDeviceId: map['target_device_id'],
       messageType: map['message_type'] != null
           ? MessageType.values[map['message_type']]
           : MessageType.text,
+      chatSessionId: map['chat_session_id'],
     );
   }
 
@@ -194,13 +200,13 @@ class MessageModel {
               orElse: () => MessageStatus.pending,
             )
           : MessageStatus.pending,
-      routePath: map['routePath'] != null 
-          ? List<String>.from(jsonDecode(map['routePath'])) 
+      routePath: map['routePath'] != null
+          ? List<String>.from(jsonDecode(map['routePath']))
           : null,
       ttl: map['ttl'],
       connectionType: map['connectionType'],
-      deviceInfo: map['deviceInfo'] != null 
-          ? jsonDecode(map['deviceInfo']) 
+      deviceInfo: map['deviceInfo'] != null
+          ? jsonDecode(map['deviceInfo'])
           : null,
       targetDeviceId: map['targetDeviceId'],
       messageType: map['messageType'] is String
@@ -209,6 +215,7 @@ class MessageModel {
               orElse: () => MessageType.text,
             )
           : MessageType.text,
+      chatSessionId: map['chatSessionId'],
     );
   }
 
