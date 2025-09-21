@@ -919,6 +919,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             onSendLocationP2P: _sendLocationViaP2P,
             onSendEmergency: _sendEmergencyMessage,
             onTyping: _handleTyping,
+            enabled: true,
           ),
       ],
     );

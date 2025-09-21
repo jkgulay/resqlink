@@ -788,6 +788,20 @@ class P2PMainService extends P2PBaseService {
   /// Get current connection mode
   P2PConnectionMode get currentConnectionMode => _currentConnectionMode;
 
+  /// Get connection type as string
+  String get connectionType {
+    switch (_currentConnectionMode) {
+      case P2PConnectionMode.wifiDirect:
+        return 'wifi_direct';
+      case P2PConnectionMode.hotspot:
+        return 'hotspot';
+      case P2PConnectionMode.client:
+        return 'client';
+      default:
+        return 'none';
+    }
+  }
+
   /// Get connected hotspot SSID
   String? get connectedHotspotSSID => _connectedHotspotSSID;
 

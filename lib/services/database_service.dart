@@ -10,11 +10,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/message_model.dart';
 import '../models/device_model.dart';
+import '../models/chat_session_model.dart';
 
 class DatabaseService {
   static Database? _database;
   static const String _dbName = 'resqlink_enhanced.db';
-  static const int _dbVersion = 3;
+  static const int _dbVersion = 4;
 
   // Table names
   static const String _messagesTable = 'messages';
@@ -26,6 +27,7 @@ class DatabaseService {
   static const String _userTable = 'users';
   static const String _knownDevicesTable = 'known_devices';
   static const String _pendingMessagesTable = 'pending_messages';
+  static const String _chatSessionsTable = 'chat_sessions';
 
   // Singleton
   static DatabaseService? _instance;
@@ -100,6 +102,7 @@ static Future<void> _createDB(Database db, int version) async {
         retryCount INTEGER DEFAULT 0,
         lastRetryTime INTEGER DEFAULT 0,
         priority INTEGER DEFAULT 0,
+        chatSessionId TEXT,
         createdAt INTEGER DEFAULT (strftime('%s', 'now'))
       )
     ''');
@@ -287,6 +290,29 @@ static Future<void> _createDB(Database db, int version) async {
     // Create indexes for pending messages table
     await db.execute('CREATE INDEX idx_pending_device_id ON $_pendingMessagesTable (deviceId)');
 
+    // Chat sessions table
+    await db.execute('''
+      CREATE TABLE $_chatSessionsTable (
+        id TEXT PRIMARY KEY,
+        device_id TEXT NOT NULL,
+        device_name TEXT NOT NULL,
+        device_address TEXT,
+        created_at INTEGER NOT NULL,
+        last_message_at INTEGER NOT NULL,
+        last_connection_at INTEGER,
+        message_count INTEGER DEFAULT 0,
+        unread_count INTEGER DEFAULT 0,
+        connection_history TEXT,
+        status INTEGER DEFAULT 0,
+        metadata TEXT
+      )
+    ''');
+
+    // Create indexes for chat sessions table
+    await db.execute('CREATE INDEX idx_chat_sessions_device_id ON $_chatSessionsTable (device_id)');
+    await db.execute('CREATE INDEX idx_chat_sessions_last_message ON $_chatSessionsTable (last_message_at)');
+    await db.execute('CREATE INDEX idx_messages_chat_session ON $_messagesTable (chatSessionId)');
+
     debugPrint('✅ Enhanced database tables created successfully');
   } catch (e) {
     debugPrint('❌ Error creating enhanced database tables: $e');
@@ -472,6 +498,44 @@ static Future<void> _createDB(Database db, int version) async {
           } catch (e) {
             debugPrint('Column $column already exists or error: $e');
           }
+        }
+      }
+
+      if (oldVersion < 4) {
+        // Add chat_session_id column to messages table
+        try {
+          await db.execute(
+            'ALTER TABLE $_messagesTable ADD COLUMN chatSessionId TEXT',
+          );
+        } catch (e) {
+          debugPrint('Column chatSessionId already exists or error: $e');
+        }
+
+        // Create chat_sessions table
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS $_chatSessionsTable (
+            id TEXT PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            device_name TEXT NOT NULL,
+            device_address TEXT,
+            created_at INTEGER NOT NULL,
+            last_message_at INTEGER NOT NULL,
+            last_connection_at INTEGER,
+            message_count INTEGER DEFAULT 0,
+            unread_count INTEGER DEFAULT 0,
+            connection_history TEXT,
+            status INTEGER DEFAULT 0,
+            metadata TEXT
+          )
+        ''');
+
+        // Create indexes for chat sessions
+        try {
+          await db.execute('CREATE INDEX idx_chat_sessions_device_id ON $_chatSessionsTable (device_id)');
+          await db.execute('CREATE INDEX idx_chat_sessions_last_message ON $_chatSessionsTable (last_message_at)');
+          await db.execute('CREATE INDEX idx_messages_chat_session ON $_messagesTable (chatSessionId)');
+        } catch (e) {
+          debugPrint('Chat session indexes may already exist: $e');
         }
       }
 
@@ -1006,9 +1070,18 @@ static Future<void> _createDB(Database db, int version) async {
   }
 
   // Enhanced message operations
-  static Future<int> insertMessage(MessageModel message) async {
+  static Future<int> insertMessage(MessageModel message, {String? currentUserId}) async {
     try {
       final db = await database;
+
+      // Generate or use existing chat session ID
+      String? chatSessionId = message.chatSessionId;
+      if (chatSessionId == null && message.endpointId != 'broadcast') {
+        chatSessionId = ChatSession.generateSessionId(
+          currentUserId ?? 'local',
+          message.endpointId,
+        );
+      }
 
       final messageMap = {
         'messageId':
@@ -1035,6 +1108,7 @@ static Future<void> _createDB(Database db, int version) async {
             ? jsonEncode(message.deviceInfo!)
             : null,
         'priority': message.isEmergency ? 1 : 0,
+        'chatSessionId': chatSessionId,
       };
 
       final id = await db.insert(
@@ -1042,6 +1116,11 @@ static Future<void> _createDB(Database db, int version) async {
         messageMap,
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
+
+      // Update chat session if applicable
+      if (chatSessionId != null) {
+        await updateChatSessionMessageCount(chatSessionId);
+      }
 
       // Add to sync queue if online
       if (_isOnline) {
@@ -1797,6 +1876,308 @@ static Future<void> _createDB(Database db, int version) async {
       await deleteDatabase(path);
     } catch (e) {
       debugPrint('❌ Error deleting database file: $e');
+    }
+  }
+
+  // Chat Session Management
+  static Future<String> createOrUpdateChatSession({
+    required String deviceId,
+    required String deviceName,
+    String? deviceAddress,
+    String? currentUserId,
+  }) async {
+    try {
+      final db = await database;
+      final sessionId = ChatSession.generateSessionId(
+        currentUserId ?? 'local',
+        deviceId,
+      );
+
+      final now = DateTime.now();
+      final existingSession = await db.query(
+        _chatSessionsTable,
+        where: 'id = ?',
+        whereArgs: [sessionId],
+        limit: 1,
+      );
+
+      if (existingSession.isNotEmpty) {
+        // Update existing session
+        await db.update(
+          _chatSessionsTable,
+          {
+            'device_name': deviceName,
+            'device_address': deviceAddress,
+            'last_connection_at': now.millisecondsSinceEpoch,
+          },
+          where: 'id = ?',
+          whereArgs: [sessionId],
+        );
+      } else {
+        // Create new session
+        final session = ChatSession(
+          id: sessionId,
+          deviceId: deviceId,
+          deviceName: deviceName,
+          deviceAddress: deviceAddress,
+          createdAt: now,
+          lastMessageAt: now,
+          lastConnectionAt: now,
+        );
+
+        await db.insert(_chatSessionsTable, session.toMap());
+      }
+
+      debugPrint('✅ Chat session created/updated: $sessionId');
+      return sessionId;
+    } catch (e) {
+      debugPrint('❌ Error creating/updating chat session: $e');
+      return '';
+    }
+  }
+
+  static Future<List<ChatSessionSummary>> getChatSessions() async {
+    try {
+      final db = await database;
+
+      final sessionQuery = '''
+        SELECT
+          cs.id as sessionId,
+          cs.device_id as deviceId,
+          cs.device_name as deviceName,
+          cs.unread_count as unreadCount,
+          cs.last_connection_at as lastConnectionAt,
+          m.message as lastMessage,
+          m.timestamp as lastMessageTime,
+          m.connection_type as connectionType
+        FROM $_chatSessionsTable cs
+        LEFT JOIN (
+          SELECT DISTINCT chatSessionId, message, timestamp, connection_type,
+            ROW_NUMBER() OVER (PARTITION BY chatSessionId ORDER BY timestamp DESC) as rn
+          FROM $_messagesTable
+          WHERE chatSessionId IS NOT NULL
+        ) m ON cs.id = m.chatSessionId AND m.rn = 1
+        ORDER BY COALESCE(m.timestamp, cs.last_message_at) DESC
+      ''';
+
+      final results = await db.rawQuery(sessionQuery);
+
+      return results.map((row) {
+        ConnectionType? connectionType;
+        final connTypeStr = row['connectionType'] as String?;
+        if (connTypeStr != null) {
+          if (connTypeStr.toLowerCase().contains('wifi_direct')) {
+            connectionType = ConnectionType.wifiDirect;
+          } else if (connTypeStr.toLowerCase().contains('hotspot')) {
+            connectionType = ConnectionType.hotspot;
+          } else {
+            connectionType = ConnectionType.unknown;
+          }
+        }
+
+        final lastConnectionAt = row['lastConnectionAt'] as int?;
+        final isOnline = lastConnectionAt != null &&
+            DateTime.now()
+                .difference(DateTime.fromMillisecondsSinceEpoch(lastConnectionAt))
+                .inMinutes < 5;
+
+        return ChatSessionSummary(
+          sessionId: row['sessionId'] as String,
+          deviceId: row['deviceId'] as String,
+          deviceName: row['deviceName'] as String,
+          lastMessage: row['lastMessage'] as String?,
+          lastMessageTime: row['lastMessageTime'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(row['lastMessageTime'] as int)
+              : null,
+          unreadCount: row['unreadCount'] as int? ?? 0,
+          isOnline: isOnline,
+          connectionType: connectionType,
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('❌ Error getting chat sessions: $e');
+      return [];
+    }
+  }
+
+  static Future<ChatSession?> getChatSession(String sessionId) async {
+    try {
+      final db = await database;
+      final results = await db.query(
+        _chatSessionsTable,
+        where: 'id = ?',
+        whereArgs: [sessionId],
+        limit: 1,
+      );
+
+      if (results.isNotEmpty) {
+        return ChatSession.fromMap(results.first);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error getting chat session: $e');
+      return null;
+    }
+  }
+
+  static Future<List<MessageModel>> getChatSessionMessages(String sessionId) async {
+    try {
+      final db = await database;
+      final results = await db.query(
+        _messagesTable,
+        where: 'chatSessionId = ?',
+        whereArgs: [sessionId],
+        orderBy: 'timestamp ASC',
+      );
+
+      return results.map((row) => MessageModel.fromMap(row)).toList();
+    } catch (e) {
+      debugPrint('❌ Error getting chat session messages: $e');
+      return [];
+    }
+  }
+
+  static Future<bool> updateChatSessionMessageCount(String sessionId) async {
+    try {
+      final db = await database;
+
+      // Get message count and unread count
+      final messageCountResult = await db.rawQuery('''
+        SELECT
+          COUNT(*) as total_messages,
+          COUNT(CASE WHEN synced = 0 AND is_me = 0 THEN 1 END) as unread_count,
+          MAX(timestamp) as last_message_time
+        FROM $_messagesTable
+        WHERE chatSessionId = ?
+      ''', [sessionId]);
+
+      if (messageCountResult.isNotEmpty) {
+        final row = messageCountResult.first;
+        final messageCount = row['total_messages'] as int? ?? 0;
+        final unreadCount = row['unread_count'] as int? ?? 0;
+        final lastMessageTime = row['last_message_time'] as int?;
+
+        await db.update(
+          _chatSessionsTable,
+          {
+            'message_count': messageCount,
+            'unread_count': unreadCount,
+            if (lastMessageTime != null) 'last_message_at': lastMessageTime,
+          },
+          where: 'id = ?',
+          whereArgs: [sessionId],
+        );
+
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('❌ Error updating chat session message count: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> markChatSessionMessagesAsRead(String sessionId) async {
+    try {
+      final db = await database;
+
+      await db.update(
+        _messagesTable,
+        {'synced': 1},
+        where: 'chatSessionId = ? AND is_me = 0 AND synced = 0',
+        whereArgs: [sessionId],
+      );
+
+      await db.update(
+        _chatSessionsTable,
+        {'unread_count': 0},
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+
+      return true;
+    } catch (e) {
+      debugPrint('❌ Error marking chat messages as read: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> updateChatSessionConnection({
+    required String sessionId,
+    required ConnectionType connectionType,
+    required DateTime connectionTime,
+  }) async {
+    try {
+      final db = await database;
+
+      final session = await getChatSession(sessionId);
+      if (session == null) return false;
+
+      final updatedHistory = List<ConnectionType>.from(session.connectionHistory);
+      if (updatedHistory.isEmpty || updatedHistory.last != connectionType) {
+        updatedHistory.add(connectionType);
+        // Keep only last 10 connection types
+        if (updatedHistory.length > 10) {
+          updatedHistory.removeAt(0);
+        }
+      }
+
+      await db.update(
+        _chatSessionsTable,
+        {
+          'last_connection_at': connectionTime.millisecondsSinceEpoch,
+          'connection_history': jsonEncode(updatedHistory.map((e) => e.index).toList()),
+        },
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+
+      return true;
+    } catch (e) {
+      debugPrint('❌ Error updating chat session connection: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> archiveChatSession(String sessionId) async {
+    try {
+      final db = await database;
+      await db.update(
+        _chatSessionsTable,
+        {'status': ChatSessionStatus.archived.index},
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+      return true;
+    } catch (e) {
+      debugPrint('❌ Error archiving chat session: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> deleteChatSession(String sessionId) async {
+    try {
+      final db = await database;
+
+      // Delete all messages in the session
+      await db.delete(
+        _messagesTable,
+        where: 'chatSessionId = ?',
+        whereArgs: [sessionId],
+      );
+
+      // Delete the session
+      await db.delete(
+        _chatSessionsTable,
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+
+      debugPrint('✅ Chat session deleted: $sessionId');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Error deleting chat session: $e');
+      return false;
     }
   }
 
