@@ -357,7 +357,7 @@ class ChatSearchDelegate extends SearchDelegate<MessageModel?> {
         style: TextStyle(
           color: ResQLinkTheme.primaryRed,
           fontWeight: FontWeight.bold,
-          backgroundColor: ResQLinkTheme.primaryRed.withOpacity(0.2),
+          backgroundColor: ResQLinkTheme.primaryRed.withValues(alpha: 0.2),
         ),
       ));
 
@@ -607,7 +607,7 @@ class ChatSessionSearchDelegate extends SearchDelegate<ChatSessionSummary?> {
                 radius: 24,
                 backgroundColor: session.isOnline
                     ? ResQLinkTheme.safeGreen
-                    : ResQLinkTheme.primaryRed.withOpacity(0.3),
+                    : ResQLinkTheme.primaryRed.withValues(alpha: 0.3),
                 child: Text(
                   session.deviceName.isNotEmpty
                       ? session.deviceName[0].toUpperCase()

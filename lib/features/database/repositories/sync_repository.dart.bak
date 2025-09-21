@@ -63,7 +63,7 @@ class SyncRepository {
     try {
       _connectivitySubscription = Connectivity().onConnectivityChanged.listen((result) {
         final wasOnline = _isOnline;
-        _isOnline = !result.contains(ConnectivityResult.none);
+        _isOnline = result != ConnectivityResult.none;
 
         if (!wasOnline && _isOnline) {
           debugPrint('📶 Internet connection restored, triggering sync');
@@ -75,7 +75,7 @@ class SyncRepository {
 
       // Check initial connectivity
       final connectivityResult = await Connectivity().checkConnectivity();
-      _isOnline = !connectivityResult.contains(ConnectivityResult.none);
+      _isOnline = connectivityResult != ConnectivityResult.none;
       debugPrint('📶 Initial connectivity: ${_isOnline ? "Online" : "Offline"}');
     } catch (e) {
       debugPrint('❌ Error starting connectivity monitoring: $e');

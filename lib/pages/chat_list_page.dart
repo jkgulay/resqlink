@@ -110,9 +110,7 @@ class _ChatListPageState extends State<ChatListPage>
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => MessagePage(
-            p2pService: widget.p2pService,
-          ),
+          builder: (context) => MessagePage(p2pService: widget.p2pService),
         ),
       );
     }
@@ -127,10 +125,7 @@ class _ChatListPageState extends State<ChatListPage>
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: ResQLinkTheme.cardDark,
-        title: Text(
-          'Delete Chat',
-          style: TextStyle(color: Colors.white),
-        ),
+        title: Text('Delete Chat', style: TextStyle(color: Colors.white)),
         content: Text(
           'Are you sure you want to delete the chat with ${session.deviceName}? This action cannot be undone.',
           style: TextStyle(color: Colors.white70),
@@ -189,7 +184,10 @@ class _ChatListPageState extends State<ChatListPage>
             connectionTime: DateTime.now(),
           );
           _loadChatSessions();
-          _showSnackBar('Reconnected to ${session.deviceName}!', isError: false);
+          _showSnackBar(
+            'Reconnected to ${session.deviceName}!',
+            isError: false,
+          );
         } else {
           _showSnackBar('Failed to reconnect. Try creating a new connection.');
         }
@@ -207,7 +205,9 @@ class _ChatListPageState extends State<ChatListPage>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: TextStyle(color: Colors.white)),
-        backgroundColor: isError ? ResQLinkTheme.primaryRed : ResQLinkTheme.safeGreen,
+        backgroundColor: isError
+            ? ResQLinkTheme.primaryRed
+            : ResQLinkTheme.safeGreen,
         duration: Duration(seconds: 3),
       ),
     );
@@ -220,10 +220,7 @@ class _ChatListPageState extends State<ChatListPage>
       appBar: AppBar(
         title: Text(
           'Chats',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: ResQLinkTheme.cardDark,
         elevation: 0,
@@ -238,10 +235,7 @@ class _ChatListPageState extends State<ChatListPage>
               });
             },
           ),
-          IconButton(
-            icon: Icon(Icons.refresh),
-            onPressed: _loadChatSessions,
-          ),
+          IconButton(icon: Icon(Icons.refresh), onPressed: _loadChatSessions),
         ],
       ),
       body: Column(
@@ -282,7 +276,7 @@ class _ChatListPageState extends State<ChatListPage>
       return Container(
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Card(
-          color: ResQLinkTheme.primaryRed.withOpacity(0.1),
+          color: ResQLinkTheme.primaryRed.withValues(alpha: 0.1),
           child: Padding(
             padding: EdgeInsets.all(12),
             child: Row(
@@ -296,7 +290,8 @@ class _ChatListPageState extends State<ChatListPage>
                   ),
                 ),
                 TextButton(
-                  onPressed: () => widget.p2pService.discoverDevices(force: true),
+                  onPressed: () =>
+                      widget.p2pService.discoverDevices(force: true),
                   child: Text(
                     'SCAN',
                     style: TextStyle(color: ResQLinkTheme.primaryRed),
@@ -343,11 +338,7 @@ class _ChatListPageState extends State<ChatListPage>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.search_off,
-            size: 64,
-            color: Colors.white30,
-          ),
+          Icon(Icons.search_off, size: 64, color: Colors.white30),
           SizedBox(height: 16),
           Text(
             'No chats found',
@@ -360,10 +351,7 @@ class _ChatListPageState extends State<ChatListPage>
           SizedBox(height: 8),
           Text(
             'Try searching with different keywords',
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 14,
-            ),
+            style: TextStyle(color: Colors.white70, fontSize: 14),
           ),
         ],
       ),
@@ -407,7 +395,7 @@ class _ChatListPageState extends State<ChatListPage>
           radius: 24,
           backgroundColor: session.isOnline
               ? ResQLinkTheme.safeGreen
-              : ResQLinkTheme.primaryRed.withOpacity(0.3),
+              : ResQLinkTheme.primaryRed.withValues(alpha: 0.3),
           child: Text(
             session.deviceName.isNotEmpty
                 ? session.deviceName[0].toUpperCase()
@@ -462,7 +450,9 @@ class _ChatListPageState extends State<ChatListPage>
                     ? Icons.wifi
                     : Icons.wifi_tethering,
                 size: 16,
-                color: session.isOnline ? ResQLinkTheme.safeGreen : Colors.white30,
+                color: session.isOnline
+                    ? ResQLinkTheme.safeGreen
+                    : Colors.white30,
               ),
             ],
           ],
@@ -500,10 +490,7 @@ class _ChatListPageState extends State<ChatListPage>
   Widget _buildTimestamp(ChatSessionSummary session) {
     return Text(
       session.timeDisplay,
-      style: TextStyle(
-        color: Colors.white70,
-        fontSize: 12,
-      ),
+      style: TextStyle(color: Colors.white70, fontSize: 12),
     );
   }
 
@@ -571,7 +558,11 @@ class _ChatListPageState extends State<ChatListPage>
           value: 'delete',
           child: Row(
             children: [
-              Icon(Icons.delete_outline, color: ResQLinkTheme.primaryRed, size: 20),
+              Icon(
+                Icons.delete_outline,
+                color: ResQLinkTheme.primaryRed,
+                size: 20,
+              ),
               SizedBox(width: 8),
               Text(
                 'Delete Chat',
@@ -634,10 +625,7 @@ class _ChatListPageState extends State<ChatListPage>
             ),
           ),
           Expanded(
-            child: Text(
-              value,
-              style: TextStyle(color: Colors.white),
-            ),
+            child: Text(value, style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -655,7 +643,9 @@ class _ChatListPageState extends State<ChatListPage>
               _showSnackBar('Scanning for nearby devices...', isError: false);
             },
       child: Icon(
-        widget.p2pService.isDiscovering ? Icons.hourglass_empty : Icons.wifi_tethering,
+        widget.p2pService.isDiscovering
+            ? Icons.hourglass_empty
+            : Icons.wifi_tethering,
         color: Colors.white,
       ),
     );

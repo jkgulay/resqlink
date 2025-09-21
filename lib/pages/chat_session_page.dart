@@ -429,7 +429,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: ResQLinkTheme.primaryRed.withOpacity(0.1),
+      color: ResQLinkTheme.primaryRed.withValues(alpha: 0.1),  
       child: Row(
         children: [
           Icon(Icons.wifi_off, color: ResQLinkTheme.primaryRed, size: 16),
@@ -550,10 +550,11 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
+              final navigator = Navigator.of(context);
+              navigator.pop();
               await ChatRepository.deleteSession(widget.sessionId);
               if (mounted) {
-                Navigator.pop(context);
+                navigator.pop();
               }
             },
             child: Text(
@@ -586,11 +587,12 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
+              final navigator = Navigator.of(context);
+              navigator.pop();
               // Implement device blocking logic here
               await ChatRepository.archiveSession(widget.sessionId);
               if (mounted) {
-                Navigator.pop(context);
+                navigator.pop();
               }
             },
             child: Text(
