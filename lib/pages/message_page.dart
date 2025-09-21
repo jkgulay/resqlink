@@ -7,6 +7,7 @@ import '../services/p2p/p2p_main_service.dart';
 import '../features/database/repositories/message_repository.dart';
 import '../../models/message_model.dart';
 import '../../utils/resqlink_theme.dart';
+import '../utils/responsive_utils.dart';
 import '../widgets/message/chat_app_bar.dart';
 import '../widgets/message/conversation_list.dart';
 import '../widgets/message/chat_view.dart';
@@ -879,7 +880,16 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               ? _reconnectToDevice(_selectedEndpointId!) 
               : null,
         ),
-        body: _buildBody(),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            return ConstrainedBox(
+              constraints: ResponsiveUtils.isDesktop(context)
+                  ? BoxConstraints(maxWidth: 1200)
+                  : BoxConstraints(),
+              child: _buildBody(),
+            );
+          },
+        ),
         floatingActionButton: _buildFloatingActionButton(),
       ),
     );

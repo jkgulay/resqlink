@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:resqlink/controllers/gps_controller.dart';
 import 'package:resqlink/models/message_model.dart';
 import 'package:resqlink/services/settings_service.dart';
+import '../utils/responsive_utils.dart';
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
@@ -104,35 +105,155 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               await gpsController
                   .getCurrentLocation(); // Also refresh GPS location
             },
-            child: SingleChildScrollView(
-              physics: AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16.0),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  physics: AlwaysScrollableScrollPhysics(),
+                  padding: ResponsiveUtils.getResponsivePadding(context),
+                  child: ConstrainedBox(
+                    constraints: ResponsiveUtils.isDesktop(context)
+                        ? BoxConstraints(maxWidth: 1200)
+                        : BoxConstraints(),
+                    child: Column(
+                      children: [
+                        // Emergency Mode Card
+                        EmergencyModeCard(
+                          p2pService: _p2pService,
+                          onToggle: controller.toggleEmergencyMode,
+                        ),
+                        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+
+                        // Use responsive layout for tablet/desktop
+                        if (ResponsiveUtils.isDesktop(context))
+                          _buildDesktopLayout(controller, locationState, gpsController)
+                        else if (ResponsiveUtils.isTablet(context))
+                          _buildTabletLayout(controller, locationState, gpsController)
+                        else
+                          _buildMobileLayout(controller, locationState, gpsController),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // Responsive layout builders
+  Widget _buildMobileLayout(HomeController controller, LocationStateService locationState, GpsController gpsController) {
+    return Column(
+      children: [
+        // Connection & Discovery Card
+        ConnectionDiscoveryCard(
+          controller: controller,
+          onDeviceChatTap: _onDeviceChatTap,
+        ),
+        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+
+        // Emergency Actions (only when connected)
+        if (controller.isConnected) ...[
+          EmergencyActionsCard(
+            p2pService: _p2pService,
+            onEmergencyMessage: _sendEmergencyMessage,
+          ),
+          SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+        ],
+
+        // Location Status Card
+        LocationStatusCard(
+          location: locationState.currentLocation,
+          isLoading: locationState.isLoadingLocation,
+          unsyncedCount: locationState.unsyncedCount,
+          onRefresh: () async {
+            await locationState.refreshLocation();
+            await gpsController.getCurrentLocation();
+          },
+          onShare: locationState.shareLocation,
+        ),
+        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+
+        // Instructions Card
+        InstructionsCard(),
+      ],
+    );
+  }
+
+  Widget _buildTabletLayout(HomeController controller, LocationStateService locationState, GpsController gpsController) {
+    return Column(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: ConnectionDiscoveryCard(
+                controller: controller,
+                onDeviceChatTap: _onDeviceChatTap,
+              ),
+            ),
+            SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+            Expanded(
+              child: LocationStatusCard(
+                location: locationState.currentLocation,
+                isLoading: locationState.isLoadingLocation,
+                unsyncedCount: locationState.unsyncedCount,
+                onRefresh: () async {
+                  await locationState.refreshLocation();
+                  await gpsController.getCurrentLocation();
+                },
+                onShare: locationState.shareLocation,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+
+        // Emergency Actions (only when connected)
+        if (controller.isConnected) ...[
+          EmergencyActionsCard(
+            p2pService: _p2pService,
+            onEmergencyMessage: _sendEmergencyMessage,
+          ),
+          SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+        ],
+
+        // Instructions Card
+        InstructionsCard(),
+      ],
+    );
+  }
+
+  Widget _buildDesktopLayout(HomeController controller, LocationStateService locationState, GpsController gpsController) {
+    return Column(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 2,
               child: Column(
                 children: [
-                  // Emergency Mode Card
-                  EmergencyModeCard(
-                    p2pService: _p2pService,
-                    onToggle: controller.toggleEmergencyMode,
-                  ),
-                  SizedBox(height: 16),
-
-                  // Connection & Discovery Card
                   ConnectionDiscoveryCard(
                     controller: controller,
                     onDeviceChatTap: _onDeviceChatTap,
                   ),
-                  SizedBox(height: 16),
-
-                  // Emergency Actions (only when connected)
                   if (controller.isConnected) ...[
+                    SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
                     EmergencyActionsCard(
                       p2pService: _p2pService,
                       onEmergencyMessage: _sendEmergencyMessage,
                     ),
-                    SizedBox(height: 16),
                   ],
-
-                  // Location Status Card - Now properly connected
+                ],
+              ),
+            ),
+            SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 24)),
+            Expanded(
+              flex: 1,
+              child: Column(
+                children: [
                   LocationStatusCard(
                     location: locationState.currentLocation,
                     isLoading: locationState.isLoadingLocation,
@@ -143,16 +264,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     },
                     onShare: locationState.shareLocation,
                   ),
-                  SizedBox(height: 16),
-
-                  // Instructions Card
+                  SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
                   InstructionsCard(),
                 ],
               ),
             ),
-          );
-        },
-      ),
+          ],
+        ),
+      ],
     );
   }
 
