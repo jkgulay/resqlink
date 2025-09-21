@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/message_model.dart';
-import '../services/database_service.dart';
+import '../features/database/repositories/message_repository.dart';
 import 'p2p/p2p_main_service.dart';
 
 /// Debug service for tracing message flow and testing connectivity
@@ -122,7 +122,7 @@ class MessageDebugService {
 
       // Test 3: Verify message was saved locally
       await Future.delayed(Duration(milliseconds: 500));
-      final messages = await DatabaseService.getAllMessages();
+      final messages = await MessageRepository.getAllMessages();
       final testMessages = messages.where((m) => m.message == testMessage).toList();
       
       if (testMessages.isEmpty) {

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/message_model.dart';
 import 'p2p/p2p_main_service.dart';
-import 'database_service.dart';
+import '../features/database/repositories/message_repository.dart';
 
 class MessageAcknowledgmentService {
   static final MessageAcknowledgmentService _instance = 
@@ -45,7 +45,7 @@ class MessageAcknowledgmentService {
 
       // Track for acknowledgment
       _pendingAcks[messageId] = DateTime.now();
-      await DatabaseService.updateMessageStatus(messageId, MessageStatus.sent);
+      await MessageRepository.updateStatus(messageId, MessageStatus.sent);
 
       // Set timeout for retry
       _ackTimeouts[messageId] = Timer(_ackTimeout, () {
@@ -55,7 +55,7 @@ class MessageAcknowledgmentService {
       debugPrint("📤 Message sent with ACK tracking: $messageId");
       return messageId;
     } catch (e) {
-      await DatabaseService.updateMessageStatus(messageId, MessageStatus.failed);
+      await MessageRepository.updateStatus(messageId, MessageStatus.failed);
       rethrow;
     }
   }
@@ -100,7 +100,7 @@ class MessageAcknowledgmentService {
       _ackTimeouts.remove(messageId);
 
       // Update message status to delivered
-      DatabaseService.updateMessageStatus(messageId, MessageStatus.delivered);
+      MessageRepository.updateStatus(messageId, MessageStatus.delivered);
       
       debugPrint("✅ ACK received for message: $messageId");
     }
@@ -118,13 +118,13 @@ class MessageAcknowledgmentService {
 
   Future<void> _retryMessage(String messageId, P2PConnectionService p2pService) async {
     try {
-      final retryCount = await DatabaseService.getRetryCount(messageId);
+      final retryCount = await MessageRepository.getRetryCount(messageId);
       
       if (retryCount < _maxRetries) {
-        await DatabaseService.incrementRetryCount(messageId);
+        await MessageRepository.incrementRetryCount(messageId);
         
         // Get original message and resend
-        final originalMessage = await DatabaseService.getMessageById(messageId);
+        final originalMessage = await MessageRepository.getById(messageId);
         if (originalMessage != null) {
           // Implement exponential backoff
           final delay = Duration(seconds: 2 * (retryCount + 1));
@@ -143,7 +143,7 @@ class MessageAcknowledgmentService {
         }
       } else {
         // Max retries reached, mark as failed
-        await DatabaseService.updateMessageStatus(messageId, MessageStatus.failed);
+        await MessageRepository.updateStatus(messageId, MessageStatus.failed);
         debugPrint("❌ Message failed after $retryCount retries: $messageId");
       }
     } catch (e) {

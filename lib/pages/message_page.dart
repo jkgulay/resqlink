@@ -4,7 +4,7 @@ import 'package:resqlink/pages/gps_page.dart';
 import 'package:resqlink/services/message_sync_service.dart';
 import 'package:resqlink/services/settings_service.dart';
 import '../services/p2p/p2p_main_service.dart';
-import '../../services/database_service.dart';
+import '../features/database/repositories/message_repository.dart';
 import '../../models/message_model.dart';
 import '../../utils/resqlink_theme.dart';
 import '../widgets/message/chat_app_bar.dart';
@@ -246,7 +246,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     if (!mounted) return;
 
     try {
-      final messages = await DatabaseService.getAllMessages().timeout(Duration(seconds: 10));
+      final messages = await MessageRepository.getAllMessages().timeout(Duration(seconds: 10));
       if (!mounted) return;
 
       final connectedDevices = widget.p2pService.connectedDevices;
@@ -318,7 +318,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     if (!mounted) return;
 
     try {
-      final messages = await DatabaseService.getMessages(endpointId);
+      final messages = await MessageRepository.getByEndpoint(endpointId);
       if (!mounted) return;
 
       setState(() {
@@ -330,8 +330,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       for (final message in messages.where((m) => !m.isMe && !m.synced)) {
         if (!mounted) return;
 
-        if (message.messageId != null) {
-          await DatabaseService.updateMessageStatus(
+        if (message.id != null) {
+          await MessageRepository.updateStatus(
             message.messageId!,
             MessageStatus.delivered,
           );
@@ -366,13 +366,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       final messageId = message.messageId ?? 'unknown';
       final senderId = message.endpointId;
 
-      final existingMessage = await DatabaseService.getMessageById(messageId);
+      final existingMessage = await MessageRepository.getById(messageId);
       if (existingMessage != null) {
         debugPrint('⚠️ Duplicate message received: $messageId');
         return;
       }
 
-      await DatabaseService.insertMessage(message);
+      await MessageRepository.insert(message);
 
       if (!mounted) return;
 
@@ -558,7 +558,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         status: MessageStatus.sent,
       );
 
-      await DatabaseService.insertMessage(dbMessage);
+      await MessageRepository.insert(dbMessage);
       await _loadMessagesForDevice(_selectedEndpointId!);
     } catch (e) {
       debugPrint('Error sending message: $e');

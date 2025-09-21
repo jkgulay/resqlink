@@ -4,7 +4,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/foundation.dart';
-import 'database_service.dart';
+import '../features/database/repositories/user_repository.dart';
+import '../features/database/core/database_manager.dart';
 import '../firebase_auth_helper.dart';
 import '../models/user_model.dart';
 
@@ -29,7 +30,7 @@ class AuthService {
 
       if (!isLoggedIn || userId == null) return null;
 
-      final db = await DatabaseService.database;
+      final db = await DatabaseManager.database;
       final result = await db.query(
         'users',
         where: 'id = ?',
@@ -112,7 +113,7 @@ class AuthService {
       await _secureStorage.deleteAll();
 
       // Clear database
-      await DatabaseService.clearAllData();
+      await UserRepository.clearAllData();
 
       print('All user data cleared');
     } catch (e) {
@@ -139,14 +140,14 @@ class AuthService {
         );
 
         // Try to find or create local user
-        UserModel? localUser = await DatabaseService.getUserByEmail(
+        UserModel? localUser = await UserRepository.getByEmail(
           firebaseUser.email!,
         );
 
-        localUser ??= await DatabaseService.createUser(
-          firebaseUser.email!,
-          firebaseUser.uid, // Use Firebase UID as password hash
-          isOnlineUser: true,
+        localUser ??= await UserRepository.create(
+          email: firebaseUser.email!,
+          password: firebaseUser.uid, // Use Firebase UID as password hash
+          name: firebaseUser.displayName ?? 'Firebase User',
         );
 
         if (localUser != null) {
@@ -176,7 +177,7 @@ class AuthService {
       print('Attempting offline login with cached credentials: $cachedEmail');
 
       // Try to login with cached Firebase UID
-      final localUser = await DatabaseService.loginUser(
+      final localUser = await UserRepository.login(
         cachedEmail,
         firebaseUid,
       );
@@ -201,7 +202,7 @@ class AuthService {
 
     if (cachedEmail != null && firebaseUid != null) {
       // Check if user exists in local database
-      final userExists = await DatabaseService.userExists(cachedEmail);
+      final userExists = await UserRepository.exists(cachedEmail);
       return userExists;
     }
 
@@ -231,15 +232,15 @@ class AuthService {
           }
 
           // Try to find or create local user
-          UserModel? localUser = await DatabaseService.loginUser(
+          UserModel? localUser = await UserRepository.login(
             email,
             firebaseUser?.uid ?? password,
           );
 
-          localUser ??= await DatabaseService.createUser(
-            email,
-            firebaseUser?.uid ?? password,
-            isOnlineUser: true,
+          localUser ??= await UserRepository.create(
+            email: email,
+            password: firebaseUser?.uid ?? password,
+            name: 'User',
           );
 
           if (localUser != null) {
@@ -256,13 +257,13 @@ class AuthService {
       print('Attempting offline login...');
 
       // First try with original password
-      UserModel? localUser = await DatabaseService.loginUser(email, password);
+      UserModel? localUser = await UserRepository.login(email, password);
 
       // If that fails, try with cached Firebase UID
       if (localUser == null) {
         final cachedUid = await _secureStorage.read(key: 'firebase_uid');
         if (cachedUid != null) {
-          localUser = await DatabaseService.loginUser(email, cachedUid);
+          localUser = await UserRepository.login(email, cachedUid);
         }
       }
 
@@ -285,7 +286,7 @@ class AuthService {
       final connected = await isConnected;
 
       // Check if user already exists locally
-      if (await DatabaseService.userExists(email)) {
+      if (await UserRepository.exists(email)) {
         return AuthResult.failure('User already exists');
       }
 
@@ -307,10 +308,10 @@ class AuthService {
           }
 
           // Create user in local database
-          final localUser = await DatabaseService.createUser(
-            email,
-            firebaseUser?.uid ?? password,
-            isOnlineUser: true,
+          final localUser = await UserRepository.create(
+            email: email,
+            password: firebaseUser?.uid ?? password,
+            name: 'User',
           );
 
           if (localUser != null) {
@@ -325,10 +326,10 @@ class AuthService {
 
       // Create user locally for offline use
       print('Creating offline user...');
-      final localUser = await DatabaseService.createUser(
-        email,
-        password,
-        isOnlineUser: false,
+      final localUser = await UserRepository.create(
+        email: email,
+        password: password,
+        name: 'User',
       );
 
       if (localUser != null) {

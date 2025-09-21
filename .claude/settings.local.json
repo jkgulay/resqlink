@@ -5,7 +5,9 @@
       "Bash(flutter analyze:*)",
       "Bash(sed:*)",
       "Bash(dart analyze:*)",
-      "Bash(flutter:*)"
+      "Bash(flutter:*)",
+      "Bash(cut:*)",
+      "Bash(timeout 120 flutter analyze)"
     ],
     "deny": [],
     "ask": []

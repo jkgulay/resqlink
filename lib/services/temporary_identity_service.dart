@@ -1,10 +1,11 @@
+import 'package:resqlink/features/database/core/database_manager.dart';
+import 'package:resqlink/features/database/repositories/user_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
 import 'dart:math';
 import '../models/user_model.dart';
-import 'database_service.dart';
 
 class TemporaryIdentityService {
   static const String _tempUserKey = 'temp_user_id';
@@ -36,10 +37,12 @@ class TemporaryIdentityService {
       debugPrint('🆔 Creating temporary identity: $displayName ($tempId)');
       
       // Create or update user in local database
-      final tempUser = await DatabaseService.createUser(
-        tempEmail,
-        tempId, // Use temp ID as password
+      final tempUser = await UserRepository.createUser(
+        email: tempEmail,
+        password: tempId, // Use temp ID as password
         isOnlineUser: false,
+        name: displayName,
+        phoneNumber: null,
       );
       
       if (tempUser != null) {
@@ -71,7 +74,7 @@ class TemporaryIdentityService {
       final userId = prefs.getInt(_tempUserKey);
       if (userId == null) return null;
       
-      final db = await DatabaseService.database;
+      final db = await DatabaseManager.database;
       final result = await db.query(
         'users',
         where: 'id = ?',
@@ -151,10 +154,12 @@ class TemporaryIdentityService {
       final displayName = prefs.getString(_tempDisplayNameKey);
       
       // Create permanent user
-      final permanentUser = await DatabaseService.createUser(
-        email,
-        password,
+      final permanentUser = await UserRepository.createUser(
+        email: email,
+        password: password,
+        name: displayName ?? 'User',
         isOnlineUser: true,
+        phoneNumber: null,
       );
       
       if (permanentUser != null && displayName != null) {
