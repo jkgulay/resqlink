@@ -251,7 +251,6 @@ class DatabaseManager {
           lastRetryTime INTEGER DEFAULT 0,
           priority INTEGER DEFAULT 0,
           chatSessionId TEXT,
-          deviceId TEXT,
           createdAt INTEGER DEFAULT (strftime('%s', 'now'))
         )
       ''');
@@ -604,9 +603,7 @@ class DatabaseManager {
 
     // Add deviceId column to messages table
     try {
-      await db.execute(
-        'ALTER TABLE messages ADD COLUMN deviceId TEXT',
-      );
+      await db.execute('ALTER TABLE messages ADD COLUMN deviceId TEXT');
       debugPrint('✅ Added deviceId column to messages table');
     } catch (e) {
       debugPrint('⚠️ DeviceId column may already exist: $e');
