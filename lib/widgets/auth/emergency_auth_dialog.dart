@@ -71,7 +71,7 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
 
     if (displayName.length < 2) {
       _showSnackBar('Display name must be at least 2 characters');
-      return;
+      return; 
     }
 
     setState(() => _isLoading = true);

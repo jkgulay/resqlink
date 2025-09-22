@@ -46,7 +46,6 @@ class P2PDiscoveryService {
     }
   }
 
-  /// Check if WiFi Direct is available
   Future<void> _checkWifiDirectAvailability() async {
     try {
       // Try to initialize WiFi Direct

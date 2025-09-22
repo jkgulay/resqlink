@@ -4,6 +4,8 @@ import '../models/chat_session_model.dart';
 import '../features/database/repositories/chat_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../utils/resqlink_theme.dart';
+import '../utils/responsive_utils.dart';
+import '../utils/responsive_helper.dart';
 import '../widgets/message/empty_chat_view.dart';
 import '../widgets/message/loading_view.dart';
 import 'message_page.dart';
@@ -238,12 +240,21 @@ class _ChatListPageState extends State<ChatListPage>
           IconButton(icon: Icon(Icons.refresh), onPressed: _loadChatSessions),
         ],
       ),
-      body: Column(
-        children: [
-          _buildSearchBar(),
-          _buildConnectionStatus(),
-          Expanded(child: _buildChatList()),
-        ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return ConstrainedBox(
+            constraints: ResponsiveUtils.isDesktop(context)
+                ? BoxConstraints(maxWidth: 1200)
+                : BoxConstraints(),
+            child: Column(
+              children: [
+                _buildSearchBar(),
+                _buildConnectionStatus(),
+                Expanded(child: _buildChatList()),
+              ],
+            ),
+          );
+        },
       ),
       floatingActionButton: _buildFloatingActionButton(),
     );
@@ -251,7 +262,8 @@ class _ChatListPageState extends State<ChatListPage>
 
   Widget _buildSearchBar() {
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: ResponsiveHelper.getCardPadding(context),
+      margin: ResponsiveHelper.getCardMargins(context),
       child: TextField(
         controller: _searchController,
         style: TextStyle(color: Colors.white),
@@ -265,7 +277,10 @@ class _ChatListPageState extends State<ChatListPage>
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide.none,
           ),
-          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          contentPadding: EdgeInsets.symmetric(
+            horizontal: ResponsiveUtils.getResponsiveSpacing(context, 16),
+            vertical: ResponsiveUtils.getResponsiveSpacing(context, 12)
+          ),
         ),
       ),
     );
@@ -274,11 +289,14 @@ class _ChatListPageState extends State<ChatListPage>
   Widget _buildConnectionStatus() {
     if (!widget.p2pService.isConnected) {
       return Container(
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: ResponsiveUtils.getResponsiveSpacing(context, 16),
+          vertical: ResponsiveUtils.getResponsiveSpacing(context, 8)
+        ),
         child: Card(
           color: ResQLinkTheme.primaryRed.withValues(alpha: 0.1),
           child: Padding(
-            padding: EdgeInsets.all(12),
+            padding: EdgeInsets.all(ResponsiveUtils.getResponsiveSpacing(context, 12)),
             child: Row(
               children: [
                 Icon(Icons.wifi_off, color: ResQLinkTheme.primaryRed, size: 20),
@@ -322,11 +340,32 @@ class _ChatListPageState extends State<ChatListPage>
     return RefreshIndicator(
       onRefresh: _loadChatSessions,
       color: ResQLinkTheme.primaryRed,
-      child: ListView.builder(
-        padding: EdgeInsets.symmetric(horizontal: 16),
-        itemCount: filteredSessions.length,
+      child: ResponsiveUtils.isDesktop(context)
+          ? _buildDesktopChatList(filteredSessions)
+          : ListView.builder(
+              padding: ResponsiveHelper.getCardMargins(context),
+              itemCount: filteredSessions.length,
+              itemBuilder: (context, index) {
+                final session = filteredSessions[index];
+                return _buildChatListItem(session);
+              },
+            ),
+    );
+  }
+
+  Widget _buildDesktopChatList(List<ChatSessionSummary> sessions) {
+    return Padding(
+      padding: ResponsiveHelper.getCardMargins(context),
+      child: GridView.builder(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: ResponsiveUtils.isDesktop(context) ? 2 : 1,
+          crossAxisSpacing: ResponsiveUtils.getResponsiveSpacing(context, 16),
+          mainAxisSpacing: ResponsiveUtils.getResponsiveSpacing(context, 16),
+          childAspectRatio: 4.0,
+        ),
+        itemCount: sessions.length,
         itemBuilder: (context, index) {
-          final session = filteredSessions[index];
+          final session = sessions[index];
           return _buildChatListItem(session);
         },
       ),
@@ -360,13 +399,13 @@ class _ChatListPageState extends State<ChatListPage>
 
   Widget _buildChatListItem(ChatSessionSummary session) {
     return Card(
-      margin: EdgeInsets.only(bottom: 8),
+      margin: ResponsiveHelper.getCardMargins(context),
       color: ResQLinkTheme.cardDark,
       child: InkWell(
         onTap: () => _openChat(session),
         borderRadius: BorderRadius.circular(8),
         child: Padding(
-          padding: EdgeInsets.all(16),
+          padding: ResponsiveHelper.getCardPadding(context),
           child: Row(
             children: [
               _buildAvatar(session),

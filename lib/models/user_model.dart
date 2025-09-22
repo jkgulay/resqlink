@@ -30,13 +30,12 @@ class UserModel {
       'id': id,
       'userId': userId,
       'email': email,
-      'password_hash': passwordHash,
+      'password': passwordHash,
       'name': name,
       'phoneNumber': phoneNumber,
-      'created_at': createdAt.millisecondsSinceEpoch,
-      'last_login': lastLogin?.millisecondsSinceEpoch,
+      'createdAt': createdAt.millisecondsSinceEpoch,
+      'lastLogin': lastLogin?.millisecondsSinceEpoch,
       'isActive': isActive ? 1 : 0,
-      'is_online_user': isOnlineUser ? 1 : 0,
       'additionalInfo': additionalInfo,
     };
   }
@@ -46,15 +45,15 @@ class UserModel {
       id: map['id'],
       userId: map['userId'] ?? '',
       email: map['email'] ?? '',
-      passwordHash: map['password_hash'] ?? '',
+      passwordHash: map['password'] ?? '',
       name: map['name'] ?? '',
       phoneNumber: map['phoneNumber'],
-      createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] ?? 0),
-      lastLogin: map['last_login'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['last_login'])
+      createdAt: DateTime.fromMillisecondsSinceEpoch(map['createdAt'] ?? 0),
+      lastLogin: map['lastLogin'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['lastLogin'])
           : null,
       isActive: (map['isActive'] ?? 1) == 1,
-      isOnlineUser: (map['is_online_user'] ?? 0) == 1,
+      isOnlineUser: false, // This field is not in the database schema
       additionalInfo: map['additionalInfo'],
     );
   }

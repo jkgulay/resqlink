@@ -378,7 +378,7 @@ class MessageSyncService {
             fromUser: data['fromUser'] ?? 'Unknown User',
             message: data['message'] ?? '',
             isMe: false, // Messages from Firebase are from other users
-            isEmergency: data['isEmergency'] ?? false,
+            isEmergency: _safeBool(data['isEmergency']) ?? false,
             timestamp:
                 data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
             type: data['type'] ?? 'message',
@@ -509,5 +509,14 @@ class MessageSyncService {
     }
 
     await syncPendingMessages();
+  }
+
+  /// Safely convert dynamic value to bool
+  bool? _safeBool(dynamic value) {
+    if (value == null) return null;
+    if (value is bool) return value;
+    if (value is int) return value == 1;
+    if (value is String) return value.toLowerCase() == 'true';
+    return null;
   }
 }

@@ -8,11 +8,10 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
-
-// Import your widgets and controllers
 import '../controllers/gps_controller.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../utils/resqlink_theme.dart';
+import '../utils/responsive_utils.dart';
 import '../widgets/gps/gps_enhanced_map.dart';
 import '../widgets/gps/gps_action_button_card.dart';
 import '../widgets/gps/gps_location_card.dart';
@@ -20,7 +19,6 @@ import '../widgets/gps/gps_button_card.dart';
 import '../widgets/gps/gps_panel_card.dart';
 import '../widgets/gps/gps_location_details_dialog.dart';
 
-// Location types for emergency scenarios
 enum LocationType {
   normal,
   emergency,
@@ -791,36 +789,49 @@ class _GpsPageState extends State<GpsPage> {
       ),
       child: Scaffold(
         backgroundColor: ResQLinkTheme.backgroundDark,
-        body: Stack(
-          children: [
-            GpsEnhancedMap(
-              mapController: _mapController,
-              onMapTap: _handleMapTap,
-              onMapLongPress: _handleMapLongPress,
-              onLocationTap: _handleLocationTap,
-              showCurrentLocation: true,
-              showSavedLocations: true,
-              showTrackingPath: controller.showTrackingPath,
-              showEmergencyZones: controller.showEmergencyZones,
-              showCriticalInfrastructure: controller.showCriticalInfrastructure,
-            ),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            return ConstrainedBox(
+              constraints: ResponsiveUtils.isDesktop(context)
+                  ? BoxConstraints(maxWidth: 1400)
+                  : BoxConstraints(),
+              child: Stack(
+                children: [
+                  GpsEnhancedMap(
+                    mapController: _mapController,
+                    onMapTap: _handleMapTap,
+                    onMapLongPress: _handleMapLongPress,
+                    onLocationTap: _handleLocationTap,
+                    showCurrentLocation: true,
+                    showSavedLocations: true,
+                    showTrackingPath: controller.showTrackingPath,
+                    showEmergencyZones: controller.showEmergencyZones,
+                    showCriticalInfrastructure:
+                        controller.showCriticalInfrastructure,
+                  ),
 
-            const GpsStatsPanel(),
+                  const GpsStatsPanel(),
 
-            GpsActionButtons(onCenterCurrentLocation: _centerOnCurrentLocation, onLocationDetailsRequest: () {  },),
+                  GpsActionButtons(
+                    onCenterCurrentLocation: _centerOnCurrentLocation,
+                    onLocationDetailsRequest: () {},
+                  ),
 
-            const GpsEmergencyButton(),
+                  const GpsEmergencyButton(),
 
-            // Bottom Location List
-            GpsLocationList(
-              onLocationSelected: _handleLocationSelected,
-              onLocationShare: _handleLocationShare,
-            ),
+                  // Bottom Location List
+                  GpsLocationList(
+                    onLocationSelected: _handleLocationSelected,
+                    onLocationShare: _handleLocationShare,
+                  ),
 
-            // Download Progress Indicator (if downloading)
-            if (controller.isDownloadingMaps)
-              _buildDownloadProgressOverlay(controller),
-          ],
+                  // Download Progress Indicator (if downloading)
+                  if (controller.isDownloadingMaps)
+                    _buildDownloadProgressOverlay(controller),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
