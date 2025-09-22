@@ -43,6 +43,51 @@ class P2PNetworkService {
     }
   }
 
+  Future<bool> sendToDevice(String message, String? targetDeviceId) async {
+    if (targetDeviceId == null) {
+      debugPrint('⚠️ No target device specified');
+      return false;
+    }
+
+    try {
+      // Try WebSocket first
+      for (final entry in _webSocketConnections.entries) {
+        if (entry.key.contains(targetDeviceId)) {
+          entry.value.sink.add(message);
+          debugPrint('✅ Message sent via WebSocket to device: $targetDeviceId');
+          return true;
+        }
+      }
+
+      // Try TCP socket
+      if (_deviceSockets.containsKey(targetDeviceId)) {
+        _deviceSockets[targetDeviceId]!.write(message);
+        _deviceSockets[targetDeviceId]!.flush();
+        debugPrint('✅ Message sent via TCP to device: $targetDeviceId');
+        return true;
+      }
+
+      // Try to find device by scanning connected devices
+      for (final socketEntry in _deviceSockets.entries) {
+        if (socketEntry.key == targetDeviceId) {
+          socketEntry.value.write(message);
+          socketEntry.value.flush();
+          debugPrint('✅ Message sent to device: $targetDeviceId');
+          return true;
+        }
+      }
+
+      debugPrint('⚠️ No connection found for device: $targetDeviceId');
+
+      // Fallback to broadcast
+      await broadcastMessage(MessageModel.fromJson(jsonDecode(message)));
+      return false;
+    } catch (e) {
+      debugPrint('❌ Error sending to device $targetDeviceId: $e');
+      return false;
+    }
+  }
+
   /// Start TCP server for device connections
   Future<void> _startTcpServer() async {
     try {

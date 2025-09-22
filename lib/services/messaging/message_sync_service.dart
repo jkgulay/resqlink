@@ -8,8 +8,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
-import '../models/message_model.dart';
-import 'p2p/p2p_main_service.dart';
+import '../../models/message_model.dart';
+import '../p2p/p2p_main_service.dart';
 
 class MessageSyncService {
   static final MessageSyncService _instance = MessageSyncService._internal();
@@ -169,6 +169,7 @@ class MessageSyncService {
       status: MessageStatus.pending,
       synced: false,
       syncedToFirebase: false,
+      deviceId: _deviceId,
     );
 
     try {
@@ -388,6 +389,7 @@ class MessageSyncService {
             status: MessageStatus.delivered,
             synced: true,
             syncedToFirebase: true,
+            deviceId: data['deviceId'],
           );
 
           await MessageRepository.insertMessage(messageModel);

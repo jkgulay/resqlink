@@ -42,6 +42,7 @@ class MessageRepository {
           'targetDeviceId': message.targetDeviceId,
           'messageType': message.messageType.index,
           'chatSessionId': chatSessionId,
+          'deviceId': message.deviceId,
           'synced': message.synced ? 1 : 0,
           'priority': message.isEmergency ? 1 : 0,
         };
@@ -677,6 +678,7 @@ class MessageRepository {
         status: MessageStatus.sent,
         latitude: latitude,
         longitude: longitude,
+        deviceId: null,
       );
 
       await insert(locationMessage);
@@ -710,6 +712,7 @@ class MessageRepository {
       'targetDeviceId': message.targetDeviceId,
       'messageType': message.messageType.index,
       'chatSessionId': message.chatSessionId,
+      'deviceId': message.deviceId,
       'priority': message.isEmergency ? 1 : 0,
       'lastRetryTime': 0,
     };

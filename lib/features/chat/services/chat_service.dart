@@ -201,6 +201,7 @@ class ChatService extends ChangeNotifier {
         connectionType: connectionType,
         latitude: latitude,
         longitude: longitude,
+        deviceId: targetDeviceId,
       );
 
       // Save to database

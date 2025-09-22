@@ -2,7 +2,8 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum MessageStatus { pending, sent, delivered, failed, synced }
+enum MessageStatus { pending, sent, delivered, failed, synced, received }
+
 enum MessageType { text, emergency, location, sos, system, file }
 
 class MessageModel {
@@ -27,6 +28,7 @@ class MessageModel {
   final String? targetDeviceId;
   final MessageType messageType;
   final String? chatSessionId;
+  final String? deviceId;
 
   MessageModel({
     this.id,
@@ -50,8 +52,11 @@ class MessageModel {
     this.targetDeviceId,
     MessageType? messageType,
     this.chatSessionId,
+    this.deviceId,
   }) : type = type ?? (isEmergency ? 'emergency' : 'message'),
-       messageType = messageType ?? (isEmergency ? MessageType.emergency : MessageType.text);
+       messageType =
+           messageType ??
+           (isEmergency ? MessageType.emergency : MessageType.text);
 
   // DateTime getter for convenience
   DateTime get dateTime => DateTime.fromMillisecondsSinceEpoch(timestamp);
@@ -90,6 +95,7 @@ class MessageModel {
     String? targetDeviceId,
     MessageType? messageType,
     String? chatSessionId,
+    String? deviceId,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -113,6 +119,7 @@ class MessageModel {
       targetDeviceId: targetDeviceId ?? this.targetDeviceId,
       messageType: messageType ?? this.messageType,
       chatSessionId: chatSessionId ?? this.chatSessionId,
+      deviceId: deviceId ?? this.deviceId,
     );
   }
 
@@ -140,6 +147,7 @@ class MessageModel {
       'target_device_id': targetDeviceId,
       'message_type': messageType.index,
       'chat_session_id': chatSessionId,
+      'device_id': deviceId,
     };
   }
 
@@ -175,6 +183,7 @@ class MessageModel {
           ? MessageType.values[map['messageType']]
           : MessageType.text,
       chatSessionId: map['chatSessionId'],
+      deviceId: map['deviceId'],
     );
   }
 
@@ -216,6 +225,7 @@ class MessageModel {
             )
           : MessageType.text,
       chatSessionId: map['chatSessionId'],
+      deviceId: map['deviceId'],
     );
   }
 
@@ -236,6 +246,8 @@ class MessageModel {
       'ttl': ttl,
       'connectionType': connectionType,
       'deviceInfo': deviceInfo,
+      'targetDeviceId': targetDeviceId,
+      'deviceId': deviceId,
     };
   }
 
@@ -256,6 +268,8 @@ class MessageModel {
       'ttl': ttl,
       'connectionType': connectionType,
       'deviceInfo': deviceInfo,
+      'targetDeviceId': targetDeviceId,
+      'deviceId': deviceId,
       'createdAt': FieldValue.serverTimestamp(),
     };
   }
@@ -304,6 +318,7 @@ class MessageModel {
       'targetDeviceId': targetDeviceId,
       'connectionType': connectionType,
       'deviceInfo': deviceInfo,
+      'deviceId': deviceId,
     };
   }
 
@@ -338,6 +353,7 @@ class MessageModel {
       targetDeviceId: json['targetDeviceId'],
       connectionType: json['connectionType'],
       deviceInfo: json['deviceInfo'],
+      deviceId: json['deviceId'],
     );
   }
 
@@ -372,7 +388,16 @@ class MessageModel {
       type: type.name,
       ttl: 5,
       routePath: [deviceId],
+      deviceId: deviceId,
     );
+  }
+
+  factory MessageModel.fromJson(Map<String, dynamic> json) {
+    if (json.containsKey('messageId') && !json.containsKey('id')) {
+      return MessageModel.fromNetworkJson(json);
+    } else {
+      return MessageModel.fromMap(json);
+    }
   }
 
   // Create a direct message to specific device
@@ -401,6 +426,7 @@ class MessageModel {
       type: type.name,
       ttl: 5,
       routePath: [deviceId],
+      deviceId: deviceId,
     );
   }
 }

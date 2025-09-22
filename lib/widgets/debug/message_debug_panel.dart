@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../services/message_debug_service.dart';
+import '../../services/messaging/message_debug_service.dart';
 import '../../services/p2p/p2p_main_service.dart';
 
 /// Debug panel widget for testing message flow and connectivity

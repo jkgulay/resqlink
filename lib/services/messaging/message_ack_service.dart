@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import '../models/message_model.dart';
-import 'p2p/p2p_main_service.dart';
-import '../features/database/repositories/message_repository.dart';
+import '../../models/message_model.dart';
+import '../p2p/p2p_main_service.dart';
+import '../../features/database/repositories/message_repository.dart';
 
 class MessageAcknowledgmentService {
   static final MessageAcknowledgmentService _instance = 

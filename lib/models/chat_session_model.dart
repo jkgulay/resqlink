@@ -38,7 +38,8 @@ class ChatSession {
     return 'chat_${sortedIds[0]}_${sortedIds[1]}';
   }
 
-  bool get isOnline => lastConnectionAt != null &&
+  bool get isOnline =>
+      lastConnectionAt != null &&
       DateTime.now().difference(lastConnectionAt!).inMinutes < 5;
 
   ConnectionType? get lastConnectionType =>
@@ -71,7 +72,9 @@ class ChatSession {
       'last_connection_at': lastConnectionAt?.millisecondsSinceEpoch,
       'message_count': messageCount,
       'unread_count': unreadCount,
-      'connection_history': jsonEncode(connectionHistory.map((e) => e.index).toList()),
+      'connection_history': jsonEncode(
+        connectionHistory.map((e) => e.index).toList(),
+      ),
       'status': status.index,
       'metadata': metadata != null ? jsonEncode(metadata!) : null,
     };
@@ -84,7 +87,9 @@ class ChatSession {
       deviceName: map['device_name'] ?? '',
       deviceAddress: map['device_address'],
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] ?? 0),
-      lastMessageAt: DateTime.fromMillisecondsSinceEpoch(map['last_message_at'] ?? 0),
+      lastMessageAt: DateTime.fromMillisecondsSinceEpoch(
+        map['last_message_at'] ?? 0,
+      ),
       lastConnectionAt: map['last_connection_at'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['last_connection_at'])
           : null,
@@ -92,8 +97,8 @@ class ChatSession {
       unreadCount: map['unread_count'] ?? 0,
       connectionHistory: map['connection_history'] != null
           ? (jsonDecode(map['connection_history']) as List)
-              .map((index) => ConnectionType.values[index])
-              .toList()
+                .map((index) => ConnectionType.values[index])
+                .toList()
           : [],
       status: map['status'] != null
           ? ChatSessionStatus.values[map['status']]

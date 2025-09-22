@@ -7,7 +7,7 @@ import 'package:path/path.dart';
 class DatabaseManager {
   static Database? _database;
   static const String _dbName = 'resqlink_enhanced.db';
-  static const int _dbVersion = 7;
+  static const int _dbVersion = 8;
 
   // Singleton
   static DatabaseManager? _instance;
@@ -251,6 +251,7 @@ class DatabaseManager {
           lastRetryTime INTEGER DEFAULT 0,
           priority INTEGER DEFAULT 0,
           chatSessionId TEXT,
+          deviceId TEXT,
           createdAt INTEGER DEFAULT (strftime('%s', 'now'))
         )
       ''');
@@ -375,6 +376,9 @@ class DatabaseManager {
       }
       if (oldVersion < 7) {
         await _upgradeToV7(db);
+      }
+      if (oldVersion < 8) {
+        await _upgradeToV8(db);
       }
 
       debugPrint('✅ Database upgrade completed successfully');
@@ -592,6 +596,20 @@ class DatabaseManager {
       debugPrint('✅ Added priority column to message_queue table');
     } catch (e) {
       debugPrint('⚠️ Priority column may already exist: $e');
+    }
+  }
+
+  static Future<void> _upgradeToV8(Database db) async {
+    debugPrint('🔄 Upgrading to database version 8...');
+
+    // Add deviceId column to messages table
+    try {
+      await db.execute(
+        'ALTER TABLE messages ADD COLUMN deviceId TEXT',
+      );
+      debugPrint('✅ Added deviceId column to messages table');
+    } catch (e) {
+      debugPrint('⚠️ DeviceId column may already exist: $e');
     }
   }
 

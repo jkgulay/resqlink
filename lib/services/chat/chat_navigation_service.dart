@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/models/message_model.dart';
-import '../models/chat_session_model.dart';
-import '../features/database/repositories/chat_repository.dart';
-import '../services/p2p/p2p_main_service.dart';
-import '../pages/chat_session_page.dart';
-import '../pages/chat_list_page.dart';
+import '../../models/chat_session_model.dart';
+import '../../features/database/repositories/chat_repository.dart';
+import '../p2p/p2p_main_service.dart';
+import '../../pages/chat_session_page.dart';
+import '../../pages/chat_list_page.dart';
 
 class ChatNavigationService {
-  static final ChatNavigationService _instance = ChatNavigationService._internal();
+  static final ChatNavigationService _instance =
+      ChatNavigationService._internal();
   factory ChatNavigationService() => _instance;
   ChatNavigationService._internal();
 
@@ -16,6 +17,12 @@ class ChatNavigationService {
 
   bool _autoNavigateEnabled = true;
   bool _isNavigating = false;
+
+  // Track active chats with deviceId mapping
+  final Map<String, bool> _activeChatSessions = {};
+  final Map<String, String> _sessionToDeviceMap = {}; // sessionId -> deviceId
+  String? _currentChatSessionId;
+  String? _currentDeviceId;
 
   void initialize(BuildContext context, P2PMainService p2pService) {
     _context = context;
@@ -26,6 +33,10 @@ class ChatNavigationService {
   void dispose() {
     _context = null;
     _p2pService = null;
+    _activeChatSessions.clear();
+    _sessionToDeviceMap.clear();
+    _currentChatSessionId = null;
+    _currentDeviceId = null;
   }
 
   void setAutoNavigateEnabled(bool enabled) {
@@ -37,8 +48,70 @@ class ChatNavigationService {
     _p2pService?.onDeviceDisconnected = _onDeviceDisconnected;
   }
 
+  Future<void> navigateToDeviceChat(
+    BuildContext context,
+    Map<String, dynamic> device,
+    P2PMainService p2pService,
+  ) async {
+    // Prevent duplicate navigation
+    if (_isNavigating) {
+      debugPrint('⚠️ Navigation already in progress');
+      return;
+    }
+
+    _isNavigating = true;
+
+    try {
+      final deviceId =
+          device['deviceId'] as String? ??
+          device['deviceAddress'] as String? ??
+          'unknown';
+      final deviceName = device['deviceName'] as String? ?? 'Unknown Device';
+
+      if (_currentChatSessionId == deviceId &&
+          ModalRoute.of(context)?.settings.name == '/chat_session') {
+        debugPrint('👀 Already in chat with $deviceName');
+        _isNavigating = false;
+        return;
+      }
+
+      ChatSession? session = await ChatRepository.getSessionByDeviceId(
+        deviceId,
+      );
+
+      _currentChatSessionId = session?.id;
+      _activeChatSessions[session!.id] = true;
+
+      if (context.mounted) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatSessionPage(
+              sessionId: session.id,
+              deviceName: session.deviceName,
+              p2pService: p2pService,
+              deviceId: session.deviceId,
+            ),
+            settings: RouteSettings(name: '/chat_session'),
+          ),
+        );
+
+        // Clear current session on pop
+        _currentChatSessionId = null;
+        _activeChatSessions[session.id] = false;
+      }
+    } catch (e) {
+      debugPrint('❌ Error navigating to chat: $e');
+    } finally {
+      _isNavigating = false;
+    }
+  }
+
   Future<void> _onDeviceConnected(String deviceId, String deviceName) async {
-    if (!_autoNavigateEnabled || _isNavigating || _context == null || _p2pService == null) {
+    if (!_autoNavigateEnabled ||
+        _isNavigating ||
+        _context == null ||
+        _p2pService == null) {
       return;
     }
 
@@ -53,8 +126,11 @@ class ChatNavigationService {
       );
 
       if (sessionId.isNotEmpty && _context != null) {
+        // Track the session and device mapping
+        _sessionToDeviceMap[sessionId] = deviceId;
+
         // Navigate to chat with the connected device
-        await _navigateToChat(sessionId, deviceName);
+        await _navigateToChat(sessionId, deviceName, deviceId);
       }
     } catch (e) {
       debugPrint('❌ Error in _onDeviceConnected: $e');
@@ -69,7 +145,11 @@ class ChatNavigationService {
     debugPrint('📱 Device disconnected: $deviceId');
   }
 
-  Future<void> _navigateToChat(String sessionId, String deviceName) async {
+  Future<void> _navigateToChat(
+    String sessionId,
+    String deviceName,
+    String deviceId,
+  ) async {
     if (_context == null || _p2pService == null) return;
 
     try {
@@ -91,7 +171,7 @@ class ChatNavigationService {
           action: SnackBarAction(
             label: 'CHAT',
             textColor: Colors.white,
-            onPressed: () => _openChatSession(sessionId, deviceName),
+            onPressed: () => _openChatSession(sessionId, deviceName, deviceId),
           ),
         ),
       );
@@ -99,15 +179,20 @@ class ChatNavigationService {
       // Auto-navigate after a short delay
       await Future.delayed(Duration(seconds: 1));
       if (_context != null) {
-        _openChatSession(sessionId, deviceName);
+        _openChatSession(sessionId, deviceName, deviceId);
       }
     } catch (e) {
       debugPrint('❌ Error navigating to chat: $e');
     }
   }
 
-  void _openChatSession(String sessionId, String deviceName) {
+  void _openChatSession(String sessionId, String deviceName, String deviceId) {
     if (_context == null || _p2pService == null) return;
+
+    // Set current session as active
+    _currentChatSessionId = sessionId;
+    _currentDeviceId = deviceId;
+    _activeChatSessions[sessionId] = true;
 
     Navigator.push(
       _context!,
@@ -115,60 +200,93 @@ class ChatNavigationService {
         builder: (context) => ChatSessionPage(
           sessionId: sessionId,
           deviceName: deviceName,
+          deviceId: deviceId,
           p2pService: _p2pService!,
         ),
       ),
-    );
+    ).then((_) {
+      // Clear current session when chat is closed
+      _currentChatSessionId = null;
+      _currentDeviceId = null;
+      _activeChatSessions[sessionId] = false;
+    });
   }
 
-  /// Navigate to chat list page
   static Future<void> navigateToChatList(
-    BuildContext context,
-    P2PMainService p2pService,
-  ) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatListPage(
-          p2pService: p2pService,
-          onChatSelected: (sessionId, deviceName) {
-            Navigator.pop(context); // Close chat list
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ChatSessionPage(
-                  sessionId: sessionId,
-                  deviceName: deviceName,
-                  p2pService: p2pService,
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
+  BuildContext context,
+  P2PMainService p2pService,
+) async {
+  if (!context.mounted) return;
 
-  /// Navigate directly to a specific chat session
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) => ChatListPage(
+        p2pService: p2pService,
+        onChatSelected: (sessionId, deviceName) async {
+          // ✅ Store navigator reference before async gap
+          final navigator = Navigator.of(context);
+          
+          // Close chat list first
+          navigator.pop();
+
+          try {
+            // Get device ID from session
+            final session = await ChatRepository.getSession(sessionId);
+            final deviceId = session?.deviceId ?? 'unknown';
+
+            // ✅ Check if context is still mounted after async operation
+            if (context.mounted) {
+              await navigator.push(
+                MaterialPageRoute(
+                  builder: (context) => ChatSessionPage(
+                    sessionId: sessionId,
+                    deviceName: deviceName,
+                    deviceId: deviceId,
+                    p2pService: p2pService,
+                  ),
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('❌ Error navigating to chat session: $e');
+          }
+        },
+      ),
+    ),
+  );
+}
+
   static Future<void> navigateToChat(
     BuildContext context,
     String sessionId,
     String deviceName,
-    P2PMainService p2pService,
-  ) async {
+    P2PMainService p2pService, {
+    String? deviceId,
+  }) async {
+    if (!context.mounted) return;
+
+    String actualDeviceId = deviceId ?? 'unknown';
+    if (deviceId == null) {
+      final session = await ChatRepository.getSession(sessionId);
+      actualDeviceId = session?.deviceId ?? 'unknown';
+    }
+
+    if (!context.mounted) return;
+
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ChatSessionPage(
           sessionId: sessionId,
           deviceName: deviceName,
+          deviceId: actualDeviceId,
           p2pService: p2pService,
         ),
       ),
     );
   }
 
-  /// Create a new chat session and navigate to it
   static Future<void> createAndNavigateToChat(
     BuildContext context,
     String deviceId,
@@ -183,7 +301,13 @@ class ChatNavigationService {
       );
 
       if (sessionId.isNotEmpty && context.mounted) {
-        await navigateToChat(context, sessionId, deviceName, p2pService);
+        await navigateToChat(
+          context,
+          sessionId,
+          deviceName,
+          p2pService,
+          deviceId: deviceId,
+        );
       }
     } catch (e) {
       debugPrint('❌ Error creating and navigating to chat: $e');
@@ -240,7 +364,13 @@ class ChatNavigationService {
                 textColor: Colors.white,
                 onPressed: () {
                   if (context.mounted) {
-                    navigateToChat(context, sessionId, deviceName, p2pService);
+                    navigateToChat(
+                      context,
+                      sessionId,
+                      deviceName,
+                      p2pService,
+                      deviceId: deviceId,
+                    );
                   }
                 },
               ),
@@ -251,12 +381,23 @@ class ChatNavigationService {
         // Auto-navigate to resume chat
         await Future.delayed(Duration(seconds: 1));
         if (context.mounted) {
-          await navigateToChat(context, sessionId, deviceName, p2pService);
+          await navigateToChat(
+            context,
+            sessionId,
+            deviceName,
+            p2pService,
+            deviceId: deviceId,
+          );
         }
       } else {
         // Create new session if none exists
         if (context.mounted) {
-          await createAndNavigateToChat(context, deviceId, deviceName, p2pService);
+          await createAndNavigateToChat(
+            context,
+            deviceId,
+            deviceName,
+            p2pService,
+          );
         }
       }
     } catch (e) {
@@ -275,10 +416,7 @@ class ChatNavigationService {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Theme.of(context).cardColor,
-        title: Text(
-          deviceName,
-          style: TextStyle(color: Colors.white),
-        ),
+        title: Text(deviceName, style: TextStyle(color: Colors.white)),
         content: Text(
           'What would you like to do with this device?',
           style: TextStyle(color: Colors.white70),
@@ -291,7 +429,12 @@ class ChatNavigationService {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              createAndNavigateToChat(context, deviceId, deviceName, p2pService);
+              createAndNavigateToChat(
+                context,
+                deviceId,
+                deviceName,
+                p2pService,
+              );
             },
             child: Text('Start Chat'),
           ),
@@ -323,13 +466,63 @@ class ChatNavigationService {
                 }
               }
             },
-            child: Text(
-              'Send SOS',
-              style: TextStyle(color: Colors.red),
-            ),
+            child: Text('Send SOS', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
+  }
+
+  /// Get current chat session ID
+  String? get currentChatSessionId => _currentChatSessionId;
+
+  /// Get current device ID
+  String? get currentDeviceId => _currentDeviceId;
+
+  /// Check if chat is active for a session
+  bool isChatActive(String sessionId) {
+    return _activeChatSessions[sessionId] ?? false;
+  }
+
+  /// Check if currently chatting with specific device
+  bool isChattingWithDevice(String deviceId) {
+    return _currentDeviceId == deviceId && _currentChatSessionId != null;
+  }
+
+  /// Get device ID for a session
+  String? getDeviceIdForSession(String sessionId) {
+    return _sessionToDeviceMap[sessionId];
+  }
+
+  /// Get all active chat sessions
+  List<String> getActiveChatSessions() {
+    return _activeChatSessions.entries
+        .where((entry) => entry.value)
+        .map((entry) => entry.key)
+        .toList();
+  }
+
+  /// Set session active state manually
+  void setSessionActive(String sessionId, String deviceId, bool active) {
+    _activeChatSessions[sessionId] = active;
+    _sessionToDeviceMap[sessionId] = deviceId;
+
+    if (active) {
+      _currentChatSessionId = sessionId;
+      _currentDeviceId = deviceId;
+    } else if (_currentChatSessionId == sessionId) {
+      _currentChatSessionId = null;
+      _currentDeviceId = null;
+    }
+  }
+
+  /// Clear all navigation state
+  void clearNavigationState() {
+    _currentChatSessionId = null;
+    _currentDeviceId = null;
+    _activeChatSessions.clear();
+    _sessionToDeviceMap.clear();
+    _isNavigating = false;
+    debugPrint('🧹 Chat navigation state cleared');
   }
 }

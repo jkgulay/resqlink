@@ -20,7 +20,7 @@ class ChatSessionPage extends StatefulWidget {
     super.key,
     required this.sessionId,
     required this.deviceName,
-    required this.p2pService,
+    required this.p2pService, required String deviceId,
   });
 
   @override
@@ -156,7 +156,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         type: type.name,
         status: MessageStatus.pending,
         chatSessionId: widget.sessionId,
-        connectionType: widget.p2pService.connectionType,
+        connectionType: widget.p2pService.connectionType, deviceId: null,
       );
 
       // Save message to database

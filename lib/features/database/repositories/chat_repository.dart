@@ -65,12 +65,76 @@ class ChatRepository {
     }
   }
 
+  static Future<ChatSession?> getSessionByDeviceId(String deviceId) async {
+  try {
+    final db = await DatabaseManager.database;
+    final results = await db.query(
+      _tableName,
+      where: 'device_id = ?',
+      whereArgs: [deviceId],
+      orderBy: 'last_message_at DESC',
+      limit: 1,
+    );
+
+    if (results.isNotEmpty) {
+      return ChatSession.fromMap(results.first);
+    }
+    return null;
+  } catch (e) {
+    debugPrint('❌ Error getting chat session by device ID: $e');
+    return null;
+  }
+}
+
+/// Get or create a chat session for a device
+static Future<ChatSession> getOrCreateSessionByDeviceId(
+  String deviceId, {
+  String? deviceName,
+  String? deviceAddress,
+  String? currentUserId,
+}) async {
+  try {
+    // First try to get existing session
+    ChatSession? session = await getSessionByDeviceId(deviceId);
+    
+    if (session != null) {
+      // Update connection time for existing session
+      await updateConnection(
+        sessionId: session.id,
+        connectionType: ConnectionType.unknown, // You can determine this based on context
+        connectionTime: DateTime.now(),
+      );
+      return session;
+    }
+
+    // Create new session if none exists
+    final sessionId = await createOrUpdate(
+      deviceId: deviceId,
+      deviceName: deviceName ?? 'Unknown Device',
+      deviceAddress: deviceAddress,
+      currentUserId: currentUserId,
+    );
+
+    // Get the newly created session
+    session = await getSession(sessionId);
+    if (session == null) {
+      throw Exception('Failed to create chat session');
+    }
+
+    return session;
+  } catch (e) {
+    debugPrint('❌ Error getting/creating chat session: $e');
+    rethrow;
+  }
+}
+
   /// Get all chat sessions with summary information
   static Future<List<ChatSessionSummary>> getAllSessions() async {
     try {
       final db = await DatabaseManager.database;
 
-      const sessionQuery = '''
+      const sessionQuery =
+          '''
         SELECT
           cs.id as sessionId,
           cs.device_id as deviceId,
@@ -106,10 +170,14 @@ class ChatRepository {
         }
 
         final lastConnectionAt = row['lastConnectionAt'] as int?;
-        final isOnline = lastConnectionAt != null &&
+        final isOnline =
+            lastConnectionAt != null &&
             DateTime.now()
-                .difference(DateTime.fromMillisecondsSinceEpoch(lastConnectionAt))
-                .inMinutes < 5;
+                    .difference(
+                      DateTime.fromMillisecondsSinceEpoch(lastConnectionAt),
+                    )
+                    .inMinutes <
+                5;
 
         return ChatSessionSummary(
           sessionId: row['sessionId'] as String,
@@ -117,7 +185,9 @@ class ChatRepository {
           deviceName: row['deviceName'] as String,
           lastMessage: row['lastMessage'] as String?,
           lastMessageTime: row['lastMessageTime'] != null
-              ? DateTime.fromMillisecondsSinceEpoch(row['lastMessageTime'] as int)
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  row['lastMessageTime'] as int,
+                )
               : null,
           unreadCount: row['unreadCount'] as int? ?? 0,
           isOnline: isOnline,
@@ -175,14 +245,17 @@ class ChatRepository {
       final db = await DatabaseManager.database;
 
       // Get message count and unread count
-      final messageCountResult = await db.rawQuery('''
+      final messageCountResult = await db.rawQuery(
+        '''
         SELECT
           COUNT(*) as total_messages,
           COUNT(CASE WHEN synced = 0 AND isMe = 0 THEN 1 END) as unread_count,
           MAX(timestamp) as last_message_time
         FROM messages
         WHERE chatSessionId = ?
-      ''', [sessionId]);
+      ''',
+        [sessionId],
+      );
 
       if (messageCountResult.isNotEmpty) {
         final row = messageCountResult.first;
@@ -246,7 +319,9 @@ class ChatRepository {
       final session = await getSession(sessionId);
       if (session == null) return false;
 
-      final updatedHistory = List<ConnectionType>.from(session.connectionHistory);
+      final updatedHistory = List<ConnectionType>.from(
+        session.connectionHistory,
+      );
       if (updatedHistory.isEmpty || updatedHistory.last != connectionType) {
         updatedHistory.add(connectionType);
         // Keep only last 10 connection types
@@ -260,7 +335,9 @@ class ChatRepository {
         _tableName,
         {
           'last_connection_at': connectionTime.millisecondsSinceEpoch,
-          'connection_history': jsonEncode(updatedHistory.map((e) => e.index).toList()),
+          'connection_history': jsonEncode(
+            updatedHistory.map((e) => e.index).toList(),
+          ),
         },
         where: 'id = ?',
         whereArgs: [sessionId],
@@ -302,11 +379,7 @@ class ChatRepository {
         );
 
         // Delete the session
-        await txn.delete(
-          _tableName,
-          where: 'id = ?',
-          whereArgs: [sessionId],
-        );
+        await txn.delete(_tableName, where: 'id = ?', whereArgs: [sessionId]);
 
         debugPrint('✅ Chat session deleted: $sessionId');
         return true;
@@ -327,8 +400,8 @@ class ChatRepository {
 
       return sessions.where((session) {
         return session.deviceName.toLowerCase().contains(lowerQuery) ||
-               session.deviceId.toLowerCase().contains(lowerQuery) ||
-               (session.lastMessage?.toLowerCase().contains(lowerQuery) ?? false);
+            session.deviceId.toLowerCase().contains(lowerQuery) ||
+            (session.lastMessage?.toLowerCase().contains(lowerQuery) ?? false);
       }).toList();
     } catch (e) {
       debugPrint('❌ Error searching chat sessions: $e');
@@ -341,7 +414,8 @@ class ChatRepository {
     try {
       final db = await DatabaseManager.database;
 
-      final stats = await db.rawQuery('''
+      final stats = await db.rawQuery(
+        '''
         SELECT
           COUNT(*) as total_messages,
           COUNT(CASE WHEN isMe = 1 THEN 1 END) as sent_messages,
@@ -351,7 +425,9 @@ class ChatRepository {
           MAX(timestamp) as last_message_time
         FROM messages
         WHERE chatSessionId = ?
-      ''', [sessionId]);
+      ''',
+        [sessionId],
+      );
 
       if (stats.isNotEmpty) {
         return Map<String, dynamic>.from(stats.first);
@@ -366,7 +442,9 @@ class ChatRepository {
   /// Clean up old archived sessions
   static Future<int> cleanupOldSessions({Duration? olderThan}) async {
     try {
-      final cutoffDate = DateTime.now().subtract(olderThan ?? const Duration(days: 90));
+      final cutoffDate = DateTime.now().subtract(
+        olderThan ?? const Duration(days: 90),
+      );
       final db = await DatabaseManager.database;
 
       final result = await db.delete(
@@ -388,7 +466,8 @@ class ChatRepository {
 
   // Compatibility methods for existing code
   static Future<List<ChatSessionSummary>> getChatSessions() => getAllSessions();
-  static Future<bool> markSessionMessagesAsRead(String sessionId) => markMessagesAsRead(sessionId);
+  static Future<bool> markSessionMessagesAsRead(String sessionId) =>
+      markMessagesAsRead(sessionId);
   static Future<bool> deleteSession(String sessionId) => delete(sessionId);
   static Future<bool> archiveSession(String sessionId) => archive(sessionId);
   static Future<bool> updateSessionConnection({

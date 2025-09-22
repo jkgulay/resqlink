@@ -3,12 +3,12 @@ import 'package:flutter/services.dart';
 import '../models/chat_session_model.dart';
 import '../features/database/repositories/chat_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
+import 'package:resqlink/services/chat/chat_navigation_service.dart';
 import '../utils/resqlink_theme.dart';
 import '../utils/responsive_utils.dart';
 import '../utils/responsive_helper.dart';
 import '../widgets/message/empty_chat_view.dart';
 import '../widgets/message/loading_view.dart';
-import 'message_page.dart';
 import 'dart:async';
 
 class ChatListPage extends StatefulWidget {
@@ -109,11 +109,13 @@ class _ChatListPageState extends State<ChatListPage>
     if (widget.onChatSelected != null) {
       widget.onChatSelected!(session.sessionId, session.deviceName);
     } else {
-      Navigator.push(
+      // Use ChatNavigationService for proper session management
+      await ChatNavigationService.navigateToChat(
         context,
-        MaterialPageRoute(
-          builder: (context) => MessagePage(p2pService: widget.p2pService),
-        ),
+        session.sessionId,
+        session.deviceName,
+        widget.p2pService,
+        deviceId: session.deviceId,
       );
     }
 
