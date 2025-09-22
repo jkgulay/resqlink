@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:resqlink/controllers/home_controller.dart';
 import 'package:resqlink/models/message_model.dart';
+import 'package:resqlink/services/chat/chat_navigation_service.dart';
 
 class ConnectionManager {
+  final ChatNavigationService _chatNavigationService = ChatNavigationService();
   Future<bool> connectToDevice(
     Map<String, dynamic> device,
     BuildContext context,
@@ -118,65 +121,35 @@ class ConnectionManager {
     }
   }
 
-  void navigateToChat(
+  Future<void> navigateToChat(
     BuildContext context,
     Map<String, dynamic> device,
     Function(Map<String, dynamic>)? onDeviceChatTap,
   ) async {
     if (!context.mounted) return;
-    final currentContext = context;
-
-    final deviceId = device['deviceAddress'] ?? device['deviceId'] ?? '';
-    final deviceName = device['deviceName'] ?? 'Unknown Device';
-
-    if (deviceId.isEmpty) {
-      if (currentContext.mounted) {
-        ScaffoldMessenger.of(currentContext).showSnackBar(
-          SnackBar(
-            content: Text('Cannot start chat: Device ID not available'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
 
     try {
       if (onDeviceChatTap != null) {
         onDeviceChatTap(device);
-      } else {
-        Navigator.of(currentContext).pushNamed(
-          '/chat',
-          arguments: {
-            'deviceId': deviceId,
-            'deviceName': deviceName,
-            'connectionType': device['connectionType'],
-          },
-        );
+        return;
       }
 
-      if (currentContext.mounted) {
-        ScaffoldMessenger.of(currentContext).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.white, size: 20),
-                SizedBox(width: 8),
-                Text('Chat with $deviceName is ready'),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
+      final controller = context.read<HomeController>();
+      await _chatNavigationService.navigateToDeviceChat(
+        context,
+        device,
+        controller.p2pService,
+      );
+
+      debugPrint('✅ Chat navigation completed for: ${device['deviceName']}');
     } catch (e) {
-      debugPrint('❌ Error opening chat: $e');
-      if (currentContext.mounted) {
-        ScaffoldMessenger.of(currentContext).showSnackBar(
+      debugPrint('❌ Error navigating to chat: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to open chat: ${e.toString()}'),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
           ),
         );
       }
@@ -209,7 +182,9 @@ class ConnectionManager {
             if (device['lastSeen'] != null)
               _buildDetailRow(
                 'Last Seen',
-                DateTime.fromMillisecondsSinceEpoch(device['lastSeen']).toString(),
+                DateTime.fromMillisecondsSinceEpoch(
+                  device['lastSeen'],
+                ).toString(),
               ),
           ],
         ),
@@ -224,7 +199,10 @@ class ConnectionManager {
   }
 
   // Private helper methods
-  void _showConnectingMessage(BuildContext context, Map<String, dynamic> device) {
+  void _showConnectingMessage(
+    BuildContext context,
+    Map<String, dynamic> device,
+  ) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -295,29 +273,45 @@ class ConnectionManager {
     try {
       debugPrint('📡 Connecting via WiFi Direct to: $deviceAddress');
 
-      final success = await controller.p2pService.wifiDirectService
-              ?.connectToPeer(deviceAddress) ??
+      final success =
+          await controller.p2pService.wifiDirectService?.connectToPeer(
+            deviceAddress,
+          ) ??
           false;
 
       if (success) {
         debugPrint('✅ WiFi Direct connection initiated');
-        await Future.delayed(Duration(seconds: 3));
 
-        final connectionInfo = await controller
-            .p2pService.wifiDirectService
+        await Future.delayed(Duration(seconds: 2));
+
+        final connectionInfo = await controller.p2pService.wifiDirectService
             ?.getConnectionInfo();
-        final isConnected = connectionInfo?['isConnected'] ?? false;
 
-        if (isConnected) {
+        if (connectionInfo != null && connectionInfo['isConnected'] == true) {
+          debugPrint('✅ WiFi Direct group formed successfully');
+
           controller.p2pService.updateConnectionStatus(true);
-          await controller.p2pService.wifiDirectService
-              ?.establishSocketConnection();
-          debugPrint('✅ WiFi Direct connection and socket established');
-          return true;
-        }
-      }
 
-      return false;
+          await Future.delayed(Duration(seconds: 1));
+          final socketEstablished =
+              connectionInfo['socketEstablished'] ?? false;
+
+          if (socketEstablished) {
+            debugPrint('🔌 Socket communication confirmed');
+          } else {
+            debugPrint('⚠️ Socket may still be establishing...');
+          }
+
+          debugPrint('✅ WiFi Direct fully connected with socket ready');
+          return true;
+        } else {
+          debugPrint('❌ WiFi Direct group formation failed');
+          return false;
+        }
+      } else {
+        debugPrint('❌ WiFi Direct connection initiation failed');
+        return false;
+      }
     } catch (e) {
       debugPrint('❌ WiFi Direct connection failed: $e');
       return false;
@@ -362,12 +356,77 @@ class ConnectionManager {
 
   String _getConnectionTypeLabel(String connectionType) {
     switch (connectionType.toLowerCase()) {
-      case 'wifi_direct': return 'WiFi Direct';
-      case 'hotspot': return 'Hotspot';
-      case 'hotspot_enhanced': return 'Hotspot+';
-      case 'mdns': return 'mDNS';
-      case 'mdns_enhanced': return 'mDNS+';
-      default: return 'Unknown';
+      case 'wifi_direct':
+        return 'WiFi Direct';
+      case 'hotspot':
+        return 'Hotspot';
+      case 'hotspot_enhanced':
+        return 'Hotspot+';
+      case 'mdns':
+        return 'mDNS';
+      case 'mdns_enhanced':
+        return 'mDNS+';
+      default:
+        return 'Unknown';
     }
+  }
+
+  /// Check if device is currently connected
+  bool isDeviceConnected(
+    Map<String, dynamic> device,
+    HomeController controller,
+  ) {
+    final deviceId = device['deviceId'] ?? device['deviceAddress'];
+    return controller.p2pService.connectedDevices.containsKey(deviceId);
+  }
+
+  Future<bool> quickConnectAndChat(
+    BuildContext context,
+    Map<String, dynamic> device,
+    HomeController controller,
+  ) async {
+    if (!context.mounted) return false;
+
+    try {
+      final connected = await connectToDevice(device, context, controller);
+
+      if (connected && context.mounted) {
+        await Future.delayed(Duration(milliseconds: 500));
+
+        if (context.mounted) {
+          await navigateToChat(context, device, null);
+          return true;
+        }
+      }
+
+      return false;
+    } catch (e) {
+      debugPrint('❌ Quick connect and chat failed: $e');
+      return false;
+    }
+  }
+
+  /// Get connection status text for UI
+  String getConnectionStatusText(Map<String, dynamic> device) {
+    final isConnected = device['isConnected'] == true;
+    final isAvailable = device['isAvailable'] == true;
+    final connectionType = device['connectionType'] as String? ?? '';
+
+    if (isConnected) {
+      return 'Connected via ${_getConnectionTypeLabel(connectionType)}';
+    } else if (isAvailable) {
+      return 'Available for connection';
+    } else {
+      return 'Not available';
+    }
+  }
+
+  /// Get chat navigation service for external access
+  ChatNavigationService get chatNavigationService => _chatNavigationService;
+
+  /// Dispose resources
+  void dispose() {
+    // Add any cleanup if needed
+    debugPrint('🗑️ ConnectionManager disposed');
   }
 }

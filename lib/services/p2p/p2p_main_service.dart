@@ -13,6 +13,9 @@ import 'p2p_base_service.dart';
 import 'p2p_network_service.dart';
 import '../connection_fallback.dart';
 import '../hotspot_manager.dart';
+import '../chat/chat_navigation_service.dart';
+import '../../services/p2p/protocols/socket_protocol.dart';
+import '../../services/messaging/message_router.dart';
 
 /// Main P2P service that orchestrates all P2P operations
 class P2PMainService extends P2PBaseService {
@@ -23,6 +26,11 @@ class P2PMainService extends P2PBaseService {
   late HotspotManager _hotspotManager;
   WiFiDirectService? _wifiDirectService;
   late HotspotService _hotspotService;
+
+  // New enhanced components
+  late SocketProtocol _socketProtocol;
+  late MessageRouter _messageRouter;
+  late ChatNavigationService _chatNavigationService;
 
   // Enhanced state
   bool _hotspotCreationInProgress = false;
@@ -93,6 +101,15 @@ class P2PMainService extends P2PBaseService {
 
       await _wifiDirectService?.initialize();
       await _hotspotService.initialize();
+
+      // Initialize new enhanced components
+      _socketProtocol = SocketProtocol();
+      _socketProtocol.initialize(deviceId!, userName);
+
+      _messageRouter = MessageRouter();
+      _messageRouter.setGlobalListener(_handleGlobalMessage);
+
+      _chatNavigationService = ChatNavigationService();
 
       // Setup WiFi Direct state synchronization
       if (_wifiDirectService != null) {
@@ -367,8 +384,10 @@ class P2PMainService extends P2PBaseService {
     debugPrint('🧹 Cleared WiFi Direct devices from connected list');
   }
 
-  /// Handle socket establishment
-  void _handleSocketEstablished(Map<String, dynamic> connectionInfo) {
+  /// Handle socket establishment with proper protocol initialization
+  Future<void> _handleSocketEstablished(
+    Map<String, dynamic> connectionInfo,
+  ) async {
     final isGroupOwner = connectionInfo['isGroupOwner'] as bool? ?? false;
     final groupOwnerAddress =
         connectionInfo['groupOwnerAddress'] as String? ?? '';
@@ -377,13 +396,30 @@ class P2PMainService extends P2PBaseService {
       '🔌 Socket established - Group Owner: $isGroupOwner, Address: $groupOwnerAddress',
     );
 
-    // Update connection mode and status
-    _currentConnectionMode = P2PConnectionMode.wifiDirect;
-    updateConnectionStatus(true);
+    try {
+      // Initialize socket protocol based on role
+      if (isGroupOwner) {
+        debugPrint('👑 Starting socket server as group owner');
+        await _socketProtocol.startServer();
+      } else {
+        debugPrint('📱 Connecting to socket server at: $groupOwnerAddress');
+        await _socketProtocol.connectToServer(groupOwnerAddress);
+      }
 
-    _addMessageTrace(
-      'Socket communication established (Group Owner: $isGroupOwner)',
-    );
+      // Update connection mode and status
+      _currentConnectionMode = P2PConnectionMode.wifiDirect;
+      updateConnectionStatus(true);
+
+      _addMessageTrace(
+        'Socket protocol initialized (Group Owner: $isGroupOwner)',
+      );
+
+      debugPrint('✅ Socket protocol fully established and ready');
+    } catch (e) {
+      debugPrint('❌ Failed to initialize socket protocol: $e');
+      _addMessageTrace('Socket protocol initialization failed: $e');
+    }
+
     notifyListeners();
   }
 
@@ -407,7 +443,7 @@ class P2PMainService extends P2PBaseService {
     notifyListeners();
   }
 
-  /// Handle incoming WiFi Direct messages
+  /// Handle incoming WiFi Direct messages with message router integration
   Future<void> _handleIncomingMessage(String message, String? from) async {
     try {
       debugPrint('📨 Processing WiFi Direct message: $message from: $from');
@@ -415,39 +451,62 @@ class P2PMainService extends P2PBaseService {
       // Try to parse as JSON message
       final messageData = Map<String, dynamic>.from(json.decode(message));
 
-      // Extract message details
-      final messageText = messageData['message'] as String? ?? message;
-      final senderName =
-          messageData['senderName'] as String? ?? 'WiFi Direct User';
-      final messageType = MessageType.values.firstWhere(
-        (type) => type.name == messageData['type'],
-        orElse: () => MessageType.text,
-      );
+      // Extract sender device ID
+      final senderDeviceId =
+          messageData['deviceId'] as String? ?? from ?? 'unknown';
 
-      // Create message model
-      final messageModel = MessageModel.createDirectMessage(
-        fromUser: senderName,
-        message: messageText,
-        deviceId: messageData['deviceId'] ?? 'unknown',
-        targetDeviceId: deviceId ?? 'unknown',
-        type: messageType,
-        isEmergency:
-            messageType == MessageType.emergency ||
-            messageType == MessageType.sos,
-      );
+      debugPrint('📍 Message from device: $senderDeviceId');
 
-      // Save to database
-      await MessageRepository.insertMessage(messageModel);
+      // Route message through message router for intelligent handling
+      _messageRouter.routeRawMessage(messageData as String, senderDeviceId);
 
-      // Add to message history
-      saveMessageToHistory(messageModel);
-
-      _addMessageTrace('WiFi Direct message processed: $messageText');
-      debugPrint('✅ WiFi Direct message processed successfully');
+      _addMessageTrace('WiFi Direct message routed: ${messageData['message']}');
+      debugPrint('✅ WiFi Direct message routed successfully via MessageRouter');
     } catch (e) {
       debugPrint('❌ Failed to process WiFi Direct message: $e');
       _addMessageTrace('Failed to process WiFi Direct message: $e');
+
+      // Fallback to direct processing if routing fails
+      try {
+        await _fallbackMessageProcessing(message, from);
+      } catch (fallbackError) {
+        debugPrint('❌ Fallback message processing also failed: $fallbackError');
+      }
     }
+  }
+
+  /// Fallback message processing if router fails
+  Future<void> _fallbackMessageProcessing(String message, String? from) async {
+    final messageData = Map<String, dynamic>.from(json.decode(message));
+
+    // Extract message details
+    final messageText = messageData['message'] as String? ?? message;
+    final senderName =
+        messageData['senderName'] as String? ?? 'WiFi Direct User';
+    final messageType = MessageType.values.firstWhere(
+      (type) => type.name == messageData['messageType'],
+      orElse: () => MessageType.text,
+    );
+
+    // Create message model
+    final messageModel = MessageModel.createDirectMessage(
+      fromUser: senderName,
+      message: messageText,
+      deviceId: messageData['deviceId'] ?? 'unknown',
+      targetDeviceId: deviceId ?? 'unknown',
+      type: messageType,
+      isEmergency:
+          messageType == MessageType.emergency ||
+          messageType == MessageType.sos,
+    );
+
+    // Save to database
+    await MessageRepository.insertMessage(messageModel);
+
+    // Add to message history
+    saveMessageToHistory(messageModel);
+
+    debugPrint('✅ Fallback message processing completed');
   }
 
   Future<void> checkForExistingConnections() async {
@@ -472,7 +531,8 @@ class P2PMainService extends P2PBaseService {
         final socketEstablished = connectionInfo['socketEstablished'] ?? false;
         if (!socketEstablished) {
           debugPrint('🔌 Socket not established, creating now...');
-          final success = await _wifiDirectService?.establishSocketConnection() ?? false;
+          final success =
+              await _wifiDirectService?.establishSocketConnection() ?? false;
           if (success) {
             debugPrint('✅ Socket connection established successfully');
             _addMessageTrace(
@@ -701,7 +761,8 @@ class P2PMainService extends P2PBaseService {
       debugPrint('📡 Connecting via WiFi Direct to: $deviceAddress');
 
       // Use WiFiDirectService for actual connection
-      final success = await _wifiDirectService?.connectToPeer(deviceAddress) ?? false;
+      final success =
+          await _wifiDirectService?.connectToPeer(deviceAddress) ?? false;
 
       if (success) {
         // Update P2P service state
@@ -732,7 +793,6 @@ class P2PMainService extends P2PBaseService {
   }
 
   Future<bool> _connectViaMDNS(Map<String, dynamic> device) async {
- 
     debugPrint('📡 Connecting via mDNS to: ${device['deviceName']}');
     return true; // Placeholder
   }
@@ -759,6 +819,13 @@ class P2PMainService extends P2PBaseService {
     } catch (e) {
       debugPrint('❌ Failed to force client role: $e');
     }
+  }
+
+  Future<void> navigateToChat(
+    BuildContext context,
+    Map<String, dynamic> device,
+  ) async {
+    await _chatNavigationService.navigateToDeviceChat(context, device, this);
   }
 
   /// Clear forced role
@@ -1153,48 +1220,49 @@ class P2PMainService extends P2PBaseService {
       // Add to message history
       saveMessageToHistory(messageModel);
 
-      // Send via network
-      await _networkService.broadcastMessage(messageModel);
+      // Create message JSON for network transmission
+      final messageJson = jsonEncode({
+        'type': 'message',
+        'messageId': messageModel.messageId,
+        'message': message,
+        'senderName': actualSenderName,
+        'deviceId': deviceId,
+        'targetDeviceId': targetDeviceId,
+        'messageType': type.name,
+        'timestamp': messageModel.timestamp,
+        'isEmergency': type == MessageType.emergency || type == MessageType.sos,
+        'latitude': latitude,
+        'longitude': longitude,
+      });
 
-      if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
-        // Create message JSON for WiFi Direct
-        final messageJson = jsonEncode({
-          'type': 'message',
-          'messageId': messageModel.messageId,
-          'message': message,
-          'from': actualSenderName,
-          'senderName': actualSenderName,
-          'timestamp': DateTime.now().millisecondsSinceEpoch,
-          'messageType': type.name,
-          'isEmergency':
-              type == MessageType.emergency || type == MessageType.sos,
-          'latitude': latitude,
-          'longitude': longitude,
-        });
+      // Send via appropriate protocol based on connection mode
+      bool success = false;
 
-        // Send via WiFi Direct socket
-        final success = await _wifiDirectService?.sendMessage(messageJson) ?? false;
-
-        if (success) {
-          debugPrint('✅ Message sent via WiFi Direct');
-          _addMessageTrace(
-            'Message sent via WiFi Direct: ${messageModel.messageId}',
+      switch (_currentConnectionMode) {
+        case P2PConnectionMode.wifiDirect:
+          success = await _socketProtocol.sendMessage(
+            messageJson,
+            targetDeviceId,
           );
+        case P2PConnectionMode.hotspot:
+          success = await _networkService.sendToDevice(
+            messageJson,
+            targetDeviceId,
+          );
+        default:
+          success = await _socketProtocol.broadcastMessage(messageJson);
+      }
 
-          // Update message status
-          if (messageModel.messageId != null) {
-            await MessageRepository.updateMessageStatus(
-              messageModel.messageId!,
-              MessageStatus.sent,
-            );
-          }
-        } else {
-          debugPrint('❌ WiFi Direct send failed, falling back to broadcast');
-          // Fallback to network service
-          await _networkService.broadcastMessage(messageModel);
-        }
+      if (success) {
+        await MessageRepository.updateMessageStatus(
+          messageModel.messageId!,
+          MessageStatus.sent,
+        );
+        _addMessageTrace(
+          'Message sent successfully: ${messageModel.messageId}',
+        );
       } else {
-        // Use existing network service for other connection types
+        debugPrint('❌ Primary send failed, falling back to network service');
         await _networkService.broadcastMessage(messageModel);
       }
 
@@ -1288,6 +1356,34 @@ ${_messageTrace.take(5).join('\n')}
 
     super.dispose();
   }
+
+  /// Handle global messages from message router
+  void _handleGlobalMessage(MessageModel message) {
+    // Notify UI listeners
+    onMessageReceived?.call(message);
+
+    // Save to history
+    saveMessageToHistory(message);
+
+    notifyListeners();
+  }
+
+  /// Generate unique message ID
+  @override
+  String generateMessageId() {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final random = timestamp.hashCode;
+    return 'msg_${timestamp}_${deviceId.hashCode}_$random';
+  }
+
+  /// Get message router for external access
+  MessageRouter get messageRouter => _messageRouter;
+
+  /// Get socket protocol for external access
+  SocketProtocol get socketProtocol => _socketProtocol;
+
+  /// Get chat navigation service for external access
+  ChatNavigationService get chatNavigationService => _chatNavigationService;
 }
 
 // Backwards compatibility typedef

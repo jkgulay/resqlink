@@ -3,7 +3,7 @@ import 'package:resqlink/pages/landing_page.dart';
 import 'package:resqlink/services/auth_service.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/features/database/repositories/system_repository.dart';
-import 'package:resqlink/services/message_sync_service.dart';
+import 'package:resqlink/services/messaging/message_sync_service.dart';
 import 'package:resqlink/services/p2p/p2p_base_service.dart';
 import 'package:resqlink/services/p2p/p2p_main_service.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';

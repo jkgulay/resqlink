@@ -51,8 +51,12 @@ class SyncRepository {
         )
       ''');
 
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_sync_queue_table ON $_syncQueueTable (table_name)');
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_sync_queue_attempts ON $_syncQueueTable (sync_attempts)');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_queue_table ON $_syncQueueTable (table_name)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_queue_attempts ON $_syncQueueTable (sync_attempts)',
+      );
     } catch (e) {
       debugPrint('❌ Error creating sync tables: $e');
     }
@@ -61,7 +65,9 @@ class SyncRepository {
   /// Start connectivity monitoring
   static Future<void> _startConnectivityMonitoring() async {
     try {
-      _connectivitySubscription = Connectivity().onConnectivityChanged.listen((result) {
+      _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+        result,
+      ) {
         final wasOnline = _isOnline;
         _isOnline = !result.contains(ConnectivityResult.none);
 
@@ -76,7 +82,9 @@ class SyncRepository {
       // Check initial connectivity
       final connectivityResult = await Connectivity().checkConnectivity();
       _isOnline = !connectivityResult.contains(ConnectivityResult.none);
-      debugPrint('📶 Initial connectivity: ${_isOnline ? "Online" : "Offline"}');
+      debugPrint(
+        '📶 Initial connectivity: ${_isOnline ? "Online" : "Offline"}',
+      );
     } catch (e) {
       debugPrint('❌ Error starting connectivity monitoring: $e');
     }
@@ -176,7 +184,8 @@ class SyncRepository {
             'syncedAt': FieldValue.serverTimestamp(),
           };
 
-          final docId = '${location.userId}_${location.timestamp.millisecondsSinceEpoch}';
+          final docId =
+              '${location.userId}_${location.timestamp.millisecondsSinceEpoch}';
           await _firestore
               .collection('locations')
               .doc(docId)
@@ -186,7 +195,9 @@ class SyncRepository {
           debugPrint('📍 Location synced: ${location.userId}');
         } catch (e) {
           debugPrint('❌ Error syncing location: $e');
-          await LocationRepository.incrementLocationSyncAttempts(location.timestamp);
+          await LocationRepository.incrementLocationSyncAttempts(
+            location.timestamp,
+          );
         }
       }
     } catch (e) {
@@ -244,7 +255,7 @@ class SyncRepository {
           success = await _syncUserToFirebase(data, operation);
         default:
           debugPrint('⚠️ Unknown table in sync queue: $tableName');
-          success = true; 
+          success = true;
       }
 
       if (success) {
@@ -259,7 +270,10 @@ class SyncRepository {
   }
 
   /// Sync individual message to Firebase
-  static Future<bool> _syncMessageToFirebase(Map<String, dynamic> data, String operation) async {
+  static Future<bool> _syncMessageToFirebase(
+    Map<String, dynamic> data,
+    String operation,
+  ) async {
     try {
       switch (operation) {
         case 'insert':
@@ -282,7 +296,10 @@ class SyncRepository {
   }
 
   /// Sync individual location to Firebase
-  static Future<bool> _syncLocationToFirebase(Map<String, dynamic> data, String operation) async {
+  static Future<bool> _syncLocationToFirebase(
+    Map<String, dynamic> data,
+    String operation,
+  ) async {
     try {
       final docId = '${data['userId']}_${data['timestamp']}';
 
@@ -294,10 +311,7 @@ class SyncRepository {
               .doc(docId)
               .set(data, SetOptions(merge: true));
         case 'delete':
-          await _firestore
-              .collection('locations')
-              .doc(docId)
-              .delete();
+          await _firestore.collection('locations').doc(docId).delete();
       }
       return true;
     } catch (e) {
@@ -307,7 +321,10 @@ class SyncRepository {
   }
 
   /// Sync individual user to Firebase
-  static Future<bool> _syncUserToFirebase(Map<String, dynamic> data, String operation) async {
+  static Future<bool> _syncUserToFirebase(
+    Map<String, dynamic> data,
+    String operation,
+  ) async {
     try {
       switch (operation) {
         case 'insert':
@@ -321,10 +338,7 @@ class SyncRepository {
               .doc(data['userId'])
               .set(syncData, SetOptions(merge: true));
         case 'delete':
-          await _firestore
-              .collection('users')
-              .doc(data['userId'])
-              .delete();
+          await _firestore.collection('users').doc(data['userId']).delete();
       }
       return true;
     } catch (e) {
@@ -344,7 +358,10 @@ class SyncRepository {
   }
 
   /// Increment sync attempts
-  static Future<void> _incrementSyncAttempts(int id, [String? errorMessage]) async {
+  static Future<void> _incrementSyncAttempts(
+    int id, [
+    String? errorMessage,
+  ]) async {
     try {
       final db = await DatabaseManager.database;
       await db.rawUpdate(
@@ -407,7 +424,8 @@ class SyncRepository {
             message: data['message'] ?? '',
             isMe: false, // Assuming downloaded messages are from others
             isEmergency: data['isEmergency'] ?? false,
-            timestamp: data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
+            timestamp:
+                data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
             messageType: MessageType.values.firstWhere(
               (e) => e.name == data['type'],
               orElse: () => MessageType.text,
@@ -419,6 +437,7 @@ class SyncRepository {
             connectionType: data['connectionType'],
             chatSessionId: data['chatSessionId'],
             synced: true,
+            deviceId: data['deviceId'],
           );
 
           messages.add(message);
@@ -457,7 +476,9 @@ class SyncRepository {
             userId: data['userId'] ?? '',
             latitude: data['latitude']?.toDouble() ?? 0.0,
             longitude: data['longitude']?.toDouble() ?? 0.0,
-            timestamp: DateTime.fromMillisecondsSinceEpoch(data['timestamp'] ?? 0),
+            timestamp: DateTime.fromMillisecondsSinceEpoch(
+              data['timestamp'] ?? 0,
+            ),
             type: _parseLocationType(data['type']),
             message: data['message'],
             synced: true,
@@ -521,16 +542,24 @@ class SyncRepository {
     try {
       final db = await DatabaseManager.database;
 
-      final queueSize = Sqflite.firstIntValue(
-        await db.rawQuery('SELECT COUNT(*) FROM $_syncQueueTable'),
-      ) ?? 0;
+      final queueSize =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM $_syncQueueTable'),
+          ) ??
+          0;
 
-      final failedItems = Sqflite.firstIntValue(
-        await db.rawQuery('SELECT COUNT(*) FROM $_syncQueueTable WHERE sync_attempts >= 3'),
-      ) ?? 0;
+      final failedItems =
+          Sqflite.firstIntValue(
+            await db.rawQuery(
+              'SELECT COUNT(*) FROM $_syncQueueTable WHERE sync_attempts >= 3',
+            ),
+          ) ??
+          0;
 
-      final pendingMessages = (await MessageRepository.getUnsyncedMessages()).length;
-      final pendingLocations = (await LocationRepository.getUnsyncedLocations()).length;
+      final pendingMessages =
+          (await MessageRepository.getUnsyncedMessages()).length;
+      final pendingLocations =
+          (await LocationRepository.getUnsyncedLocations()).length;
 
       return {
         'isOnline': _isOnline,

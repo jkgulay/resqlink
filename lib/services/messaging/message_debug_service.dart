@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../models/message_model.dart';
-import '../features/database/repositories/message_repository.dart';
-import 'p2p/p2p_main_service.dart';
+import '../../models/message_model.dart';
+import '../../features/database/repositories/message_repository.dart';
+import '../p2p/p2p_main_service.dart';
 
 /// Debug service for tracing message flow and testing connectivity
 class MessageDebugService {

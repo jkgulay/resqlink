@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/pages/gps_page.dart';
-import 'package:resqlink/services/message_sync_service.dart';
+import 'package:resqlink/services/messaging/message_sync_service.dart';
 import 'package:resqlink/services/settings_service.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../features/database/repositories/message_repository.dart';
@@ -556,7 +556,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         longitude: _currentLocation?.longitude,
         messageId: messageId,
         type: type.name,
-        status: MessageStatus.sent,
+        status: MessageStatus.sent, deviceId: null,
       );
 
       await MessageRepository.insert(dbMessage);

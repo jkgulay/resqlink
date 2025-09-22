@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
-import 'package:resqlink/services/message_debug_service.dart';
+import 'package:resqlink/services/messaging/message_debug_service.dart';
 import '../models/message_model.dart';
 import 'p2p/p2p_main_service.dart';
 class MessageTestFunctions {
@@ -189,7 +189,7 @@ class MessageTestFunctions {
           timestamp: DateTime.now().millisecondsSinceEpoch,
           messageType: MessageType.text,
           type: 'text',
-          routePath: ['test_sender'],
+          routePath: ['test_sender'], deviceId: null,
         );
         
         // Simulate the message being received
@@ -442,6 +442,7 @@ class MessageTestFunctions {
       type: type.name,
       routePath: [senderId ?? 'test_sender'],
       ttl: 5,
+      deviceId: 'deviceId',
     );
   }
 

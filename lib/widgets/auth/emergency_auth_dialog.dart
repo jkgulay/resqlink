@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../utils/responsive_utils.dart';
 import '../../services/auth_service.dart';
 import '../../services/temporary_identity_service.dart';
-import '../../services/message_sync_service.dart';
+import '../../services/messaging/message_sync_service.dart';
 import '../../pages/home_page.dart';
 
 class EmergencyAuthDialog extends StatefulWidget {
