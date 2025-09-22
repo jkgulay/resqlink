@@ -5,9 +5,9 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
 class DatabaseManager {
-static Database? _database;
+  static Database? _database;
   static const String _dbName = 'resqlink_enhanced.db';
-  static const int _dbVersion = 6; 
+  static const int _dbVersion = 7;
 
   // Singleton
   static DatabaseManager? _instance;
@@ -35,20 +35,79 @@ static Database? _database;
         onCreate: _createDatabase,
         onUpgrade: _upgradeDatabase,
         onConfigure: _configureDatabase,
+        onOpen: (db) async {
+          debugPrint('✅ Database opened successfully');
+        },
       );
     } catch (e) {
-      debugPrint('❌ Error initializing database: $e');
-      rethrow;
+      debugPrint('❌ Error initializing database with configuration: $e');
+      debugPrint('🔄 Attempting fallback database initialization...');
+
+      try {
+        return await _initDatabaseFallback();
+      } catch (fallbackError) {
+        debugPrint(
+          '❌ Fallback database initialization also failed: $fallbackError',
+        );
+        rethrow;
+      }
     }
+  }
+
+  /// Fallback database initialization without PRAGMA configurations
+  static Future<Database> _initDatabaseFallback() async {
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, _dbName);
+
+    debugPrint('🗃️ Initializing fallback database at: $path');
+
+    return await openDatabase(
+      path,
+      version: _dbVersion,
+      onCreate: _createDatabase,
+      onUpgrade: _upgradeDatabase,
+      onOpen: (db) async {
+        debugPrint('✅ Fallback database opened successfully');
+      },
+    );
   }
 
   /// Configure database settings
   static Future<void> _configureDatabase(Database db) async {
-    await db.execute('PRAGMA foreign_keys = ON');
-    await db.execute('PRAGMA journal_mode = WAL');
-    await db.execute('PRAGMA synchronous = NORMAL');
-    await db.execute('PRAGMA cache_size = 10000');
-    await db.execute('PRAGMA temp_store = MEMORY');
+    try {
+      await db.execute('PRAGMA foreign_keys = ON');
+    } catch (e) {
+      debugPrint('⚠️ Could not enable foreign keys: $e');
+    }
+
+    try {
+      await db.execute('PRAGMA journal_mode = WAL');
+    } catch (e) {
+      debugPrint('⚠️ Could not set WAL mode (falling back to default): $e');
+      try {
+        await db.execute('PRAGMA journal_mode = DELETE');
+      } catch (e2) {
+        debugPrint('⚠️ Could not set DELETE mode: $e2');
+      }
+    }
+
+    try {
+      await db.execute('PRAGMA synchronous = NORMAL');
+    } catch (e) {
+      debugPrint('⚠️ Could not set synchronous mode: $e');
+    }
+
+    try {
+      await db.execute('PRAGMA cache_size = 10000');
+    } catch (e) {
+      debugPrint('⚠️ Could not set cache size: $e');
+    }
+
+    try {
+      await db.execute('PRAGMA temp_store = MEMORY');
+    } catch (e) {
+      debugPrint('⚠️ Could not set temp store: $e');
+    }
   }
 
   /// Create all database tables
@@ -225,6 +284,7 @@ static Database? _database;
           queued_at INTEGER NOT NULL,
           retry_count INTEGER DEFAULT 0,
           last_retry_at INTEGER,
+          priority INTEGER DEFAULT 0,
           metadata TEXT
         )
       ''');
@@ -241,27 +301,47 @@ static Database? _database;
   static Future<void> _createIndexes(Database db) async {
     try {
       // Messages indexes
-      await db.execute('CREATE INDEX idx_messages_endpoint ON messages (endpointId)');
-      await db.execute('CREATE INDEX idx_messages_timestamp ON messages (timestamp)');
-      await db.execute('CREATE INDEX idx_messages_session ON messages (chatSessionId)');
-      await db.execute('CREATE INDEX idx_messages_type ON messages (messageType)');
+      await db.execute(
+        'CREATE INDEX idx_messages_endpoint ON messages (endpointId)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_messages_timestamp ON messages (timestamp)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_messages_session ON messages (chatSessionId)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_messages_type ON messages (messageType)',
+      );
 
       // Chat sessions indexes
-      await db.execute('CREATE INDEX idx_chat_sessions_device_id ON chat_sessions (device_id)');
-      await db.execute('CREATE INDEX idx_chat_sessions_last_message ON chat_sessions (last_message_at)');
+      await db.execute(
+        'CREATE INDEX idx_chat_sessions_device_id ON chat_sessions (device_id)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_chat_sessions_last_message ON chat_sessions (last_message_at)',
+      );
 
       // Message queue indexes
-      await db.execute('CREATE INDEX idx_message_queue_device ON message_queue (device_id)');
-      await db.execute('CREATE INDEX idx_message_queue_session ON message_queue (session_id)');
+      await db.execute(
+        'CREATE INDEX idx_message_queue_device ON message_queue (device_id)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_message_queue_session ON message_queue (session_id)',
+      );
 
       // Users indexes
       await db.execute('CREATE INDEX idx_users_user_id ON users (userId)');
 
       // Known devices indexes
-      await db.execute('CREATE INDEX idx_known_devices_device_id ON known_devices (deviceId)');
+      await db.execute(
+        'CREATE INDEX idx_known_devices_device_id ON known_devices (deviceId)',
+      );
 
       // Pending messages indexes
-      await db.execute('CREATE INDEX idx_pending_device_id ON pending_messages (deviceId)');
+      await db.execute(
+        'CREATE INDEX idx_pending_device_id ON pending_messages (deviceId)',
+      );
 
       debugPrint('✅ Database indexes created successfully');
     } catch (e) {
@@ -270,7 +350,11 @@ static Database? _database;
   }
 
   /// Handle database upgrades
-  static Future<void> _upgradeDatabase(Database db, int oldVersion, int newVersion) async {
+  static Future<void> _upgradeDatabase(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
     debugPrint('📊 Upgrading database from v$oldVersion to v$newVersion');
 
     try {
@@ -285,6 +369,12 @@ static Database? _database;
       }
       if (oldVersion < 5) {
         await _upgradeToV5(db);
+      }
+      if (oldVersion < 6) {
+        await _upgradeToV6(db);
+      }
+      if (oldVersion < 7) {
+        await _upgradeToV7(db);
       }
 
       debugPrint('✅ Database upgrade completed successfully');
@@ -349,11 +439,21 @@ static Database? _database;
 
     // Create new indexes
     try {
-      await db.execute('CREATE INDEX idx_chat_sessions_device_id ON chat_sessions (device_id)');
-      await db.execute('CREATE INDEX idx_chat_sessions_last_message ON chat_sessions (last_message_at)');
-      await db.execute('CREATE INDEX idx_messages_chat_session ON messages (chatSessionId)');
-      await db.execute('CREATE INDEX idx_message_queue_device ON message_queue (device_id)');
-      await db.execute('CREATE INDEX idx_message_queue_session ON message_queue (session_id)');
+      await db.execute(
+        'CREATE INDEX idx_chat_sessions_device_id ON chat_sessions (device_id)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_chat_sessions_last_message ON chat_sessions (last_message_at)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_messages_chat_session ON messages (chatSessionId)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_message_queue_device ON message_queue (device_id)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_message_queue_session ON message_queue (session_id)',
+      );
     } catch (e) {
       debugPrint('Some indexes may already exist: $e');
     }
@@ -364,7 +464,9 @@ static Database? _database;
 
     // Add missing column to messages
     try {
-      await db.execute('ALTER TABLE messages ADD COLUMN syncedToFirebase INTEGER DEFAULT 0');
+      await db.execute(
+        'ALTER TABLE messages ADD COLUMN syncedToFirebase INTEGER DEFAULT 0',
+      );
     } catch (e) {
       debugPrint('Column syncedToFirebase already exists: $e');
     }
@@ -448,15 +550,48 @@ static Database? _database;
 
     // Create new indexes
     try {
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_locations_user ON locations (userId)');
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_locations_timestamp ON locations (timestamp)');
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_p2p_sessions_device ON p2p_sessions (deviceId)');
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_sync_queue_type ON sync_queue (itemType)');
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_device_compatibility_device ON device_compatibility (deviceId)');
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)');
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_users_userId ON users (userId)');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_locations_user ON locations (userId)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_locations_timestamp ON locations (timestamp)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_p2p_sessions_device ON p2p_sessions (deviceId)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_queue_type ON sync_queue (itemType)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_device_compatibility_device ON device_compatibility (deviceId)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_users_userId ON users (userId)',
+      );
     } catch (e) {
       debugPrint('Some indexes may already exist: $e');
+    }
+  }
+
+  static Future<void> _upgradeToV6(Database db) async {
+    debugPrint('🔄 Upgrading to database version 6...');
+    // V6 upgrades were handled in existing V5 logic
+  }
+
+  static Future<void> _upgradeToV7(Database db) async {
+    debugPrint('🔄 Upgrading to database version 7...');
+
+    // Add priority column to message_queue table
+    try {
+      await db.execute(
+        'ALTER TABLE message_queue ADD COLUMN priority INTEGER DEFAULT 0',
+      );
+      debugPrint('✅ Added priority column to message_queue table');
+    } catch (e) {
+      debugPrint('⚠️ Priority column may already exist: $e');
     }
   }
 
@@ -507,17 +642,23 @@ static Database? _database;
     try {
       final db = await database;
 
-      final messageCount = Sqflite.firstIntValue(
-        await db.rawQuery('SELECT COUNT(*) FROM messages')
-      ) ?? 0;
+      final messageCount =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM messages'),
+          ) ??
+          0;
 
-      final sessionCount = Sqflite.firstIntValue(
-        await db.rawQuery('SELECT COUNT(*) FROM chat_sessions')
-      ) ?? 0;
+      final sessionCount =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM chat_sessions'),
+          ) ??
+          0;
 
-      final queueSize = Sqflite.firstIntValue(
-        await db.rawQuery('SELECT COUNT(*) FROM message_queue')
-      ) ?? 0;
+      final queueSize =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM message_queue'),
+          ) ??
+          0;
 
       final dbSize = await _getDatabaseSize();
 
@@ -558,7 +699,9 @@ static Database? _database;
   }
 
   /// Execute a transaction safely
-  static Future<T> transaction<T>(Future<T> Function(Transaction txn) action) async {
+  static Future<T> transaction<T>(
+    Future<T> Function(Transaction txn) action,
+  ) async {
     final db = await database;
     return await db.transaction(action);
   }

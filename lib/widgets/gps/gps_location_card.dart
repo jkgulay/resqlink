@@ -106,6 +106,7 @@ class _GpsLocationListState extends State<GpsLocationList>
                       ],
                     ),
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         _buildCompactHeader(controller),
                         if (_isExpanded)
@@ -133,7 +134,7 @@ class _GpsLocationListState extends State<GpsLocationList>
     return GestureDetector(
       onTap: _toggleExpansion,
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           border: _isExpanded
               ? Border(
@@ -162,6 +163,7 @@ class _GpsLocationListState extends State<GpsLocationList>
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Row(
                     children: [
@@ -201,7 +203,8 @@ class _GpsLocationListState extends State<GpsLocationList>
                       ),
                     ],
                   ),
-                  if (!_isExpanded)
+                  if (!_isExpanded) ...[
+                    const SizedBox(height: 2),
                     Text(
                       controller.savedLocations.isEmpty
                           ? 'Tap to see locations'
@@ -211,6 +214,7 @@ class _GpsLocationListState extends State<GpsLocationList>
                         fontSize: 11,
                       ),
                     ),
+                  ],
                 ],
               ),
             ),

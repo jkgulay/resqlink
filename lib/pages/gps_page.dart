@@ -799,31 +799,35 @@ class _GpsPageState extends State<GpsPage> {
                 children: [
                   GpsEnhancedMap(
                     mapController: _mapController,
-              onMapTap: _handleMapTap,
-              onMapLongPress: _handleMapLongPress,
-              onLocationTap: _handleLocationTap,
-              showCurrentLocation: true,
-              showSavedLocations: true,
-              showTrackingPath: controller.showTrackingPath,
-              showEmergencyZones: controller.showEmergencyZones,
-              showCriticalInfrastructure: controller.showCriticalInfrastructure,
-            ),
+                    onMapTap: _handleMapTap,
+                    onMapLongPress: _handleMapLongPress,
+                    onLocationTap: _handleLocationTap,
+                    showCurrentLocation: true,
+                    showSavedLocations: true,
+                    showTrackingPath: controller.showTrackingPath,
+                    showEmergencyZones: controller.showEmergencyZones,
+                    showCriticalInfrastructure:
+                        controller.showCriticalInfrastructure,
+                  ),
 
-            const GpsStatsPanel(),
+                  const GpsStatsPanel(),
 
-            GpsActionButtons(onCenterCurrentLocation: _centerOnCurrentLocation, onLocationDetailsRequest: () {  },),
+                  GpsActionButtons(
+                    onCenterCurrentLocation: _centerOnCurrentLocation,
+                    onLocationDetailsRequest: () {},
+                  ),
 
-            const GpsEmergencyButton(),
+                  const GpsEmergencyButton(),
 
-            // Bottom Location List
-            GpsLocationList(
-              onLocationSelected: _handleLocationSelected,
-              onLocationShare: _handleLocationShare,
-            ),
+                  // Bottom Location List
+                  GpsLocationList(
+                    onLocationSelected: _handleLocationSelected,
+                    onLocationShare: _handleLocationShare,
+                  ),
 
-            // Download Progress Indicator (if downloading)
-            if (controller.isDownloadingMaps)
-              _buildDownloadProgressOverlay(controller),
+                  // Download Progress Indicator (if downloading)
+                  if (controller.isDownloadingMaps)
+                    _buildDownloadProgressOverlay(controller),
                 ],
               ),
             );

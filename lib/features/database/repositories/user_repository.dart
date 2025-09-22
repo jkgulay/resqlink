@@ -22,7 +22,8 @@ class UserRepository {
     required String password,
     required String name,
     String? phoneNumber,
-    Map<String, dynamic>? additionalInfo, required bool isOnlineUser,
+    Map<String, dynamic>? additionalInfo,
+    bool isOnlineUser = false,
   }) async {
     try {
       final db = await DatabaseManager.database;
@@ -477,7 +478,8 @@ class UserRepository {
     email: email,
     password: password,
     name: name,
-    phoneNumber: phoneNumber, isOnlineUser: false,
+    phoneNumber: phoneNumber,
+    isOnlineUser: false,
   );
   static Future<UserModel?> login(String email, String password) => loginUser(email, password);
   static Future<bool> exists(String email) => userExists(email);
