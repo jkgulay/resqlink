@@ -12,7 +12,7 @@ import '../../services/hotspot_service.dart';
 import 'p2p_base_service.dart';
 import 'p2p_network_service.dart';
 import '../connection_fallback.dart';
-import '../chat/chat_navigation_service.dart';
+import '../../helpers/chat_navigation_helper.dart';
 import '../../services/p2p/protocols/socket_protocol.dart';
 import '../messaging/message_router.dart';
 import '../../features/chat/services/message_queue_service.dart';
@@ -24,12 +24,12 @@ class P2PMainService extends P2PBaseService {
   late P2PDiscoveryService _discoveryService;
   late ConnectionFallbackManager _connectionFallbackManager;
   WiFiDirectService? _wifiDirectService;
-  late HotspotService _hotspotService;
+  HotspotService? _hotspotService;
 
   // New enhanced components
   late SocketProtocol _socketProtocol;
   late MessageRouter _messageRouter;
-  late ChatNavigationService _chatNavigationService;
+  // ChatNavigationHelper is used statically, no instance needed
   late MessageQueueService _messageQueueService;
 
   // Enhanced state
@@ -87,7 +87,7 @@ class P2PMainService extends P2PBaseService {
       _hotspotService = HotspotService.instance;
 
       await _wifiDirectService?.initialize();
-      await _hotspotService.initialize();
+      await _hotspotService?.initialize();
 
       // Initialize new enhanced components
       _socketProtocol = SocketProtocol();
@@ -103,7 +103,7 @@ class P2PMainService extends P2PBaseService {
       _messageRouter = MessageRouter();
       _messageRouter.setGlobalListener(_handleGlobalMessage);
 
-      _chatNavigationService = ChatNavigationService();
+      // ChatNavigationHelper is used statically, no initialization needed
 
       // Initialize enhanced message queue service
       _messageQueueService = MessageQueueService();
@@ -134,7 +134,7 @@ class P2PMainService extends P2PBaseService {
   ConnectionFallbackManager get connectionFallbackManager =>
       _connectionFallbackManager;
   WiFiDirectService? get wifiDirectService => _wifiDirectService;
-  HotspotService get hotspotService => _hotspotService;
+  HotspotService get hotspotService => _hotspotService ?? HotspotService.instance;
 
   void _setupWiFiDirectSync() {
     _wifiDirectService?.connectionStream.listen((connectionState) {
@@ -670,19 +670,19 @@ class P2PMainService extends P2PBaseService {
       _addMessageTrace('Creating hotspot: $hotspotSSID');
 
       // Try to create hotspot using the new HotspotService
-      final success = await _hotspotService.createHotspot(
+      final success = await _hotspotService?.createHotspot(
         ssid: hotspotSSID,
         password: P2PBaseService.emergencyPassword,
       );
 
-      if (success) {
-        _actualCreatedSSID = _hotspotService.currentSSID ?? hotspotSSID;
+      if (success == true) {
+        _actualCreatedSSID = _hotspotService?.currentSSID ?? hotspotSSID;
         _isHotspotEnabled = true;
         _currentConnectionMode = P2PConnectionMode.hotspot;
 
         debugPrint('✅ Emergency hotspot created successfully');
-        debugPrint('  - SSID: ${_hotspotService.currentSSID}');
-        debugPrint('  - Password: ${_hotspotService.currentPassword}');
+        debugPrint('  - SSID: ${_hotspotService?.currentSSID}');
+        debugPrint('  - Password: ${_hotspotService?.currentPassword}');
 
         _addMessageTrace('Hotspot created successfully: $_actualCreatedSSID');
 
@@ -811,7 +811,11 @@ class P2PMainService extends P2PBaseService {
     BuildContext context,
     Map<String, dynamic> device,
   ) async {
-    await _chatNavigationService.navigateToDeviceChat(context, device, this);
+    await ChatNavigationHelper.navigateToDeviceChat(
+      context: context,
+      device: device,
+      p2pService: this,
+    );
   }
 
   /// Clear forced role
@@ -1405,9 +1409,9 @@ ${_messageTrace.take(5).join('\n')}
 
     // Stop hotspot and dispose service
     if (_isHotspotEnabled) {
-      await _hotspotService.stopHotspot();
+      await _hotspotService?.stopHotspot();
     }
-    _hotspotService.dispose();
+    _hotspotService?.dispose();
 
     _messageTrace.clear();
 
@@ -1439,8 +1443,7 @@ ${_messageTrace.take(5).join('\n')}
   /// Get socket protocol for external access
   SocketProtocol get socketProtocol => _socketProtocol;
 
-  /// Get chat navigation service for external access
-  ChatNavigationService get chatNavigationService => _chatNavigationService;
+  /// Use ChatNavigationHelper statically for chat navigation
 
   /// Get enhanced message queue service for external access
   MessageQueueService get messageQueueService => _messageQueueService;

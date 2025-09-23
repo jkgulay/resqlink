@@ -11,11 +11,8 @@ class ChatNavigationHelper {
   factory ChatNavigationHelper() => _instance;
   ChatNavigationHelper._internal();
 
-  // Track navigation state to prevent duplicate navigations
   bool _isNavigating = false;
 
-  /// Navigate directly to chat with a connected device
-  /// This is the main method that should be called from view chat icons
   static Future<void> navigateToDeviceChat({
     required BuildContext context,
     required Map<String, dynamic> device,
@@ -268,8 +265,7 @@ class ChatNavigationHelper {
     );
   }
 
-  /// Extract device ID from device data with fallbacks
-  /// Enhanced version from existing services/chat_navigation_helper.dart
+
   static String _extractDeviceId(Map<String, dynamic> device) {
     return device['deviceId'] as String? ??
         device['deviceAddress'] as String? ??

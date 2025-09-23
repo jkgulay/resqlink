@@ -1502,7 +1502,7 @@ class SettingsPageState extends State<SettingsPage> {
                             ? null
                             : _createLegacyHotspot,
                         icon: Icon(Icons.settings_input_antenna, size: 18),
-                        label: Text('Create with Custom Name (Legacy)'),
+                        label: Text('Legacy Mode (Android 7 and below)'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: isHotspotEnabled
                               ? Colors.grey.shade800
@@ -1626,22 +1626,44 @@ class SettingsPageState extends State<SettingsPage> {
       setState(() => _isLoading = true);
       _showMessage('Creating hotspot...', isSuccess: false);
 
-      final success = await widget.p2pService!.createEmergencyHotspot();
+      // Try the standard emergency hotspot creation first
+      bool success = await widget.p2pService!.createEmergencyHotspot();
+
+      // If that fails, try the modern LocalOnlyHotspot API
+      if (!success) {
+        _showMessage('Trying modern hotspot API...', isSuccess: false);
+        try {
+          success = await widget.p2pService!.hotspotService.createHotspot();
+        } catch (fallbackError) {
+          debugPrint('Fallback hotspot creation also failed: $fallbackError');
+        }
+      }
 
       setState(() => _isLoading = false);
 
       if (success) {
         final password = widget.p2pService!.hotspotService.currentPassword ?? 'resqlink911';
         final ssid = widget.p2pService!.hotspotService.currentSSID ?? 'Unknown';
-        _showMessage('Hotspot created successfully!\nSSID: $ssid\nPassword: $password', isSuccess: true);
+        final method = widget.p2pService!.hotspotService.currentSSID?.startsWith('ResQLink_') == true
+                      ? '(Custom SSID)' : '(System-generated SSID)';
+        _showMessage('Hotspot created successfully! $method\nSSID: $ssid\nPassword: $password', isSuccess: true);
       } else {
-        _showMessage('Failed to create hotspot', isDanger: true);
+        _showMessage('Failed to create hotspot.\n\nYour device may not support hotspot creation, or it requires manual setup in Android settings.', isDanger: true);
       }
 
       setState(() {}); // Refresh UI
     } catch (e) {
       setState(() => _isLoading = false);
-      _showMessage('Error creating hotspot: $e', isDanger: true);
+
+      String errorMessage = 'Error creating hotspot: ';
+      if (e.toString().contains('permission') || e.toString().contains('SecurityException')) {
+        errorMessage = 'Hotspot creation requires additional permissions.\n\n'
+                      'Please enable hotspot manually in Android Settings, or grant location/nearby devices permissions to the app.';
+      } else {
+        errorMessage += e.toString();
+      }
+
+      _showMessage(errorMessage, isDanger: true);
     }
   }
 
@@ -1670,7 +1692,22 @@ class SettingsPageState extends State<SettingsPage> {
       setState(() {}); // Refresh UI
     } catch (e) {
       setState(() => _isLoading = false);
-      _showMessage('Legacy hotspot error: $e', isDanger: true);
+
+      // Enhanced error handling for common Android API issues
+      String errorMessage = 'Legacy hotspot error: ';
+      if (e.toString().contains('setWifiApEnabled') || e.toString().contains('NoSuchMethodException')) {
+        errorMessage = 'Legacy hotspot not supported on this Android version.\n\n'
+                     'Try the standard "Create Hotspot" option instead, which uses modern Android APIs.\n\n'
+                     'Note: Modern hotspots may have system-generated names but are more reliable.';
+      } else if (e.toString().contains('SecurityException') || e.toString().contains('permission')) {
+        errorMessage = 'Permission denied for legacy hotspot creation.\n\n'
+                     'This requires system-level permissions not available to regular apps on newer Android versions.\n\n'
+                     'Please use the standard "Create Hotspot" option.';
+      } else {
+        errorMessage += e.toString();
+      }
+
+      _showMessage(errorMessage, isDanger: true);
     }
   }
 
