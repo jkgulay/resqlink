@@ -124,6 +124,23 @@ class ChatNavigationHelper {
         '🧭 Navigating to Messages tab for device: $deviceName ($deviceId)',
       );
 
+      // IMPORTANT: Create persistent chat session before navigation
+      final sessionId = await _createOrUpdateSession(
+        deviceId: deviceId,
+        deviceName: deviceName,
+        currentUserId: 'local', // Using consistent user ID for emergency mode
+      );
+
+      if (sessionId.isEmpty) {
+        debugPrint('❌ Failed to create chat session');
+        if (context.mounted) {
+          helper._showError(context, 'Failed to create chat session');
+        }
+        return;
+      }
+
+      debugPrint('✅ Chat session created/updated: $sessionId');
+
       setSelectedIndex(2);
 
       await Future.delayed(Duration(milliseconds: 150));

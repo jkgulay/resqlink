@@ -5,6 +5,7 @@ import 'package:resqlink/services/messaging/message_sync_service.dart';
 import 'package:resqlink/services/settings_service.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../features/database/repositories/message_repository.dart';
+import '../features/database/repositories/chat_repository.dart';
 import '../../models/message_model.dart';
 import '../../utils/resqlink_theme.dart';
 import '../utils/responsive_utils.dart';
@@ -113,9 +114,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
       widget.p2pService.addListener(_onP2PConnectionChanged);
       widget.p2pService.onDevicesDiscovered = _onDevicesDiscovered;
-      widget.p2pService.onDeviceConnected = (deviceId, userName) {
+      widget.p2pService.onDeviceConnected = (deviceId, userName) async {
         if (!mounted) return;
-        _createConversationForDevice(deviceId, userName);
+        await _createPersistentConversationForDevice(deviceId, userName);
         _showSuccessMessage('Connected to $userName');
       };
 
@@ -230,7 +231,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  void _onDevicesDiscovered(List<Map<String, dynamic>> devices) {
+  void _onDevicesDiscovered(List<Map<String, dynamic>> devices) async {
     if (!mounted) return;
 
     for (var device in devices) {
@@ -239,7 +240,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       final isConnected = widget.p2pService.connectedDevices.containsKey(deviceId);
 
       if (isConnected) {
-        _createConversationForDevice(deviceId, deviceName);
+        await _createPersistentConversationForDevice(deviceId, deviceName);
       }
     }
   }
@@ -267,11 +268,38 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
+  /// Create persistent conversation that survives page navigation and disconnection
+  Future<void> _createPersistentConversationForDevice(String deviceId, String deviceName) async {
+    if (!mounted) return;
+
+    try {
+      // First create the UI conversation placeholder
+      _createConversationForDevice(deviceId, deviceName);
+
+      // Then create persistent chat session in database
+      await ChatRepository.createOrUpdate(
+        deviceId: deviceId,
+        deviceName: deviceName,
+        currentUserId: _currentUserId,
+      );
+
+      debugPrint('✅ Created persistent conversation for $deviceName ($deviceId)');
+
+      // Reload conversations to reflect the database changes
+      await _loadConversations();
+
+    } catch (e) {
+      debugPrint('❌ Error creating persistent conversation: $e');
+    }
+  }
+
   Future<void> _loadConversations() async {
     if (!mounted) return;
 
     try {
+      // Load both messages and chat sessions for comprehensive conversation list
       final messages = await MessageRepository.getAllMessages().timeout(Duration(seconds: 10));
+      final chatSessions = await ChatRepository.getAllSessions();
       if (!mounted) return;
 
       final connectedDevices = widget.p2pService.connectedDevices;
@@ -279,14 +307,37 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
       final Map<String, MessageSummary> conversationMap = {};
 
+      // First, create conversations from stored chat sessions (ensures persistence)
+      for (final session in chatSessions) {
+        if (!mounted) return;
+
+        final endpointId = session.deviceId;
+        final deviceName = session.deviceName;
+
+        conversationMap[endpointId] = MessageSummary(
+          endpointId: endpointId,
+          deviceName: deviceName,
+          lastMessage: null,
+          messageCount: 0,
+          unreadCount: 0,
+          isConnected: connectedDevices.containsKey(endpointId),
+        );
+
+        debugPrint('🗄️ Loaded persistent session: $deviceName ($endpointId)');
+      }
+
+      // Then, populate with actual message data
       for (final message in messages) {
         if (!mounted) return;
 
         final endpointId = message.endpointId;
         String deviceName = message.fromUser;
 
+        // Use connected device name if available, otherwise use session name
         if (connectedDevices.containsKey(endpointId)) {
           deviceName = connectedDevices[endpointId]!.userName;
+        } else if (conversationMap.containsKey(endpointId)) {
+          deviceName = conversationMap[endpointId]!.deviceName;
         } else {
           final discoveredDevice = discoveredDevices
               .where((d) => d.deviceId == endpointId)
@@ -310,14 +361,17 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           );
         } else {
           final currentSummary = conversationMap[endpointId]!;
+          final endpointMessages = messages.where((m) => m.endpointId == endpointId).toList();
+          final unreadCount = endpointMessages.where((m) => !m.synced && !m.isMe).length;
+
           if (message.dateTime.isAfter(currentSummary.lastMessage?.dateTime ?? DateTime(0))) {
             conversationMap[endpointId] = MessageSummary(
               endpointId: endpointId,
               deviceName: deviceName,
               lastMessage: message,
-              messageCount: currentSummary.messageCount,
-              unreadCount: currentSummary.unreadCount,
-              isConnected: currentSummary.isConnected,
+              messageCount: endpointMessages.length,
+              unreadCount: unreadCount,
+              isConnected: connectedDevices.containsKey(endpointId),
             );
           }
         }
@@ -330,6 +384,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                 .compareTo(a.lastMessage?.dateTime ?? DateTime(0)));
           _isLoading = false;
         });
+
+        debugPrint('✅ Loaded ${_conversations.length} conversations (${connectedDevices.length} connected)');
       }
     } catch (e) {
       debugPrint('❌ Error loading conversations: $e');
@@ -556,21 +612,31 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
   Future<void> _sendMessage(String messageText, MessageType type) async {
+    if (_selectedEndpointId == null) {
+      _showErrorMessage('No conversation selected');
+      return;
+    }
+
+    if (messageText.trim().isEmpty) {
+      _showErrorMessage('Cannot send empty message');
+      return;
+    }
+
     try {
       final messageId = _generateMessageId();
       final timestamp = DateTime.now();
+      final senderName = widget.p2pService.userName ?? 'Unknown User';
 
-      await widget.p2pService.sendMessage(
-        message: messageText,
-        type: type,
-        latitude: _currentLocation?.latitude,
-        longitude: _currentLocation?.longitude,
-        senderName: '',
-      );
+      // Check connection status
+      final isConnected = widget.p2pService.connectedDevices.containsKey(_selectedEndpointId);
+      final connectionInfo = isConnected ? 'connected' : 'disconnected (will queue)';
 
+      debugPrint('📤 Sending message to $_selectedEndpointId ($connectionInfo): "$messageText"');
+
+      // Create local database entry for sent message FIRST (for immediate UI update)
       final dbMessage = MessageModel(
-        endpointId: _selectedEndpointId ?? 'broadcast',
-        fromUser: widget.p2pService.userName ?? 'Unknown',
+        endpointId: _selectedEndpointId!,
+        fromUser: senderName,
         message: messageText,
         isMe: true,
         isEmergency: type == MessageType.emergency || type == MessageType.sos,
@@ -580,14 +646,38 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         longitude: _currentLocation?.longitude,
         messageId: messageId,
         type: type.name,
-        status: MessageStatus.sent, deviceId: null,
+        status: isConnected ? MessageStatus.sent : MessageStatus.pending,
+        deviceId: widget.p2pService.deviceId,
       );
 
+      // Insert into local database FIRST for immediate UI update
       await MessageRepository.insert(dbMessage);
+
+      // Update UI immediately to show the sent message
       await _loadMessagesForDevice(_selectedEndpointId!);
+
+      // Then send via P2P service (this might queue if not connected)
+      await widget.p2pService.sendMessage(
+        id: messageId,
+        message: messageText,
+        type: type,
+        targetDeviceId: _selectedEndpointId, // CRITICAL: Include target device ID
+        latitude: _currentLocation?.latitude,
+        longitude: _currentLocation?.longitude,
+        senderName: senderName, // CRITICAL: Include actual sender name
+      );
+
+      if (isConnected) {
+        debugPrint('✅ Message sent immediately to connected device');
+        _showSuccessMessage('Message sent');
+      } else {
+        debugPrint('📥 Message queued for later delivery');
+        _showSuccessMessage('Message queued (device offline)');
+      }
+
     } catch (e) {
-      debugPrint('Error sending message: $e');
-      _showErrorMessage('Failed to send message');
+      debugPrint('❌ Error sending message: $e');
+      _showErrorMessage('Failed to send message: ${e.toString()}');
     }
   }
 
@@ -621,15 +711,14 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
       await LocationService.insertLocation(locationModel);
 
-      await _syncService.sendMessage(
-        endpointId: _selectedEndpointId!,
+      // Send location via P2P service instead of sync service for better delivery
+      await widget.p2pService.sendMessage(
         message: locationText,
-        fromUser: widget.p2pService.userName ?? 'Unknown',
-        isEmergency: false,
-        messageType: MessageType.location,
+        type: MessageType.location,
+        targetDeviceId: _selectedEndpointId!,
         latitude: widget.currentLocation!.latitude,
         longitude: widget.currentLocation!.longitude,
-        p2pService: widget.p2pService,
+        senderName: widget.p2pService.userName ?? 'Unknown',
       );
 
       if (mounted) {
@@ -708,9 +797,10 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     if (confirm == true && mounted && _selectedEndpointId != null) {
       try {
+        // Use the updated _sendMessage method which now handles targeting properly
         await _sendMessage('🚨 Emergency SOS', MessageType.sos);
         if (mounted) {
-          _showSuccessMessage('Emergency SOS sent');
+          _showSuccessMessage('Emergency SOS sent to ${_selectedDeviceName ?? 'device'}');
         }
       } catch (e) {
         debugPrint('❌ Error sending emergency message: $e');

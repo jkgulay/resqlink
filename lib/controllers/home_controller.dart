@@ -88,7 +88,55 @@ class HomeController extends ChangeNotifier {
   }
 
   Future<void> sendEmergencyMessage(EmergencyTemplate template) async {
-    await p2pService.sendEmergencyTemplate(template);
+    final connectedDevices = p2pService.connectedDevices;
+    final senderName = p2pService.userName ?? 'Emergency User';
+
+    // Get the emergency message text
+    final messageText = _getEmergencyMessage(template);
+    final messageType = template == EmergencyTemplate.sos
+        ? MessageType.sos
+        : MessageType.emergency;
+
+    if (connectedDevices.isEmpty) {
+      debugPrint('⚠️ No connected devices - emergency message will be queued');
+      // Still attempt to send in case there are background connections
+      await p2pService.sendMessage(
+        message: messageText,
+        type: messageType,
+        senderName: senderName,
+      );
+      return;
+    }
+
+    // Send to all connected devices specifically
+    for (final deviceId in connectedDevices.keys) {
+      try {
+        await p2pService.sendMessage(
+          message: messageText,
+          type: messageType,
+          targetDeviceId: deviceId, // CRITICAL: Target specific device
+          senderName: senderName, // CRITICAL: Include actual sender name
+        );
+        debugPrint('✅ Emergency message sent to device: $deviceId');
+      } catch (e) {
+        debugPrint('❌ Failed to send emergency message to $deviceId: $e');
+      }
+    }
+  }
+
+  String _getEmergencyMessage(EmergencyTemplate template) {
+    switch (template) {
+      case EmergencyTemplate.sos:
+        return '🆘 SOS - Emergency assistance needed!';
+      case EmergencyTemplate.trapped:
+        return '🚧 TRAPPED - Cannot move from current location!';
+      case EmergencyTemplate.medical:
+        return '🏥 MEDICAL EMERGENCY - Immediate medical attention needed!';
+      case EmergencyTemplate.safe:
+        return '✅ SAFE - I am safe and secure';
+      case EmergencyTemplate.evacuating:
+        return '🏃 EVACUATING - Moving to safer location';
+    }
   }
 
   Future<void> startScan() async {
@@ -155,14 +203,35 @@ class HomeController extends ChangeNotifier {
   }
 
   Future<void> shareLocation() async {
-    if (_currentLocation != null) {
-      await p2pService.sendMessage(
-        message: 'My current location',
-        type: MessageType.location,
-        latitude: _currentLocation!.latitude,
-        longitude: _currentLocation!.longitude,
-        senderName: '',
-      );
+    if (_currentLocation == null) {
+      debugPrint('⚠️ No location available to share');
+      return;
+    }
+
+    final connectedDevices = p2pService.connectedDevices;
+    if (connectedDevices.isEmpty) {
+      debugPrint('⚠️ No connected devices to share location with');
+      return;
+    }
+
+    final senderName = p2pService.userName ?? 'Unknown User';
+    final locationMessage = '📍 Shared location\nLat: ${_currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${_currentLocation!.longitude.toStringAsFixed(6)}';
+
+    // Send location to all connected devices
+    for (final deviceId in connectedDevices.keys) {
+      try {
+        await p2pService.sendMessage(
+          message: locationMessage,
+          type: MessageType.location,
+          targetDeviceId: deviceId, // CRITICAL: Target specific device
+          latitude: _currentLocation!.latitude,
+          longitude: _currentLocation!.longitude,
+          senderName: senderName, // CRITICAL: Include actual sender name
+        );
+        debugPrint('✅ Location shared with device: $deviceId');
+      } catch (e) {
+        debugPrint('❌ Failed to share location with $deviceId: $e');
+      }
     }
   }
 
