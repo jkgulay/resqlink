@@ -156,13 +156,13 @@ class MainActivity : FlutterActivity() {
                 "checkHotspotCapabilities" -> result.success(hotspotManager.checkHotspotCapabilities())
                 "createLocalOnlyHotspot" -> {
                     val ssid = call.argument<String>("ssid") ?: "ResQLink_${System.currentTimeMillis()}"
-                    val password = call.argument<String>("password") ?: "RESQLINK911"
+                    val password = call.argument<String>("password") ?: "resqlink911"
                     hotspotManager.createLocalOnlyHotspot(ssid, password, result)
                 }
 
                 "createLegacyHotspot" -> {
                     val ssid = call.argument<String>("ssid") ?: "ResQLink_${System.currentTimeMillis()}"
-                    val password = call.argument<String>("password") ?: "RESQLINK911"
+                    val password = call.argument<String>("password") ?: "resqlink911"
                     hotspotManager.createLegacyHotspot(ssid, password, result)
                 }
 
