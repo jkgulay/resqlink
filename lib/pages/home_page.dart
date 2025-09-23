@@ -17,6 +17,7 @@ import '../services/location_state_service.dart';
 import '../services/temporary_identity_service.dart';
 import '../features/chat/services/message_queue_service.dart';
 import '../controllers/home_controller.dart';
+import '../helpers/chat_navigation_helper.dart';
 import '../widgets/home/emergency_mode_card.dart';
 import '../widgets/home/emergency_actions_card.dart';
 import '../widgets/home/location_status_card.dart';
@@ -414,6 +415,15 @@ Future<void> _onAppResumed() async {
   void _onDeviceConnected(String deviceId, String userName) {
     debugPrint("✅ Device connected: $userName ($deviceId)");
     if (mounted) {
+      // Create device map for navigation
+      final device = {
+        'deviceId': deviceId,
+        'deviceAddress': deviceId,
+        'deviceName': userName,
+        'isConnected': true,
+      };
+
+      // Show enhanced connection notification with immediate chat access
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -424,20 +434,21 @@ Future<void> _onAppResumed() async {
             ],
           ),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 4),
+          duration: Duration(seconds: 5),
           action: SnackBarAction(
-            label: 'VIEW CHAT',
+            label: 'OPEN CHAT',
             textColor: Colors.white,
             onPressed: () {
-              setState(() => selectedIndex = 2);
+              _onDeviceChatTap(device);
             },
           ),
         ),
       );
 
-      Timer(Duration(seconds: 1), () {
+      // Auto-navigate to chat after a brief delay
+      Timer(Duration(seconds: 2), () {
         if (mounted) {
-          setState(() => selectedIndex = 2);
+          _onDeviceChatTap(device);
         }
       });
     }
@@ -548,36 +559,14 @@ Future<void> _onAppResumed() async {
   }
 
   void _onDeviceChatTap(Map<String, dynamic> device) {
-    final deviceId = device['deviceAddress'] ?? device['deviceId'] ?? '';
-    final deviceName = device['deviceName'] ?? 'Unknown Device';
+    debugPrint('🎯 HomePage: Device chat tap for ${device['deviceName']}');
 
-    if (deviceId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Cannot start chat: Device ID not available'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      selectedIndex = 2;
-    });
-
-    Future.delayed(Duration(milliseconds: 100), () {
-      if (_messagePageKey != null) {
-        MessagePage.selectDeviceFor(_messagePageKey!, deviceId, deviceName);
-      }
-    });
-
-    // Show feedback
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Opening chat with $deviceName'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 1),
-      ),
+    // Use the new ChatNavigationHelper to navigate to messages tab
+    ChatNavigationHelper.navigateToMessagesTab(
+      context: context,
+      device: device,
+      setSelectedIndex: (index) => setState(() => selectedIndex = index),
+      messagePageKey: _messagePageKey,
     );
   }
 
