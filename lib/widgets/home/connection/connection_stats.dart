@@ -32,15 +32,7 @@ class ConnectionStats extends StatelessWidget {
               Colors.blue,
             ),
           ),
-          Container(
-            width: 1,
-            height: dividerHeight,
-            color: Colors.blue.withValues(alpha: 0.3),
-            margin: EdgeInsets.symmetric(
-              horizontal: ResponsiveHelper.isDesktop(context) ? 20 : 
-                         ResponsiveHelper.isTablet(context) ? 16 : 12,
-            ),
-          ),
+          _buildStatDivider(context, dividerHeight),
           Expanded(
             child: _buildNetworkStat(
               context,
@@ -49,6 +41,10 @@ class ConnectionStats extends StatelessWidget {
               Icons.link,
               Colors.green,
             ),
+          ),
+          _buildStatDivider(context, dividerHeight),
+          Expanded(
+            child: _buildHotspotStat(context),
           ),
         ],
       ),
@@ -93,6 +89,35 @@ class ConnectionStats extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
       ],
+    );
+  }
+
+  Widget _buildStatDivider(BuildContext context, double height) {
+    return Container(
+      width: 1,
+      height: height,
+      color: Colors.blue.withValues(alpha: 0.3),
+      margin: EdgeInsets.symmetric(
+        horizontal: ResponsiveHelper.isDesktop(context) ? 20 :
+                   ResponsiveHelper.isTablet(context) ? 16 : 12,
+      ),
+    );
+  }
+
+  Widget _buildHotspotStat(BuildContext context) {
+    final hotspotService = controller.p2pService.hotspotService;
+    final isHotspotEnabled = hotspotService.isEnabled;
+    final clientCount = hotspotService.connectedClients.length;
+
+    final color = isHotspotEnabled ? Colors.orange : Colors.grey;
+    final status = isHotspotEnabled ? '$clientCount' : 'Off';
+
+    return _buildNetworkStat(
+      context,
+      'Hotspot',
+      status,
+      isHotspotEnabled ? Icons.wifi_tethering : Icons.wifi_tethering_off,
+      color,
     );
   }
 }

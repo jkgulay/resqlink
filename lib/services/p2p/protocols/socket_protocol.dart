@@ -24,6 +24,9 @@ class SocketProtocol {
   String? _deviceId;
   String? _userName;
 
+  // CRITICAL: Callback for device connections
+  Function(String deviceId, String userName)? onDeviceConnected;
+
   /// Initialize socket protocol
   void initialize(String deviceId, String userName) {
     _deviceId = deviceId;
@@ -193,7 +196,11 @@ class SocketProtocol {
 
     if (deviceId != null) {
       _deviceSockets[deviceId] = socket;
-      debugPrint('🤝 Handshake from $userName ($deviceId)');
+
+      // CRITICAL: Notify P2P service about the connected device
+      onDeviceConnected?.call(deviceId, userName ?? 'Unknown');
+
+      debugPrint('🤝 Handshake completed with $userName ($deviceId)');
 
       // Send acknowledgment
       final ack = jsonEncode({

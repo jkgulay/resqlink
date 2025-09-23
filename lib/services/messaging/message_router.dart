@@ -16,11 +16,19 @@ class MessageRouter {
 
   // Message queue for offline devices
   final Map<String, List<MessageModel>> _messageQueue = {};
+  
+  // Track device connections for proper routing
+  final Map<String, String> _deviceConnections = {}; 
+
+  void registerDeviceConnection(String deviceId, String socketId) {
+    _deviceConnections[socketId] = deviceId;
+    debugPrint('🔗 Registered device connection: $deviceId -> $socketId');
+  }
 
   /// Register a listener for a specific device
   void registerDeviceListener(String deviceId, Function(MessageModel) listener) {
     _deviceListeners[deviceId] = listener;
-    debugPrint('=� Registered listener for device: $deviceId');
+    debugPrint('📱 Registered listener for device: $deviceId');
 
     // Process queued messages
     _processQueuedMessages(deviceId);
@@ -29,7 +37,7 @@ class MessageRouter {
   /// Unregister device listener
   void unregisterDeviceListener(String deviceId) {
     _deviceListeners.remove(deviceId);
-    debugPrint('= Unregistered listener for device: $deviceId');
+    debugPrint('🔕 Unregistered listener for device: $deviceId');
   }
 
   /// Set global message listener
@@ -37,44 +45,55 @@ class MessageRouter {
     _globalListener = listener;
   }
 
-  /// Route incoming message to appropriate handler
   Future<void> routeMessage(MessageModel message) async {
     try {
-      debugPrint('=� Routing message from ${message.fromUser} to ${message.endpointId}');
+      debugPrint('📨 Routing message:');
+      debugPrint('  From: ${message.fromUser} (${message.deviceId})');
+      debugPrint('  To: ${message.endpointId}');
+      debugPrint('  Message: ${message.message}');
 
-      // Save to database first
       await MessageRepository.insertMessage(message);
 
-      // Notify global listener
       _globalListener?.call(message);
 
-      // Route to specific device listener
-      final targetDevice = message.endpointId != 'broadcast' ? message.endpointId : null;
-      if (targetDevice != null) {
-        final listener = _deviceListeners[targetDevice];
-        if (listener != null) {
-          listener(message);
+      final senderDeviceId = message.deviceId;
+      
+      if (!message.isMe && senderDeviceId != null) {
+        final senderListener = _deviceListeners[senderDeviceId];
+        if (senderListener != null) {
+          debugPrint('✅ Routing to sender chat: $senderDeviceId');
+          senderListener(message);
         } else {
-          // Queue message if no listener available
-          _queueMessage(targetDevice, message);
+          // Queue for sender's chat if not open
+          _queueMessage(senderDeviceId, message);
+        }
+      }
+      
+      // Handle targeted messages (for delivery confirmation)
+      if (message.targetDeviceId != null && message.targetDeviceId != 'broadcast') {
+        final targetListener = _deviceListeners[message.targetDeviceId!];
+        if (targetListener != null && message.isMe) {
+          // Show sent messages in target's chat
+          targetListener(message);
         }
       }
 
       // Broadcast to all listeners for broadcast messages
-      if (message.endpointId == 'broadcast' || message.isBroadcast) {
+      if (message.isBroadcast) {
+        debugPrint('📢 Broadcasting message to all listeners');
         _deviceListeners.forEach((deviceId, listener) {
           listener(message);
         });
       }
     } catch (e) {
-      debugPrint('L Error routing message: $e');
+      debugPrint('❌ Error routing message: $e');
     }
   }
 
   /// Queue message for offline device
   void _queueMessage(String deviceId, MessageModel message) {
     _messageQueue.putIfAbsent(deviceId, () => []).add(message);
-    debugPrint('=� Message queued for device: $deviceId');
+    debugPrint('📦 Message queued for device: $deviceId');
   }
 
   /// Process queued messages for a device
@@ -87,24 +106,59 @@ class MessageRouter {
           listener(message);
         }
         _messageQueue.remove(deviceId);
-        debugPrint(' Processed ${messages.length} queued messages for $deviceId');
+        debugPrint('✅ Processed ${messages.length} queued messages for $deviceId');
       }
     }
   }
 
-  /// Parse and route raw message data
   Future<void> routeRawMessage(String rawMessage, String? fromDevice) async {
     try {
+      debugPrint('🔄 Parsing raw message from device: $fromDevice');
       final data = jsonDecode(rawMessage);
 
-      // Extract message details
+      // Handle different message types
+      final messageType = data['type'] as String?;
+      
+      if (messageType == 'handshake' || messageType == 'handshake_response') {
+        // Don't route handshake messages as chat messages
+        debugPrint('🤝 Ignoring handshake message');
+        return;
+      }
+      
+      if (messageType == 'heartbeat' || messageType == 'ack') {
+        // Don't route system messages as chat messages
+        debugPrint('💓 Ignoring system message: $messageType');
+        return;
+      }
+
+      // Extract sender information - CRITICAL: use the actual sender's device ID
+      final senderDeviceId = data['deviceId'] ?? 
+                            data['senderDeviceId'] ?? 
+                            fromDevice ?? 
+                            'unknown';
+      
+      final senderName = data['senderName'] ?? 
+                        data['from'] ?? 
+                        data['fromUser'] ?? 
+                        data['userName'] ?? 
+                        'Unknown';
+
+      // Extract target information
+      final targetDeviceId = data['targetDeviceId'] ?? 
+                            data['endpointId'] ?? 
+                            'broadcast';
+
+      // Create message model with proper sender/target mapping
       final messageModel = MessageModel(
-        messageId: data['messageId'] ?? MessageModel.generateMessageId(fromDevice ?? 'unknown'),
-        endpointId: data['targetDeviceId'] ?? data['endpointId'] ?? fromDevice ?? 'unknown',
-        deviceId: data['deviceId'] ?? fromDevice,
-        fromUser: data['senderName'] ?? data['from'] ?? data['fromUser'] ?? 'Unknown',
+        messageId: data['messageId'] ?? MessageModel.generateMessageId(senderDeviceId),
+        // CRITICAL: endpointId should be the conversation partner
+        // For incoming messages, that's the sender
+        endpointId: senderDeviceId, // This is who the message is FROM
+        deviceId: senderDeviceId,   // The sender's device ID
+        targetDeviceId: targetDeviceId, // Who it was sent TO
+        fromUser: senderName,
         message: data['message'] ?? '',
-        isMe: false,
+        isMe: false, // This is an incoming message
         isEmergency: data['isEmergency'] ?? false,
         timestamp: data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
         messageType: MessageType.values.firstWhere(
@@ -115,19 +169,25 @@ class MessageRouter {
         status: MessageStatus.received,
         latitude: data['latitude']?.toDouble(),
         longitude: data['longitude']?.toDouble(),
-        targetDeviceId: data['targetDeviceId'],
       );
+
+      debugPrint('📨 Created message model:');
+      debugPrint('  Sender: $senderName ($senderDeviceId)');
+      debugPrint('  Target: $targetDeviceId');
+      debugPrint('  Message: ${messageModel.message}');
 
       await routeMessage(messageModel);
     } catch (e) {
-      debugPrint('L Error parsing raw message: $e');
+      debugPrint('❌ Error parsing raw message: $e');
+      debugPrint('  Raw message: $rawMessage');
     }
   }
 
   /// Clear all queued messages
   void clearQueues() {
     _messageQueue.clear();
-    debugPrint('>� Cleared all message queues');
+    _deviceConnections.clear();
+    debugPrint('🧹 Cleared all message queues and connections');
   }
 
   /// Get active device listeners
@@ -148,12 +208,23 @@ class MessageRouter {
   /// Clear queue for specific device
   void clearDeviceQueue(String deviceId) {
     _messageQueue.remove(deviceId);
-    debugPrint('>� Cleared queue for device: $deviceId');
+    debugPrint('🧹 Cleared queue for device: $deviceId');
+  }
+  
+  /// Debug: Print current routing state
+  void debugPrintState() {
+    debugPrint('📊 MessageRouter State:');
+    debugPrint('  Active Listeners: ${_deviceListeners.keys.toList()}');
+    debugPrint('  Device Connections: $_deviceConnections');
+    debugPrint('  Queued Messages: ${_messageQueue.keys.map((k) => '$k: ${_messageQueue[k]?.length}')}');
   }
 }
 
 /// Extension to add isBroadcast getter to MessageModel
 extension MessageModelExtensions on MessageModel {
   /// Check if this is a broadcast message
-  bool get isBroadcast => endpointId == 'broadcast' || targetDeviceId == 'broadcast';
+  bool get isBroadcast => 
+      endpointId == 'broadcast' || 
+      targetDeviceId == 'broadcast' ||
+      endpointId == 'unknown';
 }

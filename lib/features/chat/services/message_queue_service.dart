@@ -628,6 +628,11 @@ class MessageQueueService extends ChangeNotifier {
     return List.from(_deviceQueues[deviceId] ?? []);
   }
 
+  // Public method to manually process queue for a specific device
+  Future<void> processQueueForDevice(String deviceId) async {
+    await _processQueueForDevice(deviceId);
+  }
+
   // Dispose
   @override
   void dispose() {

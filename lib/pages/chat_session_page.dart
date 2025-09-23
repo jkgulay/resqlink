@@ -39,6 +39,8 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   Timer? _refreshTimer;
   Timer? _typingTimer;
   bool _isTyping = false;
+  String? _deviceId; // Store device ID for MessageRouter listener
+  int _queuedMessageCount = 0; // Track queued messages for this device
 
   @override
   void initState() {
@@ -54,6 +56,13 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     _messageController.dispose();
     _scrollController.dispose();
     WidgetsBinding.instance.removeObserver(this);
+
+    // Unregister MessageRouter listener
+    if (_deviceId != null) {
+      widget.p2pService.messageRouter.unregisterDeviceListener(_deviceId!);
+    }
+
+    // Clear global P2P listener
     widget.p2pService.onMessageReceived = null;
     super.dispose();
   }
@@ -71,12 +80,28 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   Future<void> _initialize() async {
     await _loadChatData();
     _setupMessageListener();
+    _setupMessageRouterListener();
     _markMessagesAsRead();
     _startPeriodicRefresh();
   }
 
   void _setupMessageListener() {
     widget.p2pService.onMessageReceived = _onMessageReceived;
+  }
+
+  void _setupMessageRouterListener() {
+    // Extract device ID from session for MessageRouter
+    if (_chatSession != null) {
+      _deviceId = _chatSession!.deviceId;
+
+      // Register listener with MessageRouter for real-time messages
+      widget.p2pService.messageRouter.registerDeviceListener(
+        _deviceId!,
+        _onRouterMessage,
+      );
+
+      debugPrint('📱 Registered MessageRouter listener for device: $_deviceId');
+    }
   }
 
   void _startPeriodicRefresh() {
@@ -102,6 +127,14 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           _isLoading = false;
           _isConnected = _chatSession?.isOnline ?? false;
         });
+
+        // Setup MessageRouter listener if not already done
+        if (_deviceId == null && _chatSession != null) {
+          _setupMessageRouterListener();
+        }
+
+        // Update queued message count
+        _updateQueuedMessageCount();
         _scrollToBottom();
       }
     } catch (e) {
@@ -131,6 +164,43 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
       await _loadChatData();
       _markMessagesAsRead();
+    }
+  }
+
+  /// Handle messages from MessageRouter (real-time)
+  void _onRouterMessage(MessageModel message) async {
+    if (!mounted) return;
+
+    debugPrint('📨 ChatSession received router message from ${message.fromUser}: ${message.message}');
+
+    // Update message with chat session ID if not set
+    if (message.chatSessionId == null) {
+      final updatedMessage = message.copyWith(chatSessionId: widget.sessionId);
+      await MessageRepository.insert(updatedMessage);
+    }
+
+    // Reload chat data to show new message
+    await _loadChatData();
+
+    // Mark messages as read
+    await _markMessagesAsRead();
+
+    // Scroll to bottom to show new message
+    _scrollToBottom();
+
+    // Update queued message count
+    _updateQueuedMessageCount();
+  }
+
+  /// Update queued message count for this device
+  void _updateQueuedMessageCount() {
+    if (_deviceId != null) {
+      final queuedMessages = widget.p2pService.messageQueueService.getQueueForDevice(_deviceId!);
+      if (mounted) {
+        setState(() {
+          _queuedMessageCount = queuedMessages.length;
+        });
+      }
     }
   }
 
@@ -329,12 +399,34 @@ class _ChatSessionPageState extends State<ChatSessionPage>
               fontSize: 18,
             ),
           ),
-          Text(
-            _isConnected ? 'Connected' : _chatSession?.lastSeenText ?? 'Offline',
-            style: TextStyle(
-              color: _isConnected ? ResQLinkTheme.safeGreen : Colors.white60,
-              fontSize: 12,
-            ),
+          Row(
+            children: [
+              Text(
+                _isConnected ? 'Connected' : _chatSession?.lastSeenText ?? 'Offline',
+                style: TextStyle(
+                  color: _isConnected ? ResQLinkTheme.safeGreen : Colors.white60,
+                  fontSize: 12,
+                ),
+              ),
+              if (_queuedMessageCount > 0) ...[
+                SizedBox(width: 8),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.orange,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$_queuedMessageCount',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),
@@ -405,7 +497,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
     return Column(
       children: [
-        if (!_isConnected) _buildOfflineBanner(),
+        if (!_isConnected || _queuedMessageCount > 0) _buildOfflineBanner(),
         Expanded(
           child: ChatView(
             messages: _messages,
@@ -426,30 +518,74 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   }
 
   Widget _buildOfflineBanner() {
+    final isOffline = !_isConnected;
+    final hasQueuedMessages = _queuedMessageCount > 0;
+
+    String bannerText;
+    IconData bannerIcon;
+    Color bannerColor;
+
+    if (isOffline && hasQueuedMessages) {
+      bannerText = 'Device offline - $_queuedMessageCount messages queued';
+      bannerIcon = Icons.wifi_off;
+      bannerColor = ResQLinkTheme.primaryRed;
+    } else if (isOffline) {
+      bannerText = 'Device offline - messages will be queued';
+      bannerIcon = Icons.wifi_off;
+      bannerColor = ResQLinkTheme.primaryRed;
+    } else if (hasQueuedMessages) {
+      bannerText = '$_queuedMessageCount messages pending delivery';
+      bannerIcon = Icons.schedule;
+      bannerColor = Colors.orange;
+    } else {
+      bannerText = 'Device offline - messages will be queued';
+      bannerIcon = Icons.wifi_off;
+      bannerColor = ResQLinkTheme.primaryRed;
+    }
+
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: ResQLinkTheme.primaryRed.withValues(alpha: 0.1),  
+      color: bannerColor.withValues(alpha: 0.1),
       child: Row(
         children: [
-          Icon(Icons.wifi_off, color: ResQLinkTheme.primaryRed, size: 16),
+          Icon(bannerIcon, color: bannerColor, size: 16),
           SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Device offline - messages will be queued',
+              bannerText,
               style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
-          TextButton(
-            onPressed: _reconnectToDevice,
-            child: Text(
-              'RECONNECT',
-              style: TextStyle(color: ResQLinkTheme.primaryRed, fontSize: 12),
+          if (isOffline)
+            TextButton(
+              onPressed: _reconnectToDevice,
+              child: Text(
+                'RECONNECT',
+                style: TextStyle(color: bannerColor, fontSize: 12),
+              ),
             ),
-          ),
+          if (hasQueuedMessages && _isConnected)
+            TextButton(
+              onPressed: _retryQueuedMessages,
+              child: Text(
+                'RETRY',
+                style: TextStyle(color: bannerColor, fontSize: 12),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  /// Retry queued messages manually
+  Future<void> _retryQueuedMessages() async {
+    if (_deviceId != null) {
+      // Force process queue for this device
+      await widget.p2pService.messageQueueService.processQueueForDevice(_deviceId!);
+      _updateQueuedMessageCount();
+      _showSnackBar('Retrying queued messages...', isError: false);
+    }
   }
 
   void _showDeviceInfo() {

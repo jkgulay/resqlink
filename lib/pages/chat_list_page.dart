@@ -40,6 +40,7 @@ class _ChatListPageState extends State<ChatListPage>
     _loadChatSessions();
     _startPeriodicRefresh();
     _searchController.addListener(_onSearchChanged);
+    _setupMessageRouterListener();
   }
 
   @override
@@ -65,6 +66,24 @@ class _ChatListPageState extends State<ChatListPage>
     setState(() {
       _searchQuery = _searchController.text.toLowerCase();
     });
+  }
+
+  void _setupMessageRouterListener() {
+    // Set up global listener to refresh chat list when new messages arrive
+    widget.p2pService.messageRouter.setGlobalListener(_onGlobalMessage);
+    debugPrint('📱 ChatListPage registered MessageRouter global listener');
+  }
+
+  void _onGlobalMessage(dynamic message) {
+    // Refresh chat sessions when any message is received
+    if (mounted) {
+      _loadChatSessions();
+    }
+  }
+
+  /// Get queue statistics for display
+  Map<String, dynamic> _getQueueStatistics() {
+    return widget.p2pService.messageQueueService.statistics;
   }
 
   void _startPeriodicRefresh() {
@@ -222,9 +241,39 @@ class _ChatListPageState extends State<ChatListPage>
     return Scaffold(
       backgroundColor: ResQLinkTheme.backgroundDark,
       appBar: AppBar(
-        title: Text(
-          'Chats',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        title: Row(
+          children: [
+            Text(
+              'Chats',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            Builder(
+              builder: (context) {
+                final queueStats = _getQueueStatistics();
+                final totalQueued = queueStats['totalQueued'] as int? ?? 0;
+
+                if (totalQueued > 0) {
+                  return Container(
+                    margin: EdgeInsets.only(left: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.orange,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '$totalQueued queued',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  );
+                }
+                return SizedBox.shrink();
+              },
+            ),
+          ],
         ),
         backgroundColor: ResQLinkTheme.cardDark,
         elevation: 0,
