@@ -423,27 +423,8 @@ Future<void> _onAppResumed() async {
         'isConnected': true,
       };
 
-      // Show enhanced connection notification with immediate chat access
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.white),
-              SizedBox(width: 8),
-              Expanded(child: Text('Connected to $userName')),
-            ],
-          ),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 5),
-          action: SnackBarAction(
-            label: 'OPEN CHAT',
-            textColor: Colors.white,
-            onPressed: () {
-              _onDeviceChatTap(device);
-            },
-          ),
-        ),
-      );
+      // Show enhanced connection notification with display name
+      _showDisplayNameConnectedSnackBar(userName, device);
 
       // Auto-navigate to chat after a brief delay
       Timer(Duration(seconds: 2), () {
@@ -982,4 +963,13 @@ Future<void> _onAppResumed() async {
   ) async => false;
 
   bool get isInBackground => _isInBackground;
+
+  /// Show connection snackbar with display name
+  void _showDisplayNameConnectedSnackBar(String userName, Map<String, dynamic> device) {
+    ChatNavigationHelper.showConnectionSuccess(
+      context: context,
+      deviceName: userName,
+      onChatTap: () => _onDeviceChatTap(device),
+    );
+  }
 }

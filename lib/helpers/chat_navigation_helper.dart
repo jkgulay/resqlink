@@ -4,6 +4,8 @@ import '../services/p2p/p2p_main_service.dart';
 import '../pages/chat_session_page.dart';
 import '../pages/message_page.dart';
 import '../models/chat_session_model.dart';
+import '../services/auth_service.dart';
+import '../services/temporary_identity_service.dart';
 
 class ChatNavigationHelper {
   static final ChatNavigationHelper _instance =
@@ -12,6 +14,8 @@ class ChatNavigationHelper {
   ChatNavigationHelper._internal();
 
   bool _isNavigating = false;
+  static ScaffoldMessengerState? _lastMessenger;
+  static DateTime? _lastSnackbarTime;
 
   static Future<void> navigateToDeviceChat({
     required BuildContext context,
@@ -130,13 +134,19 @@ class ChatNavigationHelper {
       }
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _showSnackBarSafe(
+          context,
           SnackBar(
             content: Row(
               children: [
                 Icon(Icons.chat, color: Colors.white, size: 20),
                 SizedBox(width: 8),
-                Text('Opening chat with $deviceName'),
+                FutureBuilder<String>(
+                  future: _getDisplayName(deviceName),
+                  builder: (context, snapshot) {
+                    return Text('Opening chat with ${snapshot.data ?? deviceName}');
+                  },
+                ),
               ],
             ),
             backgroundColor: Colors.green,
@@ -179,7 +189,8 @@ class ChatNavigationHelper {
       debugPrint('🚀 Quick connecting to $deviceName');
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _showSnackBarSafe(
+          context,
           SnackBar(
             content: Row(
               children: [
@@ -192,7 +203,12 @@ class ChatNavigationHelper {
                   ),
                 ),
                 SizedBox(width: 12),
-                Text('Connecting to $deviceName...'),
+                FutureBuilder<String>(
+                  future: _getDisplayName(deviceName),
+                  builder: (context, snapshot) {
+                    return Text('Connecting to ${snapshot.data ?? deviceName}...');
+                  },
+                ),
               ],
             ),
             backgroundColor: Colors.blue,
@@ -245,13 +261,21 @@ class ChatNavigationHelper {
   }) {
     if (!context.mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    _showSnackBarSafe(
+      context,
       SnackBar(
         content: Row(
           children: [
             Icon(Icons.check_circle, color: Colors.white, size: 20),
             SizedBox(width: 8),
-            Expanded(child: Text('Connected to $deviceName')),
+            Expanded(
+              child: FutureBuilder<String>(
+                future: _getDisplayName(deviceName),
+                builder: (context, snapshot) {
+                  return Text('Connected to ${snapshot.data ?? deviceName}');
+                },
+              ),
+            ),
           ],
         ),
         backgroundColor: Colors.green,
@@ -278,7 +302,8 @@ class ChatNavigationHelper {
   void _showError(BuildContext context, String message) {
     if (!context.mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    _showSnackBarSafe(
+      context,
       SnackBar(
         content: Row(
           children: [
@@ -491,7 +516,8 @@ class ChatNavigationHelper {
   static void _showErrorMessage(BuildContext context, String message) {
     if (!context.mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    _showSnackBarSafe(
+      context,
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red,
@@ -507,18 +533,67 @@ class ChatNavigationHelper {
   ) {
     if (!context.mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    _showSnackBarSafe(
+      context,
       SnackBar(
         content: Row(
           children: [
             Icon(Icons.refresh, color: Colors.white, size: 20),
             SizedBox(width: 8),
-            Text('Reconnected to $deviceName'),
+            FutureBuilder<String>(
+              future: _getDisplayName(deviceName),
+              builder: (context, snapshot) {
+                return Text('Reconnected to ${snapshot.data ?? deviceName}');
+              },
+            ),
           ],
         ),
         backgroundColor: Colors.green,
         duration: Duration(seconds: 2),
       ),
     );
+  }
+
+  /// Get display name with fallback to device name
+  static Future<String> _getDisplayName([String? fallbackDeviceName]) async {
+    // First try to get temporary display name (for emergency mode)
+    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
+    if (tempDisplayName != null) {
+      return tempDisplayName;
+    }
+
+    // Then try to get current authenticated user name
+    final currentUser = await AuthService.getCurrentUser();
+    if (currentUser != null) {
+      return currentUser.name;
+    }
+
+    // Fallback to device name
+    return fallbackDeviceName ?? 'Unknown Device';
+  }
+
+  /// Show snackbar safely with duplicate prevention
+  static void _showSnackBarSafe(BuildContext context, SnackBar snackBar) {
+    if (!context.mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final now = DateTime.now();
+
+    // Prevent duplicate snackbars within 1 second
+    if (_lastMessenger == messenger &&
+        _lastSnackbarTime != null &&
+        now.difference(_lastSnackbarTime!).inMilliseconds < 1000) {
+      return;
+    }
+
+    // Clear any existing snackbar
+    messenger.clearSnackBars();
+
+    // Show new snackbar
+    messenger.showSnackBar(snackBar);
+
+    // Update tracking
+    _lastMessenger = messenger;
+    _lastSnackbarTime = now;
   }
 }

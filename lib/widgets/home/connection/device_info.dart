@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/utils/responsive_helper.dart';
 import 'package:resqlink/widgets/home/connection/device_badges.dart';
+import 'package:resqlink/services/auth_service.dart';
+import 'package:resqlink/services/temporary_identity_service.dart';
 
 class DeviceInfo extends StatelessWidget {
   final Map<String, dynamic> device;
@@ -59,15 +61,20 @@ class DeviceInfo extends StatelessWidget {
             Expanded(
               child: GestureDetector(
                 onTap: isConnected ? onChatTap : null,
-                child: Text(
-                  device['deviceName'] ?? 'Unknown Device',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: nameSize,
-                    color: isConnected ? Colors.green : Colors.white,
-                    decoration: isConnected ? TextDecoration.underline : null,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                child: FutureBuilder<String>(
+                  future: _getDisplayName(),
+                  builder: (context, snapshot) {
+                    return Text(
+                      snapshot.data ?? device['deviceName'] ?? 'Unknown Device',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: nameSize,
+                        color: isConnected ? Colors.green : Colors.white,
+                        decoration: isConnected ? TextDecoration.underline : null,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    );
+                  },
                 ),
               ),
             ),
@@ -96,5 +103,22 @@ class DeviceInfo extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  Future<String> _getDisplayName() async {
+    // First try to get temporary display name (for emergency mode)
+    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
+    if (tempDisplayName != null) {
+      return tempDisplayName;
+    }
+
+    // Then try to get current authenticated user name
+    final currentUser = await AuthService.getCurrentUser();
+    if (currentUser != null) {
+      return currentUser.name;
+    }
+
+    // Fallback to device name as last resort
+    return device['deviceName'] ?? 'Unknown Device';
   }
 }

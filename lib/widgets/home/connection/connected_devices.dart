@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/controllers/home_controller.dart';
 import 'package:resqlink/utils/responsive_helper.dart';
+import 'package:resqlink/services/auth_service.dart';
+import 'package:resqlink/services/temporary_identity_service.dart';
 
 class ConnectedDevices extends StatelessWidget {
   final HomeController controller;
@@ -81,14 +83,19 @@ class ConnectedDevices extends StatelessWidget {
               ),
               SizedBox(width: spacing),
               Expanded(
-                child: Text(
-                  device.userName,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w500,
-                    fontSize: deviceNameSize,
-                    color: Colors.white,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                child: FutureBuilder<String>(
+                  future: _getDisplayName(device),
+                  builder: (context, snapshot) {
+                    return Text(
+                      snapshot.data ?? device.userName,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        fontSize: deviceNameSize,
+                        color: Colors.white,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    );
+                  },
                 ),
               ),
               Container(
@@ -115,5 +122,21 @@ class ConnectedDevices extends StatelessWidget {
         ),
       ).toList(),
     );
+  }
+
+  Future<String> _getDisplayName(dynamic device, [String? fallbackDeviceName]) async {
+    // First try to get temporary display name (for emergency mode)
+    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
+    if (tempDisplayName != null) {
+      return tempDisplayName;
+    }
+
+    // Then try to get current authenticated user name
+    final currentUser = await AuthService.getCurrentUser();
+    if (currentUser != null ) {
+      return currentUser.name;
+    }
+
+    return fallbackDeviceName ?? device.userName;
   }
 }
