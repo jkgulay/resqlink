@@ -247,6 +247,27 @@ class SettingsPageState extends State<SettingsPage> {
                 info['forcedRole'] ?? 'Unknown',
                 color: ResQLinkTheme.orange,
               ),
+            SizedBox(height: 8),
+            // Hotspot information
+            _buildInfoRow(
+              'Hotspot Status',
+              widget.p2pService?.hotspotService.isEnabled == true
+                  ? 'Active'
+                  : 'Disabled',
+              color: widget.p2pService?.hotspotService.isEnabled == true
+                  ? ResQLinkTheme.safeGreen
+                  : Colors.grey,
+            ),
+            if (widget.p2pService?.hotspotService.isEnabled == true) ...[
+              _buildInfoRow(
+                'Hotspot SSID',
+                widget.p2pService?.hotspotService.currentSSID ?? 'Unknown',
+              ),
+              _buildInfoRow(
+                'Hotspot Clients',
+                '${widget.p2pService?.hotspotService.connectedClients.length ?? 0}',
+              ),
+            ],
           ],
         ),
         actions: [
@@ -696,6 +717,9 @@ class SettingsPageState extends State<SettingsPage> {
         SizedBox(height: 16),
         // ✅ ADD: Connection mode section
         _buildConnectionModeSection(settings),
+        SizedBox(height: 16),
+        // ✅ ADD: Hotspot management section
+        _buildHotspotManagementSection(),
       ],
     );
   }
@@ -967,8 +991,8 @@ class SettingsPageState extends State<SettingsPage> {
 
           case 'hotspot_fallback':
             widget.p2pService!.setHotspotFallbackEnabled(true);
-            // Force hotspot mode - FIXED
-            await widget.p2pService!.hotspotManager.createResQLinkHotspot();
+            // Force hotspot mode using HotspotService
+            await widget.p2pService!.createEmergencyHotspot();
 
           case 'hybrid':
             widget.p2pService!.setHotspotFallbackEnabled(true);
@@ -1289,5 +1313,258 @@ class SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  Widget _buildHotspotManagementSection() {
+    final hotspotService = widget.p2pService?.hotspotService;
+    final isHotspotEnabled = hotspotService?.isEnabled ?? false;
+    final connectedClients = hotspotService?.connectedClients ?? [];
+
+    return Card(
+      color: ResQLinkTheme.cardDark,
+      elevation: 2,
+      child: Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.wifi_tethering, color: ResQLinkTheme.orange),
+                SizedBox(width: 8),
+                Text(
+                  'Hotspot Management',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Current status
+          Container(
+            margin: EdgeInsets.symmetric(horizontal: 16),
+            padding: EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isHotspotEnabled
+                  ? ResQLinkTheme.orange.withAlpha(51)
+                  : Colors.grey.withAlpha(51),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isHotspotEnabled
+                    ? ResQLinkTheme.orange.withAlpha(128)
+                    : Colors.grey.withAlpha(128),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      isHotspotEnabled
+                          ? Icons.wifi_tethering
+                          : Icons.wifi_tethering_off,
+                      color: isHotspotEnabled
+                          ? ResQLinkTheme.orange
+                          : Colors.grey,
+                      size: 16,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      isHotspotEnabled ? 'HOTSPOT ACTIVE' : 'HOTSPOT DISABLED',
+                      style: TextStyle(
+                        color: isHotspotEnabled
+                            ? ResQLinkTheme.orange
+                            : Colors.grey,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 4),
+                if (isHotspotEnabled) ...[
+                  Text(
+                    'SSID: ${hotspotService?.currentSSID ?? 'Unknown'}',
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                  Text(
+                    'Connected clients: ${connectedClients.length}',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ] else
+                  Text(
+                    'No active hotspot',
+                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                  ),
+              ],
+            ),
+          ),
+
+          SizedBox(height: 16),
+
+          // Manual control buttons
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: isHotspotEnabled
+                            ? null
+                            : _createManualHotspot,
+                        icon: Icon(Icons.wifi_tethering, size: 18),
+                        label: Text('Create Hotspot'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isHotspotEnabled
+                              ? Colors.grey.shade800
+                              : ResQLinkTheme.orange,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: isHotspotEnabled ? _stopManualHotspot : null,
+                        icon: Icon(Icons.wifi_tethering_off, size: 18),
+                        label: Text('Stop Hotspot'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isHotspotEnabled
+                              ? ResQLinkTheme.primaryRed
+                              : Colors.grey.shade800,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          SizedBox(height: 16),
+
+          // Connected clients list
+          if (connectedClients.isNotEmpty) ...[
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Connected Devices:',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  ...connectedClients.map(
+                    (client) => Container(
+                      margin: EdgeInsets.only(bottom: 4),
+                      padding: EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha(25),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.device_hub,
+                            color: ResQLinkTheme.orange,
+                            size: 16,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              client.deviceName,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            client.ipAddress,
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
+          ],
+
+          // Help text
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Manual hotspot control allows you to create or stop hotspots independently of the automatic connection system.',
+              style: TextStyle(color: Colors.white60, fontSize: 11),
+            ),
+          ),
+
+          SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createManualHotspot() async {
+    if (widget.p2pService == null) return;
+
+    try {
+      setState(() => _isLoading = true);
+      _showMessage('Creating hotspot...', isSuccess: false);
+
+      final success = await widget.p2pService!.createEmergencyHotspot();
+
+      setState(() => _isLoading = false);
+
+      if (success) {
+        _showMessage('Hotspot created successfully', isSuccess: true);
+      } else {
+        _showMessage('Failed to create hotspot', isDanger: true);
+      }
+
+      setState(() {}); // Refresh UI
+    } catch (e) {
+      setState(() => _isLoading = false);
+      _showMessage('Error creating hotspot: $e', isDanger: true);
+    }
+  }
+
+  Future<void> _stopManualHotspot() async {
+    if (widget.p2pService == null) return;
+
+    try {
+      setState(() => _isLoading = true);
+      _showMessage('Stopping hotspot...', isSuccess: false);
+
+      await widget.p2pService!.hotspotService.stopHotspot();
+
+      setState(() => _isLoading = false);
+      _showMessage('Hotspot stopped successfully', isSuccess: true);
+
+      setState(() {}); // Refresh UI
+    } catch (e) {
+      setState(() => _isLoading = false);
+      _showMessage('Error stopping hotspot: $e', isDanger: true);
+    }
   }
 }
