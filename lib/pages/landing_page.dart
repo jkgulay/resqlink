@@ -218,7 +218,7 @@ class LandingPage extends StatelessWidget {
           SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 8)),
           Flexible(
             child: Text(
-              'Ready for Emergency - No Internet Required',
+              'Ready for Emergency',
               style: TextStyle(
                 color: Colors.green,
                 fontWeight: FontWeight.bold,

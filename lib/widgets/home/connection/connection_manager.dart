@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/controllers/home_controller.dart';
 import 'package:resqlink/models/message_model.dart';
-import 'package:resqlink/services/chat/chat_navigation_service.dart';
+import 'package:resqlink/helpers/chat_navigation_helper.dart';
 
+/// Manages device connections and chat navigation
+/// This class handles all connection-related operations and navigation to chat
 class ConnectionManager {
-  final ChatNavigationService _chatNavigationService = ChatNavigationService();
+
+  /// Connect to a device with proper error handling
   Future<bool> connectToDevice(
     Map<String, dynamic> device,
     BuildContext context,
@@ -47,6 +50,7 @@ class ConnectionManager {
     }
   }
 
+  /// Disconnect from a device
   Future<void> disconnectDevice(
     Map<String, dynamic> device,
     BuildContext context,
@@ -79,6 +83,7 @@ class ConnectionManager {
     }
   }
 
+  /// Send a test message to connected device
   Future<void> sendTestMessage(
     Map<String, dynamic> device,
     BuildContext context,
@@ -121,6 +126,7 @@ class ConnectionManager {
     }
   }
 
+  /// Navigate to chat using the robust ChatNavigationHelper
   Future<void> navigateToChat(
     BuildContext context,
     Map<String, dynamic> device,
@@ -129,21 +135,20 @@ class ConnectionManager {
     if (!context.mounted) return;
 
     try {
-      if (onDeviceChatTap != null) {
-        onDeviceChatTap(device);
-        return;
-      }
-
       final controller = context.read<HomeController>();
-      await _chatNavigationService.navigateToDeviceChat(
-        context,
-        device,
-        controller.p2pService,
+
+      debugPrint('🧭 ConnectionManager: Navigating to chat for ${device['deviceName']}');
+
+      // Use the new ChatNavigationHelper for robust navigation
+      await ChatNavigationHelper.navigateToDeviceChat(
+        context: context,
+        device: device,
+        p2pService: controller.p2pService,
+        fallbackCallback: onDeviceChatTap,
       );
 
-      debugPrint('✅ Chat navigation completed for: ${device['deviceName']}');
     } catch (e) {
-      debugPrint('❌ Error navigating to chat: $e');
+      debugPrint('❌ ConnectionManager: Error navigating to chat: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -156,6 +161,7 @@ class ConnectionManager {
     }
   }
 
+  /// Show device details in a dialog
   void showDeviceDetails(BuildContext context, Map<String, dynamic> device) {
     showDialog(
       context: context,
@@ -196,6 +202,49 @@ class ConnectionManager {
         ],
       ),
     );
+  }
+
+  /// Quick connect and navigate to chat using ChatNavigationHelper
+  Future<bool> quickConnectAndChat(
+    BuildContext context,
+    Map<String, dynamic> device,
+    HomeController controller,
+  ) async {
+    if (!context.mounted) return false;
+
+    debugPrint('🚀 ConnectionManager: Quick connect and chat for ${device['deviceName']}');
+
+    return await ChatNavigationHelper.quickConnectAndNavigateToChat(
+      context: context,
+      device: device,
+      p2pService: controller.p2pService,
+      connectFunction: (device, context, ctrl) => connectToDevice(device, context, ctrl as HomeController),
+      controller: controller,
+    );
+  }
+
+  /// Check if device is currently connected
+  bool isDeviceConnected(
+    Map<String, dynamic> device,
+    HomeController controller,
+  ) {
+    final deviceId = device['deviceId'] ?? device['deviceAddress'];
+    return controller.p2pService.connectedDevices.containsKey(deviceId);
+  }
+
+  /// Get connection status text for UI
+  String getConnectionStatusText(Map<String, dynamic> device) {
+    final isConnected = device['isConnected'] == true;
+    final isAvailable = device['isAvailable'] == true;
+    final connectionType = device['connectionType'] as String? ?? '';
+
+    if (isConnected) {
+      return 'Connected via ${_getConnectionTypeLabel(connectionType)}';
+    } else if (isAvailable) {
+      return 'Available for connection';
+    } else {
+      return 'Not available';
+    }
   }
 
   // Private helper methods
@@ -275,9 +324,9 @@ class ConnectionManager {
 
       final success =
           await controller.p2pService.wifiDirectService?.connectToPeer(
-            deviceAddress,
-          ) ??
-          false;
+                deviceAddress,
+              ) ??
+              false;
 
       if (success) {
         debugPrint('✅ WiFi Direct connection initiated');
@@ -371,58 +420,18 @@ class ConnectionManager {
     }
   }
 
-  /// Check if device is currently connected
-  bool isDeviceConnected(
-    Map<String, dynamic> device,
-    HomeController controller,
-  ) {
-    final deviceId = device['deviceId'] ?? device['deviceAddress'];
-    return controller.p2pService.connectedDevices.containsKey(deviceId);
+  /// Show connection success with navigation option
+  static void showConnectionSuccess({
+    required BuildContext context,
+    required String deviceName,
+    required VoidCallback onChatTap,
+  }) {
+    ChatNavigationHelper.showConnectionSuccess(
+      context: context,
+      deviceName: deviceName,
+      onChatTap: onChatTap,
+    );
   }
-
-  Future<bool> quickConnectAndChat(
-    BuildContext context,
-    Map<String, dynamic> device,
-    HomeController controller,
-  ) async {
-    if (!context.mounted) return false;
-
-    try {
-      final connected = await connectToDevice(device, context, controller);
-
-      if (connected && context.mounted) {
-        await Future.delayed(Duration(milliseconds: 500));
-
-        if (context.mounted) {
-          await navigateToChat(context, device, null);
-          return true;
-        }
-      }
-
-      return false;
-    } catch (e) {
-      debugPrint('❌ Quick connect and chat failed: $e');
-      return false;
-    }
-  }
-
-  /// Get connection status text for UI
-  String getConnectionStatusText(Map<String, dynamic> device) {
-    final isConnected = device['isConnected'] == true;
-    final isAvailable = device['isAvailable'] == true;
-    final connectionType = device['connectionType'] as String? ?? '';
-
-    if (isConnected) {
-      return 'Connected via ${_getConnectionTypeLabel(connectionType)}';
-    } else if (isAvailable) {
-      return 'Available for connection';
-    } else {
-      return 'Not available';
-    }
-  }
-
-  /// Get chat navigation service for external access
-  ChatNavigationService get chatNavigationService => _chatNavigationService;
 
   /// Dispose resources
   void dispose() {

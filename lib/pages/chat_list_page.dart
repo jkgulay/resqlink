@@ -3,12 +3,14 @@ import 'package:flutter/services.dart';
 import '../models/chat_session_model.dart';
 import '../features/database/repositories/chat_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
-import 'package:resqlink/services/chat/chat_navigation_service.dart';
+import 'package:resqlink/helpers/chat_navigation_helper.dart';
 import '../utils/resqlink_theme.dart';
 import '../utils/responsive_utils.dart';
 import '../utils/responsive_helper.dart';
 import '../widgets/message/empty_chat_view.dart';
 import '../widgets/message/loading_view.dart';
+import '../services/auth_service.dart';
+import '../services/temporary_identity_service.dart';
 import 'dart:async';
 
 class ChatListPage extends StatefulWidget {
@@ -128,13 +130,13 @@ class _ChatListPageState extends State<ChatListPage>
     if (widget.onChatSelected != null) {
       widget.onChatSelected!(session.sessionId, session.deviceName);
     } else {
-      // Use ChatNavigationService for proper session management
-      await ChatNavigationService.navigateToChat(
-        context,
-        session.sessionId,
-        session.deviceName,
-        widget.p2pService,
+      // Use ChatNavigationHelper for proper session management
+      await ChatNavigationHelper.navigateToSession(
+        context: context,
+        sessionId: session.sessionId,
+        deviceName: session.deviceName,
         deviceId: session.deviceId,
+        p2pService: widget.p2pService,
       );
     }
 
@@ -481,21 +483,27 @@ class _ChatListPageState extends State<ChatListPage>
   Widget _buildAvatar(ChatSessionSummary session) {
     return Stack(
       children: [
-        CircleAvatar(
-          radius: 24,
-          backgroundColor: session.isOnline
-              ? ResQLinkTheme.safeGreen
-              : ResQLinkTheme.primaryRed.withValues(alpha: 0.3),
-          child: Text(
-            session.deviceName.isNotEmpty
-                ? session.deviceName[0].toUpperCase()
-                : 'D',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-            ),
-          ),
+        FutureBuilder<String>(
+          future: _getDisplayName(session.deviceName),
+          builder: (context, snapshot) {
+            final displayName = snapshot.data ?? session.deviceName;
+            return CircleAvatar(
+              radius: 24,
+              backgroundColor: session.isOnline
+                  ? ResQLinkTheme.safeGreen
+                  : ResQLinkTheme.primaryRed.withValues(alpha: 0.3),
+              child: Text(
+                displayName.isNotEmpty
+                    ? displayName[0].toUpperCase()
+                    : 'D',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+            );
+          },
         ),
         if (session.isOnline)
           Positioned(
@@ -522,15 +530,20 @@ class _ChatListPageState extends State<ChatListPage>
         Row(
           children: [
             Expanded(
-              child: Text(
-                session.deviceName,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              child: FutureBuilder<String>(
+                future: _getDisplayName(session.deviceName),
+                builder: (context, snapshot) {
+                  return Text(
+                    snapshot.data ?? session.deviceName,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  );
+                },
               ),
             ),
             if (session.connectionType != null) ...[
@@ -739,5 +752,22 @@ class _ChatListPageState extends State<ChatListPage>
         color: Colors.white,
       ),
     );
+  }
+
+  Future<String> _getDisplayName([String? fallbackDeviceName]) async {
+    // First try to get temporary display name (for emergency mode)
+    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
+    if (tempDisplayName != null) {
+      return tempDisplayName;
+    }
+
+    // Then try to get current authenticated user name
+    final currentUser = await AuthService.getCurrentUser();
+    if (currentUser != null) {
+      return currentUser.name;
+    }
+
+    // Fallback to device name
+    return fallbackDeviceName ?? 'Unknown User';
   }
 }

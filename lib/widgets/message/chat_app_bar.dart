@@ -4,6 +4,8 @@ import '../../services/p2p/p2p_main_service.dart';
 import '../../services/p2p/p2p_base_service.dart';
 import '../../utils/resqlink_theme.dart';
 import 'chat_search_delegate.dart';
+import '../../services/auth_service.dart';
+import '../../services/temporary_identity_service.dart';
 
 class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool isChatView;
@@ -57,10 +59,15 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            selectedDeviceName ?? 'Unknown Device',
-            style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
-            maxLines: 1,
+          FutureBuilder<String>(
+            future: _getDisplayName(),
+            builder: (context, snapshot) {
+              return Text(
+                snapshot.data ?? selectedDeviceName ?? 'Unknown Device',
+                style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+                maxLines: 1,
+              );
+            },
           ),
           GestureDetector(
             onTap: () {
@@ -248,4 +255,21 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Size get preferredSize => Size.fromHeight(kToolbarHeight);
+
+  Future<String> _getDisplayName() async {
+    // First try to get temporary display name (for emergency mode)
+    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
+    if (tempDisplayName != null) {
+      return tempDisplayName;
+    }
+
+    // Then try to get current authenticated user name
+    final currentUser = await AuthService.getCurrentUser();
+    if (currentUser != null) {
+      return currentUser.name;
+    }
+
+    // Fallback to provided device name as last resort
+    return selectedDeviceName ?? 'Unknown Device';
+  }
 }

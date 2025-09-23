@@ -283,7 +283,7 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
           Expanded(
             child: Text(
               isConnected
-                  ? 'Ready to broadcast to $connectedDevices device${connectedDevices == 1 ? '' : 's'}'
+                  ? 'Ready to send to $connectedDevices connected device${connectedDevices == 1 ? '' : 's'}'
                   : 'No connections - messages will be queued',
               style: TextStyle(
                 color: isConnected ? ResQLinkTheme.safeGreen : ResQLinkTheme.offlineGray,
@@ -317,8 +317,13 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
       // Call original callback if provided
       widget.onEmergencyMessage?.call(template);
 
-      // Show success feedback
-      _showSuccessSnackBar('Emergency message broadcasted');
+      // Show success feedback with device count
+      final connectedCount = widget.p2pService.connectedDevices.length;
+      final successMessage = connectedCount > 0
+          ? 'Emergency message sent to $connectedCount device${connectedCount == 1 ? '' : 's'}'
+          : 'Emergency message queued for delivery';
+
+      _showSuccessSnackBar(successMessage);
 
       // Stop pulse animation after delay
       if (template == EmergencyTemplate.sos) {
@@ -346,13 +351,36 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
         ? MessageType.sos
         : MessageType.emergency;
 
-    // Broadcast to all connected devices
-    await widget.p2pService.sendMessage(
-      message: messageText,
-      type: messageType,
-      targetDeviceId: 'broadcast',
-      senderName: widget.p2pService.userName ?? 'Emergency Broadcast',
-    );
+    final connectedDevices = widget.p2pService.connectedDevices;
+    final senderName = widget.p2pService.userName ?? 'Emergency User';
+
+    if (connectedDevices.isEmpty) {
+      debugPrint('⚠️ No connected devices - emergency message will be queued');
+      // Still attempt to send in case there are background connections
+      await widget.p2pService.sendMessage(
+        message: messageText,
+        type: messageType,
+        senderName: senderName,
+      );
+      return;
+    }
+
+    // Send to all connected devices individually
+    debugPrint('📢 Broadcasting emergency message to ${connectedDevices.length} connected devices');
+
+    for (final deviceId in connectedDevices.keys) {
+      try {
+        await widget.p2pService.sendMessage(
+          message: messageText,
+          type: messageType,
+          targetDeviceId: deviceId, // CRITICAL: Target specific device
+          senderName: senderName, // CRITICAL: Include actual sender name
+        );
+        debugPrint('✅ Emergency message sent to device: $deviceId');
+      } catch (e) {
+        debugPrint('❌ Failed to send emergency message to $deviceId: $e');
+      }
+    }
   }
 
   String _getEmergencyMessage(EmergencyTemplate template) {
