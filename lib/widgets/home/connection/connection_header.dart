@@ -25,6 +25,8 @@ class ConnectionHeader extends StatelessWidget {
           _buildStatusIcon(context),
           SizedBox(width: ResponsiveHelper.getContentSpacing(context)),
           Expanded(child: _buildStatusText(context)),
+          if (controller.p2pService.hotspotService.isEnabled)
+            _buildHotspotIndicator(context),
         ],
       ),
     );
@@ -84,8 +86,12 @@ class ConnectionHeader extends StatelessWidget {
   }
 
   String _getConnectionStatusText() {
-    if (controller.p2pService.isHotspotEnabled) {
-      return 'Hosting hotspot - ${controller.p2pService.connectedDevices.length} connected';
+    final hotspotService = controller.p2pService.hotspotService;
+
+    if (hotspotService.isEnabled) {
+      final clientCount = hotspotService.connectedClients.length;
+      final ssid = hotspotService.currentSSID ?? 'ResQLink';
+      return 'Hosting "$ssid" - $clientCount client${clientCount == 1 ? '' : 's'}';
     }
 
     if (controller.p2pService.wifiDirectService?.connectionState ==
@@ -102,5 +108,40 @@ class ConnectionHeader extends StatelessWidget {
     }
 
     return 'Ready to connect';
+  }
+
+  Widget _buildHotspotIndicator(BuildContext context) {
+    final hotspotService = controller.p2pService.hotspotService;
+    final clientCount = hotspotService.connectedClients.length;
+
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.orange.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.wifi_tethering,
+            color: Colors.orange,
+            size: 16,
+          ),
+          SizedBox(width: 4),
+          Text(
+            '$clientCount',
+            style: TextStyle(
+              color: Colors.orange,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

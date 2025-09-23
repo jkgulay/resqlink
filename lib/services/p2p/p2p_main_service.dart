@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:resqlink/features/database/repositories/chat_repository.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_discovery_service.dart';
@@ -12,10 +12,10 @@ import '../../services/hotspot_service.dart';
 import 'p2p_base_service.dart';
 import 'p2p_network_service.dart';
 import '../connection_fallback.dart';
-import '../hotspot_manager.dart';
 import '../chat/chat_navigation_service.dart';
 import '../../services/p2p/protocols/socket_protocol.dart';
-import '../../services/messaging/message_router.dart';
+import '../messaging/message_router.dart';
+import '../../features/chat/services/message_queue_service.dart';
 
 /// Main P2P service that orchestrates all P2P operations
 class P2PMainService extends P2PBaseService {
@@ -23,7 +23,6 @@ class P2PMainService extends P2PBaseService {
   late P2PNetworkService _networkService;
   late P2PDiscoveryService _discoveryService;
   late ConnectionFallbackManager _connectionFallbackManager;
-  late HotspotManager _hotspotManager;
   WiFiDirectService? _wifiDirectService;
   late HotspotService _hotspotService;
 
@@ -31,6 +30,7 @@ class P2PMainService extends P2PBaseService {
   late SocketProtocol _socketProtocol;
   late MessageRouter _messageRouter;
   late ChatNavigationService _chatNavigationService;
+  late MessageQueueService _messageQueueService;
 
   // Enhanced state
   bool _hotspotCreationInProgress = false;
@@ -67,19 +67,6 @@ class P2PMainService extends P2PBaseService {
       _networkService = P2PNetworkService(this);
       _discoveryService = P2PDiscoveryService(this, _networkService);
 
-      // Initialize hotspot manager
-      _hotspotManager = HotspotManager(
-        wifiChannel: MethodChannel('wifi_hotspot'),
-        deviceId: deviceId,
-        startHotspotTcpServer: () async =>
-            await _networkService.setupHotspotServices(),
-        connectToHotspotTcpServer: (ssid) async =>
-            await _networkService.connectToResQLinkNetwork(ssid),
-        setCurrentRole: (role) => setRole(_parseRole(role)),
-        androidSdkVersion: 29, // You can get this dynamically if needed
-        canCreateProgrammaticHotspot: true,
-      );
-
       // Initialize connection fallback manager
       _connectionFallbackManager = ConnectionFallbackManager(
         performDiscoveryScan: () => discoverDevices(force: true),
@@ -106,10 +93,24 @@ class P2PMainService extends P2PBaseService {
       _socketProtocol = SocketProtocol();
       _socketProtocol.initialize(deviceId!, userName);
 
+      // CRITICAL: Set callback for device connections
+      _socketProtocol.onDeviceConnected = (deviceId, userName) {
+        debugPrint('🔗 Device connected via SocketProtocol: $userName ($deviceId)');
+        addConnectedDevice(deviceId, userName);
+        onDeviceConnected?.call(deviceId, userName);
+      };
+
       _messageRouter = MessageRouter();
       _messageRouter.setGlobalListener(_handleGlobalMessage);
 
       _chatNavigationService = ChatNavigationService();
+
+      // Initialize enhanced message queue service
+      _messageQueueService = MessageQueueService();
+      await _messageQueueService.initialize();
+
+      // Connect P2P service to message queue
+      MessageQueueService.setP2PService(this);
 
       // Setup WiFi Direct state synchronization
       if (_wifiDirectService != null) {
@@ -132,19 +133,8 @@ class P2PMainService extends P2PBaseService {
 
   ConnectionFallbackManager get connectionFallbackManager =>
       _connectionFallbackManager;
-  HotspotManager get hotspotManager => _hotspotManager;
   WiFiDirectService? get wifiDirectService => _wifiDirectService;
   HotspotService get hotspotService => _hotspotService;
-  P2PRole _parseRole(String role) {
-    switch (role.toLowerCase()) {
-      case 'host':
-        return P2PRole.host;
-      case 'client':
-        return P2PRole.client;
-      default:
-        return P2PRole.none;
-    }
-  }
 
   void _setupWiFiDirectSync() {
     _wifiDirectService?.connectionStream.listen((connectionState) {
@@ -401,9 +391,14 @@ class P2PMainService extends P2PBaseService {
       if (isGroupOwner) {
         debugPrint('👑 Starting socket server as group owner');
         await _socketProtocol.startServer();
-      } else {
+      } else if (groupOwnerAddress.isNotEmpty) {
+        // Add this check to ensure we have a valid address
         debugPrint('📱 Connecting to socket server at: $groupOwnerAddress');
         await _socketProtocol.connectToServer(groupOwnerAddress);
+      } else {
+        debugPrint('⚠️ Cannot connect - no group owner address provided');
+        _addMessageTrace('Socket connection failed: no group owner address');
+        return;
       }
 
       // Update connection mode and status
@@ -416,7 +411,7 @@ class P2PMainService extends P2PBaseService {
 
       debugPrint('✅ Socket protocol fully established and ready');
     } catch (e) {
-      debugPrint('❌ Failed to initialize socket protocol: $e');
+      debugPrint('❌ Socket protocol error: $e');
       _addMessageTrace('Socket protocol initialization failed: $e');
     }
 
@@ -448,23 +443,14 @@ class P2PMainService extends P2PBaseService {
     try {
       debugPrint('📨 Processing WiFi Direct message: $message from: $from');
 
-      // Try to parse as JSON message
-      final messageData = Map<String, dynamic>.from(json.decode(message));
+      // Route through MessageRouter instead of direct handling
+      await _messageRouter.routeRawMessage(message, from ?? 'unknown');
 
-      // Extract sender device ID
-      final senderDeviceId =
-          messageData['deviceId'] as String? ?? from ?? 'unknown';
-
-      debugPrint('📍 Message from device: $senderDeviceId');
-
-      // Route message through message router for intelligent handling
-      _messageRouter.routeRawMessage(messageData as String, senderDeviceId);
-
-      _addMessageTrace('WiFi Direct message routed: ${messageData['message']}');
+      _addMessageTrace('WiFi Direct message routed successfully');
       debugPrint('✅ WiFi Direct message routed successfully via MessageRouter');
     } catch (e) {
-      debugPrint('❌ Failed to process WiFi Direct message: $e');
-      _addMessageTrace('Failed to process WiFi Direct message: $e');
+      debugPrint('❌ Error routing message: $e');
+      _addMessageTrace('Failed to route message: $e');
 
       // Fallback to direct processing if routing fails
       try {
@@ -1235,6 +1221,35 @@ class P2PMainService extends P2PBaseService {
         'longitude': longitude,
       });
 
+      // Check if connected, otherwise queue the message
+      if (!isConnected) {
+        debugPrint('📥 Device not connected, queuing message for later delivery');
+
+        // Queue message for later delivery with enhanced service
+        final sessionId = await _getOrCreateChatSession(targetDeviceId ?? 'broadcast', actualSenderName);
+        await _messageQueueService.queueMessage(
+          sessionId: sessionId,
+          deviceId: targetDeviceId ?? 'broadcast',
+          message: message,
+          type: type,
+          metadata: {
+            'senderName': actualSenderName,
+            'latitude': latitude,
+            'longitude': longitude,
+          },
+          priority: type == MessageType.emergency || type == MessageType.sos ? 2 : 0,
+        );
+
+        // Update status to pending
+        await MessageRepository.updateMessageStatus(
+          messageModel.messageId!,
+          MessageStatus.pending,
+        );
+
+        _addMessageTrace('Message queued: ${messageModel.messageId}');
+        return;
+      }
+
       // Send via appropriate protocol based on connection mode
       bool success = false;
 
@@ -1262,8 +1277,28 @@ class P2PMainService extends P2PBaseService {
           'Message sent successfully: ${messageModel.messageId}',
         );
       } else {
-        debugPrint('❌ Primary send failed, falling back to network service');
-        await _networkService.broadcastMessage(messageModel);
+        debugPrint('❌ Primary send failed, queuing message for retry');
+
+        // Queue message for retry if primary send fails with enhanced service
+        final sessionId = await _getOrCreateChatSession(targetDeviceId ?? 'broadcast', actualSenderName);
+        await _messageQueueService.queueMessage(
+          sessionId: sessionId,
+          deviceId: targetDeviceId ?? 'broadcast',
+          message: message,
+          type: type,
+          metadata: {
+            'senderName': actualSenderName,
+            'latitude': latitude,
+            'longitude': longitude,
+          },
+          priority: type == MessageType.emergency || type == MessageType.sos ? 2 : 0,
+        );
+
+        // Update status to pending for retry
+        await MessageRepository.updateMessageStatus(
+          messageModel.messageId!,
+          MessageStatus.pending,
+        );
       }
 
       debugPrint('✅ Message processing completed');
@@ -1271,6 +1306,21 @@ class P2PMainService extends P2PBaseService {
       _addMessageTrace('Message send failed: $e');
       debugPrint('❌ Message send failed: $e');
       rethrow;
+    }
+  }
+
+  /// Helper method to get or create chat session for queue operations
+  Future<String> _getOrCreateChatSession(String deviceId, String deviceName) async {
+    try {
+      return await ChatRepository.createOrUpdate(
+        deviceId: deviceId,
+        deviceName: deviceName,
+        currentUserId: this.deviceId,
+      );
+    } catch (e) {
+      debugPrint('❌ Error creating chat session: $e');
+      // Return a fallback session ID
+      return 'session_${deviceId}_${DateTime.now().millisecondsSinceEpoch}';
     }
   }
 
@@ -1343,14 +1393,21 @@ ${_messageTrace.take(5).join('\n')}
   }
 
   @override
-  void dispose() {
+  void dispose() async {
     debugPrint('🗑️ P2P Main Service disposing...');
 
     _hotspotVerificationTimer?.cancel();
 
     _networkService.dispose();
     _discoveryService.dispose();
-    _connectionFallbackManager.dispose(); // Add this
+    _connectionFallbackManager.dispose();
+    _messageQueueService.dispose();
+
+    // Stop hotspot and dispose service
+    if (_isHotspotEnabled) {
+      await _hotspotService.stopHotspot();
+    }
+    _hotspotService.dispose();
 
     _messageTrace.clear();
 
@@ -1384,6 +1441,9 @@ ${_messageTrace.take(5).join('\n')}
 
   /// Get chat navigation service for external access
   ChatNavigationService get chatNavigationService => _chatNavigationService;
+
+  /// Get enhanced message queue service for external access
+  MessageQueueService get messageQueueService => _messageQueueService;
 }
 
 // Backwards compatibility typedef

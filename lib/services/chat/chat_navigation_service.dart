@@ -28,6 +28,7 @@ class ChatNavigationService {
     _context = context;
     _p2pService = p2pService;
     _setupConnectionListener();
+    _setupMessageRouterIntegration();
   }
 
   void dispose() {
@@ -48,6 +49,15 @@ class ChatNavigationService {
     _p2pService?.onDeviceDisconnected = _onDeviceDisconnected;
   }
 
+  void _setupMessageRouterIntegration() {
+    if (_p2pService?.messageRouter == null) return;
+
+    // Set up message routing for navigation decisions
+    _p2pService!.messageRouter.setGlobalListener(_handleIncomingMessage);
+
+    debugPrint('🧭 ChatNavigationService integrated with MessageRouter');
+  }
+
   Future<void> navigateToDeviceChat(
     BuildContext context,
     Map<String, dynamic> device,
@@ -59,30 +69,35 @@ class ChatNavigationService {
       return;
     }
 
+    final deviceId =
+        device['deviceId'] as String? ??
+        device['deviceAddress'] as String? ??
+        'unknown';
+    final deviceName = device['deviceName'] as String? ?? 'Unknown Device';
+
+    // Check if we're already in a chat with this device
+    final currentRoute = ModalRoute.of(context)?.settings.name;
+    if (currentRoute == '/chat_session' && _currentDeviceId == deviceId) {
+      debugPrint('Already in chat with $deviceName');
+      return;
+    }
+
     _isNavigating = true;
 
     try {
-      final deviceId =
-          device['deviceId'] as String? ??
-          device['deviceAddress'] as String? ??
-          'unknown';
-      final deviceName = device['deviceName'] as String? ?? 'Unknown Device';
-
-      if (_currentChatSessionId == deviceId &&
-          ModalRoute.of(context)?.settings.name == '/chat_session') {
-        debugPrint('👀 Already in chat with $deviceName');
-        _isNavigating = false;
-        return;
-      }
 
       ChatSession? session = await ChatRepository.getSessionByDeviceId(
         deviceId,
       );
 
       _currentChatSessionId = session?.id;
-      _activeChatSessions[session!.id] = true;
+      _currentDeviceId = deviceId;
+      if (session != null) {
+        _activeChatSessions[session.id] = true;
+        _sessionToDeviceMap[session.id] = deviceId;
+      }
 
-      if (context.mounted) {
+      if (context.mounted && session != null) {
         await Navigator.push(
           context,
           MaterialPageRoute(
@@ -98,8 +113,9 @@ class ChatNavigationService {
 
         // Clear current session on pop
         _currentChatSessionId = null;
+        _currentDeviceId = null;
         _activeChatSessions[session.id] = false;
-      }
+            }
     } catch (e) {
       debugPrint('❌ Error navigating to chat: $e');
     } finally {
@@ -524,5 +540,98 @@ class ChatNavigationService {
     _sessionToDeviceMap.clear();
     _isNavigating = false;
     debugPrint('🧹 Chat navigation state cleared');
+  }
+
+  /// Handle incoming messages for navigation decisions
+  void _handleIncomingMessage(MessageModel message) {
+    if (!_autoNavigateEnabled || _context == null) return;
+
+    // If message is from an unknown device and is an emergency, show notification
+    if (message.isEmergency && !_activeChatSessions.containsValue(true)) {
+      _showEmergencyNotification(message);
+    }
+
+    // If we're not currently in a chat with this device, show message notification
+    if (message.deviceId != null &&
+        !isChattingWithDevice(message.deviceId!) &&
+        !message.isMe) {
+      _showMessageNotification(message);
+    }
+  }
+
+  void _showEmergencyNotification(MessageModel message) {
+    if (_context == null) return;
+
+    ScaffoldMessenger.of(_context!).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.emergency, color: Colors.white, size: 20),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '🚨 Emergency from ${message.fromUser}: ${message.message}',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.red[700],
+        duration: Duration(seconds: 5),
+        action: SnackBarAction(
+          label: 'RESPOND',
+          textColor: Colors.white,
+          onPressed: () async {
+            if (message.deviceId != null) {
+              await createAndNavigateToChat(
+                _context!,
+                message.deviceId!,
+                message.fromUser,
+                _p2pService!,
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showMessageNotification(MessageModel message) {
+    if (_context == null) return;
+
+    ScaffoldMessenger.of(_context!).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.message, color: Colors.white, size: 20),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Message from ${message.fromUser}: ${message.message}',
+                style: TextStyle(color: Colors.white),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.blue[700],
+        duration: Duration(seconds: 3),
+        action: SnackBarAction(
+          label: 'OPEN',
+          textColor: Colors.white,
+          onPressed: () async {
+            if (message.deviceId != null) {
+              await createAndNavigateToChat(
+                _context!,
+                message.deviceId!,
+                message.fromUser,
+                _p2pService!,
+              );
+            }
+          },
+        ),
+      ),
+    );
   }
 }

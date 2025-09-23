@@ -786,6 +786,70 @@ Future<void> _onAppResumed() async {
       ),
     );
 
+    // Hotspot Status Indicator
+    if (_p2pService.hotspotService.isEnabled) {
+      actions.add(
+        Container(
+          margin: EdgeInsets.only(right: isNarrowScreen ? 4 : 8),
+          padding: EdgeInsets.symmetric(
+            horizontal: isNarrowScreen ? 8 : 12,
+            vertical: isNarrowScreen ? 4 : 6,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.orange,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.orange.withValues(alpha: 0.3),
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.wifi_tethering,
+                size: isNarrowScreen ? 10 : 12,
+                color: Colors.white,
+              ),
+              if (!isNarrowScreen ||
+                  MediaQuery.of(context).size.width > 400) ...[
+                SizedBox(width: 3),
+                Text(
+                  isNarrowScreen ? 'AP' : 'HOTSPOT',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: isNarrowScreen ? 10 : 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+              if (_p2pService.hotspotService.connectedClients.isNotEmpty) ...[
+                SizedBox(width: 4),
+                Container(
+                  padding: EdgeInsets.all(isNarrowScreen ? 2 : 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '${_p2pService.hotspotService.connectedClients.length}',
+                    style: TextStyle(
+                      color: Colors.orange,
+                      fontSize: isNarrowScreen ? 8 : 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
     // Online/Offline Status
     actions.add(
       Padding(

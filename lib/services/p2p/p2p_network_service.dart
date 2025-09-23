@@ -440,6 +440,14 @@ class P2PNetworkService {
       if (connected) {
         debugPrint('✅ Connected to: $ssid');
 
+        // Get gateway IP (usually the hotspot host)
+        final gatewayIp = await getGatewayIP();
+
+        if (gatewayIp != null) {
+          // Connect socket to hotspot server
+          await _connectToHotspotServer(gatewayIp);
+        }
+
         // Try to establish P2P connection
         await _establishP2PConnection();
         return true;
@@ -501,6 +509,77 @@ class P2PNetworkService {
   void stopPeriodicScanning() {
     _hotspotScanTimer?.cancel();
     _hotspotScanTimer = null;
+  }
+
+  /// Get gateway IP address
+  Future<String?> getGatewayIP() async {
+    try {
+      // Common gateway IPs for mobile hotspots
+      final commonGateways = ['192.168.43.1', '192.168.4.1', '10.0.0.1'];
+
+      for (final gateway in commonGateways) {
+        try {
+          // Try to ping the gateway
+          final result = await InternetAddress.lookup(gateway);
+          if (result.isNotEmpty) {
+            debugPrint('🌐 Found gateway at: $gateway');
+            return gateway;
+          }
+        } catch (e) {
+          // Continue to next gateway
+          continue;
+        }
+      }
+
+      debugPrint('⚠️ No gateway IP found');
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error getting gateway IP: $e');
+      return null;
+    }
+  }
+
+  Future<void> _connectToHotspotServer(String serverIp) async {
+    try {
+      final socket = await Socket.connect(
+        serverIp,
+        P2PBaseService.tcpPort, // Use the default port
+        timeout: Duration(seconds: 5),
+      );
+
+      _deviceSockets[serverIp] = socket;
+
+      // Handle incoming messages
+      socket.listen(
+        (data) => _handleSocketMessage(utf8.decode(data), serverIp),
+        onError: (e) => debugPrint('Socket error: $e'),
+        onDone: () => _deviceSockets.remove(serverIp),
+      );
+
+      debugPrint('✅ Connected to hotspot server at $serverIp');
+    } catch (e) {
+      debugPrint('❌ Failed to connect to hotspot server: $e');
+    }
+  }
+
+  /// Handle incoming messages from sockets
+  void _handleSocketMessage(String message, String fromDevice) {
+    try {
+      debugPrint('📨 Received message from $fromDevice: $message');
+
+      // Parse and forward to base service
+      final messageData = jsonDecode(message);
+      if (messageData['type'] == 'message') {
+        // Create message model and save
+        final messageModel = MessageModel.fromJson(messageData);
+        _baseService.saveMessageToHistory(messageModel);
+
+        // Notify listeners
+        _baseService.onMessageReceived?.call(messageModel);
+      }
+    } catch (e) {
+      debugPrint('❌ Error processing incoming message: $e');
+    }
   }
 
   /// Get network status

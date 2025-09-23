@@ -77,6 +77,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _initialize();
     _initializeOfflineQueue();
+    _setupMessageRouterListener();
   }
 
   @override
@@ -84,7 +85,12 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     _refreshTimer?.cancel();
     _typingTimer?.cancel();
     _queueProcessingTimer?.cancel();
-    
+
+    // Unregister MessageRouter listener
+    if (_selectedEndpointId != null) {
+      widget.p2pService.messageRouter.unregisterDeviceListener(_selectedEndpointId!);
+    }
+
     try {
       _syncService.dispose();
       widget.p2pService.removeListener(_onP2PUpdate);
@@ -131,6 +137,24 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       debugPrint('❌ Error initializing MessagePage: $e');
       if (mounted) {
         setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  void _setupMessageRouterListener() {
+    // Set up global listener for message updates
+    widget.p2pService.messageRouter.setGlobalListener(_onRouterMessage);
+    debugPrint('📱 MessagePage registered MessageRouter global listener');
+  }
+
+  void _onRouterMessage(dynamic message) {
+    // Refresh conversations when any message is received
+    if (mounted) {
+      _loadConversations();
+
+      // If we're in a specific conversation, refresh that too
+      if (_isChatView && _selectedEndpointId != null) {
+        _loadMessagesForDevice(_selectedEndpointId!);
       }
     }
   }
@@ -709,6 +733,19 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   void selectDevice(String deviceId, String deviceName) {
     _openConversation(deviceId, deviceName);
+
+    // Register MessageRouter listener for this specific device
+    widget.p2pService.messageRouter.registerDeviceListener(
+      deviceId,
+      _onDeviceMessage,
+    );
+  }
+
+  void _onDeviceMessage(dynamic message) {
+    // Handle real-time messages for the selected device
+    if (mounted && _selectedEndpointId != null) {
+      _loadMessagesForDevice(_selectedEndpointId!);
+    }
   }
 
   void _scrollToBottom() {
