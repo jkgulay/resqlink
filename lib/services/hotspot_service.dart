@@ -119,9 +119,8 @@ class HotspotService {
         return false;
       }
 
-      // Generate SSID and password if not provided
       final hotspotSSID = ssid ?? 'ResQLink_${DateTime.now().millisecondsSinceEpoch}';
-      final hotspotPassword = password ?? 'RESQLINK911';
+      final hotspotPassword = password ?? 'resqlink911';
 
       debugPrint('📶 Creating hotspot: $hotspotSSID');
 
@@ -168,7 +167,7 @@ class HotspotService {
 
       // Generate SSID and password if not provided
       final hotspotSSID = ssid ?? 'ResQLink_${DateTime.now().millisecondsSinceEpoch}';
-      final hotspotPassword = password ?? 'RESQLINK911';
+      final hotspotPassword = password ?? 'resqlink911';
 
       debugPrint('📶 Creating legacy hotspot: $hotspotSSID');
 
@@ -212,14 +211,24 @@ class HotspotService {
       await initialize();
     }
 
+    // Try legacy method first to preserve custom SSID, then fall back to modern
+    if (!forceLegacy) {
+      debugPrint('🔧 Trying legacy method first to preserve custom SSID...');
+      final legacySuccess = await createLegacyHotspot(ssid: ssid, password: password);
+      if (legacySuccess) {
+        debugPrint('✅ Legacy hotspot created with custom SSID');
+        return true;
+      }
+      debugPrint('⚠️ Legacy hotspot failed, trying modern method (will use system-generated SSID)...');
+    }
+
     if (forceLegacy) {
       return await createLegacyHotspot(ssid: ssid, password: password);
     } else {
-      // Try modern method first, fall back to legacy
+      // Try modern method as fallback (will use Android-generated SSID)
       final success = await createLocalOnlyHotspot(ssid: ssid, password: password);
-      if (!success) {
-        debugPrint('⚠️ Modern hotspot failed, trying legacy method...');
-        return await createLegacyHotspot(ssid: ssid, password: password);
+      if (success) {
+        debugPrint('⚠️ Using system-generated hotspot name (Android limitation)');
       }
       return success;
     }

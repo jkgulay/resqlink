@@ -31,18 +31,18 @@ class HotspotPlugin: FlutterPlugin, MethodChannel.MethodCallHandler {
         when (call.method) {
             "createHotspot" -> {
                 val ssid = call.argument<String>("ssid") ?: "ResQLink_Emergency"
-                val password = call.argument<String>("password") ?: "RESQLINK911"
+                val password = call.argument<String>("password") ?: "resqlink911"
                 val force = call.argument<Boolean>("force") ?: false
                 createHotspot(ssid, password, force, result)
             }
             "createLocalOnlyHotspot" -> {
                 val ssid = call.argument<String>("ssid") ?: "ResQLink_Emergency"
-                val password = call.argument<String>("password") ?: "RESQLINK911"
+                val password = call.argument<String>("password") ?: "resqlink911"
                 createLocalOnlyHotspot(ssid, password, result)
             }
             "createLegacyHotspot" -> {
                 val ssid = call.argument<String>("ssid") ?: "ResQLink_Emergency"
-                val password = call.argument<String>("password") ?: "RESQLINK911"
+                val password = call.argument<String>("password") ?: "resqlink911"
                 createLegacyHotspot(ssid, password, result)
             }
             "isHotspotEnabled" -> {

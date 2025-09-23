@@ -264,6 +264,10 @@ class SettingsPageState extends State<SettingsPage> {
                 widget.p2pService?.hotspotService.currentSSID ?? 'Unknown',
               ),
               _buildInfoRow(
+                'Hotspot Password',
+                widget.p2pService?.hotspotService.currentPassword ?? 'resqlink911',
+              ),
+              _buildInfoRow(
                 'Hotspot Clients',
                 '${widget.p2pService?.hotspotService.connectedClients.length ?? 0}',
               ),
@@ -376,11 +380,32 @@ class SettingsPageState extends State<SettingsPage> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message, style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(
+          message,
+          style: TextStyle(fontWeight: FontWeight.bold),
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
+        ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 3),
+        duration: Duration(seconds: 5),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        action: message.contains('Password:') ? SnackBarAction(
+          label: 'COPY',
+          textColor: Colors.white,
+          onPressed: () {
+            final lines = message.split('\n');
+            final passwordLine = lines.firstWhere(
+              (line) => line.contains('Password:'),
+              orElse: () => '',
+            );
+            if (passwordLine.isNotEmpty) {
+              final password = passwordLine.split('Password: ').last;
+              Clipboard.setData(ClipboardData(text: password));
+              HapticFeedback.lightImpact();
+            }
+          },
+        ) : null,
       ),
     );
   }
@@ -1391,6 +1416,27 @@ class SettingsPageState extends State<SettingsPage> {
                     'SSID: ${hotspotService?.currentSSID ?? 'Unknown'}',
                     style: TextStyle(color: Colors.white, fontSize: 14),
                   ),
+                  Row(
+                    children: [
+                      Text(
+                        'Password: ${hotspotService?.currentPassword ?? 'resqlink911'}',
+                        style: TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                      SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () {
+                          final password = hotspotService?.currentPassword ?? 'resqlink911';
+                          HapticFeedback.lightImpact();
+                          Clipboard.setData(ClipboardData(text: password));
+                          _showMessage('Password copied to clipboard', isSuccess: true);
+                        },
+                        icon: Icon(Icons.copy, color: ResQLinkTheme.orange, size: 16),
+                        tooltip: 'Copy password',
+                        padding: EdgeInsets.all(4),
+                        constraints: BoxConstraints(minWidth: 24, minHeight: 24),
+                      ),
+                    ],
+                  ),
                   Text(
                     'Connected clients: ${connectedClients.length}',
                     style: TextStyle(color: Colors.white70, fontSize: 12),
@@ -1411,37 +1457,85 @@ class SettingsPageState extends State<SettingsPage> {
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: Column(
               children: [
-                Row(
+                Column(
                   children: [
-                    Expanded(
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: isHotspotEnabled
+                                ? null
+                                : _createManualHotspot,
+                            icon: Icon(Icons.wifi_tethering, size: 18),
+                            label: Text('Create Hotspot'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isHotspotEnabled
+                                  ? Colors.grey.shade800
+                                  : ResQLinkTheme.orange,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: isHotspotEnabled ? _stopManualHotspot : null,
+                            icon: Icon(Icons.wifi_tethering_off, size: 18),
+                            label: Text('Stop Hotspot'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isHotspotEnabled
+                                  ? ResQLinkTheme.primaryRed
+                                  : Colors.grey.shade800,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
                       child: ElevatedButton.icon(
                         onPressed: isHotspotEnabled
                             ? null
-                            : _createManualHotspot,
-                        icon: Icon(Icons.wifi_tethering, size: 18),
-                        label: Text('Create Hotspot'),
+                            : _createLegacyHotspot,
+                        icon: Icon(Icons.settings_input_antenna, size: 18),
+                        label: Text('Create with Custom Name (Legacy)'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: isHotspotEnabled
                               ? Colors.grey.shade800
-                              : ResQLinkTheme.orange,
+                              : Colors.purple.shade700,
                           foregroundColor: Colors.white,
                           padding: EdgeInsets.symmetric(vertical: 12),
                         ),
                       ),
                     ),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: isHotspotEnabled ? _stopManualHotspot : null,
-                        icon: Icon(Icons.wifi_tethering_off, size: 18),
-                        label: Text('Stop Hotspot'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: isHotspotEnabled
-                              ? ResQLinkTheme.primaryRed
-                              : Colors.grey.shade800,
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                        ),
+                    SizedBox(height: 8),
+                    Container(
+                      padding: EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade900.withAlpha(76),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade600, width: 1),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline, color: Colors.blue.shade300, size: 20),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Note: Modern Android may use system-generated names like "AndroidShare" for security. Use Legacy mode to force custom ResQLink names.',
+                              style: TextStyle(
+                                color: Colors.blue.shade300,
+                                fontSize: 12,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -1537,7 +1631,9 @@ class SettingsPageState extends State<SettingsPage> {
       setState(() => _isLoading = false);
 
       if (success) {
-        _showMessage('Hotspot created successfully', isSuccess: true);
+        final password = widget.p2pService!.hotspotService.currentPassword ?? 'resqlink911';
+        final ssid = widget.p2pService!.hotspotService.currentSSID ?? 'Unknown';
+        _showMessage('Hotspot created successfully!\nSSID: $ssid\nPassword: $password', isSuccess: true);
       } else {
         _showMessage('Failed to create hotspot', isDanger: true);
       }
@@ -1546,6 +1642,35 @@ class SettingsPageState extends State<SettingsPage> {
     } catch (e) {
       setState(() => _isLoading = false);
       _showMessage('Error creating hotspot: $e', isDanger: true);
+    }
+  }
+
+  Future<void> _createLegacyHotspot() async {
+    if (widget.p2pService == null) return;
+
+    try {
+      setState(() => _isLoading = true);
+      _showMessage('Creating legacy hotspot with custom name...', isSuccess: false);
+
+      // Force legacy hotspot creation to preserve custom SSID
+      final success = await widget.p2pService!.hotspotService.createHotspot(
+        forceLegacy: true,
+      );
+
+      setState(() => _isLoading = false);
+
+      if (success) {
+        final password = widget.p2pService!.hotspotService.currentPassword ?? 'resqlink911';
+        final ssid = widget.p2pService!.hotspotService.currentSSID ?? 'ResQLink_${DateTime.now().millisecondsSinceEpoch}';
+        _showMessage('Legacy hotspot created!\nSSID: $ssid\nPassword: $password\nNote: Custom name preserved', isSuccess: true);
+      } else {
+        _showMessage('Failed to create legacy hotspot. Your device may not support this method.', isDanger: true);
+      }
+
+      setState(() {}); // Refresh UI
+    } catch (e) {
+      setState(() => _isLoading = false);
+      _showMessage('Legacy hotspot error: $e', isDanger: true);
     }
   }
 

@@ -10,7 +10,7 @@ import '../../models/device_model.dart';
 abstract class P2PBaseService with ChangeNotifier {
   // Constants
   static const String resqlinkPrefix = "ResQLink_";
-  static const String emergencyPassword = "RESQLINK911";
+  static const String emergencyPassword = "resqlink911";
   static const int defaultPort = 8080;
   static const int tcpPort = 8888;
   static const Duration messageExpiry = Duration(hours: 24);

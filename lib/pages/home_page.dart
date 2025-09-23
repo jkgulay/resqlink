@@ -414,7 +414,6 @@ Future<void> _onAppResumed() async {
   void _onDeviceConnected(String deviceId, String userName) {
     debugPrint("✅ Device connected: $userName ($deviceId)");
     if (mounted) {
-      // Show connection notification with action to view chat
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -430,13 +429,12 @@ Future<void> _onAppResumed() async {
             label: 'VIEW CHAT',
             textColor: Colors.white,
             onPressed: () {
-              setState(() => selectedIndex = 2); // Navigate to Messages tab
+              setState(() => selectedIndex = 2);
             },
           ),
         ),
       );
 
-      // Auto-navigate to Messages tab after a short delay
       Timer(Duration(seconds: 1), () {
         if (mounted) {
           setState(() => selectedIndex = 2);
@@ -878,13 +876,7 @@ Future<void> _onAppResumed() async {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    // Update message page with current location
-    if (selectedIndex == 2 && pages.length > 2) {
-      pages[2] = MessagePage(
-        p2pService: _p2pService,
-        currentLocation: _homeController.currentLocation,
-      );
-    }
+    // Message page is created once in initState and reused
 
     final mainArea = ColoredBox(
       color: colorScheme.surfaceContainerHighest,
