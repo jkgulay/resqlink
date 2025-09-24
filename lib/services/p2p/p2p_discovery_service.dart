@@ -141,7 +141,7 @@ class P2PDiscoveryService {
           final device = DeviceModel(
             id: deviceId,
             deviceId: deviceId,
-            userName: "User_$deviceId",
+            userName: "Device_$deviceId", // Use a more user-friendly placeholder name
             isHost: false,
             isOnline: false,
             lastSeen: DateTime.now(),

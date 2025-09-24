@@ -4,8 +4,6 @@ import '../services/p2p/p2p_main_service.dart';
 import '../pages/chat_session_page.dart';
 import '../pages/message_page.dart';
 import '../models/chat_session_model.dart';
-import '../services/auth_service.dart';
-import '../services/temporary_identity_service.dart';
 
 class ChatNavigationHelper {
   static final ChatNavigationHelper _instance =
@@ -571,21 +569,8 @@ class ChatNavigationHelper {
     );
   }
 
-  /// Get display name with fallback to device name
   static Future<String> _getDisplayName([String? fallbackDeviceName]) async {
-    // First try to get temporary display name (for emergency mode)
-    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
-    if (tempDisplayName != null) {
-      return tempDisplayName;
-    }
-
-    // Then try to get current authenticated user name
-    final currentUser = await AuthService.getCurrentUser();
-    if (currentUser != null) {
-      return currentUser.name;
-    }
-
-    // Fallback to device name
+    // Return the device's name directly - this is for displaying OTHER devices in navigation
     return fallbackDeviceName ?? 'Unknown Device';
   }
 
