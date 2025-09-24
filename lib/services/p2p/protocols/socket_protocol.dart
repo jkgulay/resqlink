@@ -197,10 +197,13 @@ class SocketProtocol {
     if (deviceId != null) {
       _deviceSockets[deviceId] = socket;
 
+      debugPrint('🤝 Device connected: $userName ($deviceId)');
+      debugPrint('📱 Total connected devices: ${_deviceSockets.length}');
+
       // CRITICAL: Notify P2P service about the connected device
       onDeviceConnected?.call(deviceId, userName ?? 'Unknown');
 
-      debugPrint('🤝 Handshake completed with $userName ($deviceId)');
+      debugPrint('✅ Handshake completed with $userName ($deviceId)');
 
       // Send acknowledgment
       final ack = jsonEncode({
@@ -212,6 +215,8 @@ class SocketProtocol {
       });
 
       _sendToSocket(socket, ack);
+    } else {
+      debugPrint('⚠️ Handshake missing deviceId');
     }
   }
 
@@ -268,14 +273,20 @@ class SocketProtocol {
   /// Send message to specific device
   Future<bool> sendMessage(String message, String? targetDeviceId) async {
     try {
+      debugPrint('📤 Attempting to send message:');
+      debugPrint('  Target: $targetDeviceId');
+      debugPrint('  Connected devices: ${_deviceSockets.keys.toList()}');
+
       // If target specified, send to specific device
       if (targetDeviceId != null &&
           _deviceSockets.containsKey(targetDeviceId)) {
+        debugPrint('✅ Sending to specific device: $targetDeviceId');
         final socket = _deviceSockets[targetDeviceId]!;
         return _sendToSocket(socket, message);
       }
 
       // Otherwise broadcast to all
+      debugPrint('📡 Broadcasting message to all devices');
       return broadcastMessage(message);
     } catch (e) {
       debugPrint('❌ Error sending message: $e');

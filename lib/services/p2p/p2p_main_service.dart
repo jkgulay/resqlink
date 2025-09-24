@@ -119,6 +119,9 @@ class P2PMainService extends P2PBaseService {
       // Setup WiFi Direct state synchronization
       if (_wifiDirectService != null) {
         _setupWiFiDirectSync();
+
+        // CRITICAL FIX: Listen to WiFi Direct message stream
+        _setupWiFiDirectMessageStream();
       }
 
       _addMessageTrace('Main service initialized with userName: $userName');
@@ -144,6 +147,27 @@ class P2PMainService extends P2PBaseService {
   void _debounceConnectionStateChange(VoidCallback callback) {
     _connectionStateDebounceTimer?.cancel();
     _connectionStateDebounceTimer = Timer(_connectionStateDebounceDelay, callback);
+  }
+
+  /// CRITICAL FIX: Setup WiFi Direct message stream listener
+  void _setupWiFiDirectMessageStream() {
+    _wifiDirectService?.messageStream.listen((messageData) {
+      debugPrint('📨 WiFi Direct message stream received: $messageData');
+
+      final messageType = messageData['type'] as String?;
+      if (messageType == 'message_received') {
+        final message = messageData['message'] as String?;
+        final from = messageData['from'] as String?;
+
+        if (message != null && from != null) {
+          _handleIncomingMessage(message, from);
+        }
+      }
+    }).onError((error) {
+      debugPrint('❌ WiFi Direct message stream error: $error');
+    });
+
+    debugPrint('✅ WiFi Direct message stream listener setup complete');
   }
 
   void _setupWiFiDirectSync() {
@@ -1537,7 +1561,6 @@ ${_messageTrace.take(5).join('\n')}
     notifyListeners();
   }
 
-  /// Generate unique message ID
   @override
   String generateMessageId() {
     final timestamp = DateTime.now().millisecondsSinceEpoch;

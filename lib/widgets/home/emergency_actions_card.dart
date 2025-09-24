@@ -354,20 +354,30 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
     final connectedDevices = widget.p2pService.connectedDevices;
     final senderName = widget.p2pService.userName ?? 'Emergency User';
 
+    debugPrint('🚨 Sending emergency message: $messageText');
+    debugPrint('📱 Connected devices: ${connectedDevices.keys.toList()}');
+
+    // CRITICAL FIX: Always try to send as broadcast if no specific devices
     if (connectedDevices.isEmpty) {
-      debugPrint('⚠️ No connected devices - emergency message will be queued');
-      // Still attempt to send in case there are background connections
-      await widget.p2pService.sendMessage(
-        message: messageText,
-        type: messageType,
-        senderName: senderName,
-      );
+      debugPrint('⚠️ No connected devices - broadcasting emergency message anyway');
+      try {
+        await widget.p2pService.sendMessage(
+          message: messageText,
+          type: messageType,
+          senderName: senderName,
+          // Try broadcast to any available connections
+        );
+        debugPrint('✅ Emergency broadcast attempted');
+      } catch (e) {
+        debugPrint('❌ Emergency broadcast failed: $e');
+      }
       return;
     }
 
-    // Send to all connected devices individually
+    // Send to all connected devices individually AND broadcast
     debugPrint('📢 Broadcasting emergency message to ${connectedDevices.length} connected devices');
 
+    // First, send targeted messages
     for (final deviceId in connectedDevices.keys) {
       try {
         await widget.p2pService.sendMessage(
@@ -380,6 +390,18 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
       } catch (e) {
         debugPrint('❌ Failed to send emergency message to $deviceId: $e');
       }
+    }
+
+    // Also send as broadcast to catch any missed connections
+    try {
+      await widget.p2pService.sendMessage(
+        message: messageText,
+        type: messageType,
+        senderName: senderName,
+      );
+      debugPrint('✅ Emergency broadcast completed');
+    } catch (e) {
+      debugPrint('❌ Emergency broadcast failed: $e');
     }
   }
 
