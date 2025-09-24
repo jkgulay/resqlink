@@ -48,7 +48,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
   // Services
   final MessageSyncService _syncService = MessageSyncService();
-  final List<Map<String, dynamic>> _offlineMessageQueue = [];
+  // Removed local offline queue - using centralized MessageQueueService instead
   Timer? _queueProcessingTimer;
 
   // State Variables
@@ -77,7 +77,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initialize();
-    _initializeOfflineQueue();
+    _initializeQueueProcessing();
     _setupMessageRouterListener();
   }
 
@@ -191,45 +191,16 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  void _initializeOfflineQueue() {
-    _queueProcessingTimer = Timer.periodic(Duration(seconds: 30), (timer) {
-      if (widget.p2pService.isConnected && _offlineMessageQueue.isNotEmpty) {
-        _processOfflineQueue();
+  void _initializeQueueProcessing() {
+    _queueProcessingTimer = Timer.periodic(Duration(seconds: 30), (timer) async {
+      if (widget.p2pService.isConnected) {
+        // Process all queued messages using centralized service
+        await widget.p2pService.messageQueueService.processAllQueues();
       }
     });
   }
 
-  Future<void> _processOfflineQueue() async {
-    if (!mounted || _offlineMessageQueue.isEmpty) return;
-
-    debugPrint('📤 Processing ${_offlineMessageQueue.length} offline messages...');
-
-    final messagesToProcess = List.from(_offlineMessageQueue);
-    _offlineMessageQueue.clear();
-
-    for (final queuedMessage in messagesToProcess) {
-      try {
-        await widget.p2pService.sendMessage(
-          message: queuedMessage['text'],
-          type: MessageType.values.firstWhere(
-            (e) => e.name == queuedMessage['type'],
-            orElse: () => MessageType.text,
-          ),
-          targetDeviceId: queuedMessage['targetId'],
-          senderName: '',
-        );
-
-        debugPrint('✅ Offline message sent: ${queuedMessage['text']}');
-      } catch (e) {
-        debugPrint('❌ Failed to send offline message: $e');
-        _offlineMessageQueue.add(queuedMessage);
-      }
-    }
-
-    if (mounted && _offlineMessageQueue.isEmpty) {
-      _showSuccessMessage('All offline messages sent!');
-    }
-  }
+  // Removed _processOfflineQueue - using centralized MessageQueueService
 
   void _onDevicesDiscovered(List<Map<String, dynamic>> devices) async {
     if (!mounted) return;

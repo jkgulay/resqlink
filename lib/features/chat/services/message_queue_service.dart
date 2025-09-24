@@ -628,9 +628,14 @@ class MessageQueueService extends ChangeNotifier {
     return List.from(_deviceQueues[deviceId] ?? []);
   }
 
-  // Public method to manually process queue for a specific device
   Future<void> processQueueForDevice(String deviceId) async {
     await _processQueueForDevice(deviceId);
+  }
+
+  /// Process all queues for all devices
+  Future<void> processAllQueues() async {
+    debugPrint('🔄 Processing all message queues');
+    await _processAllQueues();
   }
 
   // Dispose

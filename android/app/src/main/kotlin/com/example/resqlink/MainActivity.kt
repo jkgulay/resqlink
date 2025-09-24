@@ -384,7 +384,7 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
     private fun startServerSocket() {
         try {
             // Close existing server socket if any
-            serverSocket?.close()
+            cleanupServerSocket()
 
             // Try to find an available port starting from 8888
             var port = 8888
@@ -392,7 +392,10 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
 
             for (i in 0..10) { // Try 10 different ports
                 try {
-                    serverSocket = ServerSocket(port + i)
+                    serverSocket = ServerSocket(port + i).apply {
+                        soTimeout = 30000 // 30 second timeout
+                        reuseAddress = true
+                    }
                     android.util.Log.d("WiFiDirect", "✅ Server socket started on port ${port + i}")
 
                     // Notify Flutter of the actual port used
@@ -414,24 +417,38 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
                 throw Exception("No available ports found")
             }
 
-            // Accept client connections
+            // Accept client connections with proper error handling
             Thread {
-                while (serverSocket?.isClosed == false) {
-                    try {
-                        val client = serverSocket?.accept()
-                        client?.let {
-                            synchronized(connectedClients) {
-                                connectedClients.add(it)
+                try {
+                    while (serverSocket?.isClosed == false && !Thread.currentThread().isInterrupted) {
+                        try {
+                            val client = serverSocket?.accept()
+                            client?.let {
+                                // Set socket options for better performance
+                                it.tcpNoDelay = true
+                                it.keepAlive = true
+                                it.soTimeout = 10000 // 10 second read timeout
+
+                                synchronized(connectedClients) {
+                                    connectedClients.add(it)
+                                }
+                                android.util.Log.d("WiFiDirect", "Client connected: ${it.remoteSocketAddress}")
+                                handleClientConnection(it)
                             }
-                            android.util.Log.d("WiFiDirect", "Client connected: ${it.remoteSocketAddress}")
-                            handleClientConnection(it)
+                        } catch (e: java.net.SocketTimeoutException) {
+                            // Timeout is normal, continue accepting
+                            continue
+                        } catch (e: Exception) {
+                            if (serverSocket?.isClosed == false) {
+                                android.util.Log.e("WiFiDirect", "Error accepting client", e)
+                            }
+                            break
                         }
-                    } catch (e: Exception) {
-                        if (serverSocket?.isClosed == false) {
-                            android.util.Log.e("WiFiDirect", "Error accepting client", e)
-                        }
-                        break
                     }
+                } catch (e: Exception) {
+                    android.util.Log.e("WiFiDirect", "Server socket thread error", e)
+                } finally {
+                    android.util.Log.d("WiFiDirect", "Server socket thread ended")
                 }
             }.start()
         } catch (e: Exception) {
@@ -439,20 +456,59 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
         }
     }
 
+    private fun cleanupServerSocket() {
+        try {
+            serverSocket?.close()
+            serverSocket = null
+            synchronized(connectedClients) {
+                connectedClients.forEach { client ->
+                    try { client.close() } catch (_: Exception) {}
+                }
+                connectedClients.clear()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("WiFiDirect", "Error cleaning up server socket", e)
+        }
+    }
+
     private fun connectToGroupOwner(address: String) {
         try {
             // Close any existing connection first
-            clientSocket?.close()
+            cleanupClientSocket()
 
-            clientSocket = Socket()
+            clientSocket = Socket().apply {
+                tcpNoDelay = true
+                keepAlive = true
+                soTimeout = 10000 // 10 second timeout
+                reuseAddress = true
+            }
+
             android.util.Log.d("WiFiDirect", "Attempting to connect to group owner at $address:8888")
-            clientSocket?.connect(InetSocketAddress(address, 8888), 10000) // Increased timeout
-            android.util.Log.d("WiFiDirect", "✅ Connected to group owner at $address")
+
+            // Try multiple ports in case the default is busy
+            var connected = false
+            for (port in 8888..8898) {
+                try {
+                    clientSocket?.connect(InetSocketAddress(address, port), 15000) // 15 second timeout
+                    android.util.Log.d("WiFiDirect", "✅ Connected to group owner at $address:$port")
+                    connected = true
+                    break
+                } catch (e: Exception) {
+                    android.util.Log.w("WiFiDirect", "Failed to connect on port $port: ${e.message}")
+                }
+            }
+
+            if (!connected) {
+                throw Exception("Failed to connect on any port")
+            }
 
             // Start message handling
             handleClientConnection(clientSocket!!)
         } catch (e: Exception) {
             android.util.Log.e("WiFiDirect", "❌ Failed to connect to group owner at $address", e)
+
+            // Clean up failed connection
+            cleanupClientSocket()
 
             // Notify Flutter of connection failure
             runOnUiThread {
@@ -464,50 +520,155 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
         }
     }
 
+    private fun cleanupClientSocket() {
+        try {
+            clientSocket?.close()
+            clientSocket = null
+        } catch (e: Exception) {
+            android.util.Log.e("WiFiDirect", "Error cleaning up client socket", e)
+        }
+    }
+
    private fun handleClientConnection(socket: Socket) {
     Thread {
-        try {
-            val input = BufferedReader(InputStreamReader(socket.getInputStream()))
-            val output = PrintWriter(socket.getOutputStream(), true)
+        val remoteAddress = socket.remoteSocketAddress?.toString() ?: "unknown"
+        var input: BufferedReader? = null
+        var output: PrintWriter? = null
 
-            // Send handshake
+        try {
+            input = BufferedReader(InputStreamReader(socket.getInputStream()))
+            output = PrintWriter(socket.getOutputStream(), true)
+
+            // Send handshake with connection info
             val handshake = JSONObject().apply {
                 put("type", "handshake")
                 put("deviceId", android.provider.Settings.Secure.getString(
                     contentResolver,
                     android.provider.Settings.Secure.ANDROID_ID
                 ))
+                put("deviceName", Build.MODEL)
                 put("timestamp", System.currentTimeMillis())
+                put("protocol_version", "1.0")
             }
-            output.println(handshake.toString())
 
-            // Listen for messages
-            var line: String? = null
-            while (socket.isConnected && !socket.isClosed && input.readLine().also { line = it } != null) {
-                line?.let { message ->
-                    android.util.Log.d("WiFiDirect", "Received message: $message from ${socket.remoteSocketAddress}")
-                    runOnUiThread {
-                        wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
-                            "message" to message,
-                            "from" to socket.remoteSocketAddress.toString()
-                        ))
-                    }
+            // Send handshake with retry mechanism
+            var handshakeSent = false
+            for (attempt in 1..3) {
+                try {
+                    output.println(handshake.toString())
+                    output.flush()
+                    handshakeSent = true
+                    android.util.Log.d("WiFiDirect", "Handshake sent to $remoteAddress (attempt $attempt)")
+                    break
+                } catch (e: Exception) {
+                    android.util.Log.w("WiFiDirect", "Handshake attempt $attempt failed: ${e.message}")
+                    if (attempt < 3) Thread.sleep(1000)
                 }
             }
+
+            if (!handshakeSent) {
+                throw Exception("Failed to send handshake after 3 attempts")
+            }
+
+            // Listen for messages with heartbeat
+            var lastHeartbeat = System.currentTimeMillis()
+            val heartbeatInterval = 30000L // 30 seconds
+
+            while (socket.isConnected && !socket.isClosed && !Thread.currentThread().isInterrupted) {
+                try {
+                    // Check for heartbeat timeout
+                    val now = System.currentTimeMillis()
+                    if (now - lastHeartbeat > heartbeatInterval * 2) {
+                        android.util.Log.w("WiFiDirect", "Heartbeat timeout for $remoteAddress")
+                        break
+                    }
+
+                    // Send periodic heartbeat
+                    if (now - lastHeartbeat > heartbeatInterval) {
+                        output?.println("""{"type":"heartbeat","timestamp":$now}""")
+                        output?.flush()
+                        lastHeartbeat = now
+                    }
+
+                    // Read message with timeout
+                    socket.soTimeout = 5000 // 5 second read timeout
+                    val line = input?.readLine()
+
+                    if (line == null) {
+                        android.util.Log.d("WiFiDirect", "Connection closed by remote peer: $remoteAddress")
+                        break
+                    }
+
+                    if (line.isNotEmpty()) {
+                        // Handle different message types
+                        try {
+                            val messageObj = JSONObject(line)
+                            val messageType = messageObj.optString("type", "message")
+
+                            when (messageType) {
+                                "heartbeat" -> {
+                                    lastHeartbeat = System.currentTimeMillis()
+                                    // Don't forward heartbeats to Flutter
+                                }
+                                else -> {
+                                    android.util.Log.d("WiFiDirect", "Received $messageType from $remoteAddress: $line")
+                                    runOnUiThread {
+                                        wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
+                                            "message" to line,
+                                            "from" to remoteAddress,
+                                            "messageType" to messageType
+                                        ))
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Treat as plain text message if not valid JSON
+                            android.util.Log.d("WiFiDirect", "Received text message from $remoteAddress: $line")
+                            runOnUiThread {
+                                wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
+                                    "message" to line,
+                                    "from" to remoteAddress,
+                                    "messageType" to "text"
+                                ))
+                            }
+                        }
+                    }
+
+                } catch (e: java.net.SocketTimeoutException) {
+                    // Timeout is expected, continue
+                    continue
+                } catch (e: java.io.IOException) {
+                    if (socket.isClosed) {
+                        android.util.Log.d("WiFiDirect", "Socket closed normally for $remoteAddress")
+                    } else {
+                        android.util.Log.e("WiFiDirect", "IO error for $remoteAddress", e)
+                    }
+                    break
+                } catch (e: Exception) {
+                    android.util.Log.e("WiFiDirect", "Unexpected error handling $remoteAddress", e)
+                    break
+                }
+            }
+
         } catch (e: Exception) {
-            android.util.Log.e("WiFiDirect", "Error handling client connection", e)
+            android.util.Log.e("WiFiDirect", "Error in client connection handler for $remoteAddress", e)
         } finally {
             // Clean up connection
             try {
+                input?.close()
+                output?.close()
                 synchronized(connectedClients) {
                     connectedClients.remove(socket)
                 }
                 socket.close()
-                android.util.Log.d("WiFiDirect", "Client connection closed: ${socket.remoteSocketAddress}")
+                android.util.Log.d("WiFiDirect", "Client connection cleaned up: $remoteAddress")
             } catch (e: Exception) {
-                android.util.Log.e("WiFiDirect", "Error closing socket", e)
+                android.util.Log.e("WiFiDirect", "Error cleaning up connection for $remoteAddress", e)
             }
         }
+    }.apply {
+        name = "ClientHandler-$remoteAddress"
+        isDaemon = true
     }.start()
 }
 
