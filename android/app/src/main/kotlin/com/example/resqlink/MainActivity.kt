@@ -530,8 +530,8 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
     }
 
    private fun handleClientConnection(socket: Socket) {
+    val remoteAddress = socket.remoteSocketAddress?.toString() ?: "unknown"
     Thread {
-        val remoteAddress = socket.remoteSocketAddress?.toString() ?: "unknown"
         var input: BufferedReader? = null
         var output: PrintWriter? = null
 
