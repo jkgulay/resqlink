@@ -366,7 +366,6 @@ Future<void> _onAppResumed() async {
   }
 
   Future<void> _initializeP2P() async {
-    // Get display name from temporary identity service (from landing page)
     String? displayName =
         await TemporaryIdentityService.getTemporaryDisplayName();
     final userName =
