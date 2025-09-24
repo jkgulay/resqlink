@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/utils/responsive_helper.dart';
 import 'package:resqlink/widgets/home/connection/device_badges.dart';
-import 'package:resqlink/services/auth_service.dart';
-import 'package:resqlink/services/temporary_identity_service.dart';
+
 
 class DeviceInfo extends StatelessWidget {
   final Map<String, dynamic> device;
@@ -106,19 +105,7 @@ class DeviceInfo extends StatelessWidget {
   }
 
   Future<String> _getDisplayName() async {
-    // First try to get temporary display name (for emergency mode)
-    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
-    if (tempDisplayName != null) {
-      return tempDisplayName;
-    }
-
-    // Then try to get current authenticated user name
-    final currentUser = await AuthService.getCurrentUser();
-    if (currentUser != null) {
-      return currentUser.name;
-    }
-
-    // Fallback to device name as last resort
+    // Return the device's name directly - this is for displaying OTHER devices
     return device['deviceName'] ?? 'Unknown Device';
   }
 }

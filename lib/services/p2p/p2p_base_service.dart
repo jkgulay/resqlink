@@ -243,9 +243,25 @@ abstract class P2PBaseService with ChangeNotifier {
     );
     
     _connectedDevices[deviceId] = device;
+
+    // Also update the discovered device with the correct name if it exists
+    final discoveredIndex = _discoveredResQLinkDevices.indexWhere(
+      (d) => d.deviceId == deviceId
+    );
+    if (discoveredIndex >= 0) {
+      final discoveredDevice = _discoveredResQLinkDevices[discoveredIndex];
+      final updatedDevice = discoveredDevice.copyWith(
+        userName: userName,
+        isOnline: true,
+        lastSeen: now,
+      );
+      _discoveredResQLinkDevices[discoveredIndex] = updatedDevice;
+      debugPrint('📝 Updated discovered device name: $userName ($deviceId)');
+    }
+
     onDeviceConnected?.call(deviceId, userName);
     notifyListeners();
-    
+
     debugPrint('✅ Device connected: $userName ($deviceId)');
   }
 

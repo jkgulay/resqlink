@@ -69,12 +69,16 @@ class MessageRouter {
         }
       }
       
-      // Handle targeted messages (for delivery confirmation)
+      // Handle targeted messages (both sent and received)
       if (message.targetDeviceId != null && message.targetDeviceId != 'broadcast') {
         final targetListener = _deviceListeners[message.targetDeviceId!];
-        if (targetListener != null && message.isMe) {
-          // Show sent messages in target's chat
+        if (targetListener != null) {
+          // Show all messages (sent and received) in target's chat
+          debugPrint('✅ Routing message to target chat: ${message.targetDeviceId}');
           targetListener(message);
+        } else if (message.isMe) {
+          // Queue sent messages for target's chat if not open
+          _queueMessage(message.targetDeviceId!, message);
         }
       }
 

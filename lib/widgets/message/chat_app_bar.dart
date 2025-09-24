@@ -4,8 +4,7 @@ import '../../services/p2p/p2p_main_service.dart';
 import '../../services/p2p/p2p_base_service.dart';
 import '../../utils/resqlink_theme.dart';
 import 'chat_search_delegate.dart';
-import '../../services/auth_service.dart';
-import '../../services/temporary_identity_service.dart';
+
 
 class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool isChatView;
@@ -257,19 +256,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   Size get preferredSize => Size.fromHeight(kToolbarHeight);
 
   Future<String> _getDisplayName() async {
-    // First try to get temporary display name (for emergency mode)
-    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
-    if (tempDisplayName != null) {
-      return tempDisplayName;
-    }
-
-    // Then try to get current authenticated user name
-    final currentUser = await AuthService.getCurrentUser();
-    if (currentUser != null) {
-      return currentUser.name;
-    }
-
-    // Fallback to provided device name as last resort
+    // Return the selected device's name - this is for displaying OTHER devices in the chat app bar
     return selectedDeviceName ?? 'Unknown Device';
   }
 }

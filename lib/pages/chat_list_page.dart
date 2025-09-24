@@ -9,8 +9,6 @@ import '../utils/responsive_utils.dart';
 import '../utils/responsive_helper.dart';
 import '../widgets/message/empty_chat_view.dart';
 import '../widgets/message/loading_view.dart';
-import '../services/auth_service.dart';
-import '../services/temporary_identity_service.dart';
 import 'dart:async';
 
 class ChatListPage extends StatefulWidget {
@@ -755,19 +753,7 @@ class _ChatListPageState extends State<ChatListPage>
   }
 
   Future<String> _getDisplayName([String? fallbackDeviceName]) async {
-    // First try to get temporary display name (for emergency mode)
-    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
-    if (tempDisplayName != null) {
-      return tempDisplayName;
-    }
-
-    // Then try to get current authenticated user name
-    final currentUser = await AuthService.getCurrentUser();
-    if (currentUser != null) {
-      return currentUser.name;
-    }
-
-    // Fallback to device name
+    // Return the device's name directly - this is for displaying OTHER devices in chat list
     return fallbackDeviceName ?? 'Unknown User';
   }
 }

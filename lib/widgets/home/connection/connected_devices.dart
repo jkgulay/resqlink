@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/controllers/home_controller.dart';
 import 'package:resqlink/utils/responsive_helper.dart';
-import 'package:resqlink/services/auth_service.dart';
-import 'package:resqlink/services/temporary_identity_service.dart';
 
 class ConnectedDevices extends StatelessWidget {
   final HomeController controller;
@@ -125,18 +123,7 @@ class ConnectedDevices extends StatelessWidget {
   }
 
   Future<String> _getDisplayName(dynamic device, [String? fallbackDeviceName]) async {
-    // First try to get temporary display name (for emergency mode)
-    final tempDisplayName = await TemporaryIdentityService.getTemporaryDisplayName();
-    if (tempDisplayName != null) {
-      return tempDisplayName;
-    }
-
-    // Then try to get current authenticated user name
-    final currentUser = await AuthService.getCurrentUser();
-    if (currentUser != null ) {
-      return currentUser.name;
-    }
-
+    // Return the device's name directly - this is for displaying OTHER connected devices
     return fallbackDeviceName ?? device.userName;
   }
 }

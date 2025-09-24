@@ -784,6 +784,9 @@ class P2PMainService extends P2PBaseService {
         final deviceName = device['deviceName'] as String? ?? 'Unknown Device';
         addConnectedDevice(deviceAddress, deviceName);
 
+        // CRITICAL FIX: Initialize socket protocol after WiFi Direct connection
+        await _initializeSocketProtocolAfterConnection();
+
         debugPrint('✅ WiFi Direct connection successful');
         return true;
       } else {
@@ -1075,7 +1078,7 @@ class P2PMainService extends P2PBaseService {
       if (deviceId.isNotEmpty && !deviceMap.containsKey(deviceId)) {
         deviceMap[deviceId] = {
           'deviceId': deviceId,
-          'deviceName': network['ssid'],
+          'deviceName': 'Device_$deviceId', // Use a more user-friendly placeholder name
           'deviceAddress': network['bssid'] ?? deviceId,
           'connectionType': 'hotspot',
           'isAvailable': true,
@@ -1086,6 +1089,19 @@ class P2PMainService extends P2PBaseService {
             'emergency',
           ),
         };
+      }
+    }
+
+    // Final step: Override device names with connected device names (real names from handshake)
+    for (final connectedDevice in connectedDevices.values) {
+      if (deviceMap.containsKey(connectedDevice.deviceId)) {
+        deviceMap[connectedDevice.deviceId] = {
+          ...deviceMap[connectedDevice.deviceId]!,
+          'deviceName': connectedDevice.userName, // Use real name from connection handshake
+          'isConnected': true,
+          'isOnline': connectedDevice.isOnline,
+        };
+        debugPrint('🔄 Updated device name from connection: ${connectedDevice.userName} (${connectedDevice.deviceId})');
       }
     }
 
@@ -1387,6 +1403,35 @@ class P2PMainService extends P2PBaseService {
       debugPrint('❌ Error creating chat session: $e');
       // Return a fallback session ID
       return 'session_${deviceId}_${DateTime.now().millisecondsSinceEpoch}';
+    }
+  }
+
+  /// Initialize socket protocol after successful WiFi Direct connection
+  Future<void> _initializeSocketProtocolAfterConnection() async {
+    try {
+      debugPrint('🔌 Initializing socket protocol after WiFi Direct connection...');
+
+      // Get WiFi Direct connection info to determine role
+      final connectionInfo = await _wifiDirectService?.getConnectionInfo();
+      final isGroupOwner = connectionInfo?['isGroupOwner'] ?? false;
+      final groupOwnerAddress = connectionInfo?['groupOwnerAddress'] ?? '';
+
+      if (isGroupOwner) {
+        debugPrint('👑 Starting socket server as group owner');
+        await _socketProtocol.startServer();
+      } else if (groupOwnerAddress.isNotEmpty) {
+        debugPrint('📱 Connecting to socket server at: $groupOwnerAddress');
+        await _socketProtocol.connectToServer(groupOwnerAddress);
+      } else {
+        debugPrint('⚠️ Cannot determine socket connection - trying server mode');
+        await _socketProtocol.startServer();
+      }
+
+      debugPrint('✅ Socket protocol initialized successfully');
+      _addMessageTrace('Socket protocol initialized after WiFi Direct connection');
+    } catch (e) {
+      debugPrint('❌ Socket protocol initialization failed: $e');
+      _addMessageTrace('Socket protocol initialization error: $e');
     }
   }
 
