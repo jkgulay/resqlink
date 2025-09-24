@@ -560,6 +560,23 @@ class WiFiDirectService {
         debugPrint(
           '📱 Device info: ${args['deviceName']} (${args['deviceAddress']})',
         );
+
+      case 'onServerSocketReady':
+        final args = call.arguments as Map<String, dynamic>;
+        debugPrint('🔌 Server socket ready on port ${args['port']}');
+        _stateController.add({
+          'serverSocketReady': true,
+          'socketInfo': args,
+        });
+
+      case 'onConnectionError':
+        final args = call.arguments as Map<String, dynamic>;
+        debugPrint('❌ Connection error: ${args['error']}');
+        _stateController.add({
+          'connectionError': true,
+          'error': args['error'],
+          'details': args['details'],
+        });
     }
   }
 

@@ -48,6 +48,10 @@ class P2PMainService extends P2PBaseService {
   // Message tracing for debugging
   final List<String> _messageTrace = [];
 
+  // Debounce mechanism for connection state changes
+  Timer? _connectionStateDebounceTimer;
+  static const Duration _connectionStateDebounceDelay = Duration(milliseconds: 500);
+
   @override
   Future<bool> initialize(String userName, {String? preferredRole}) async {
     debugPrint('🚀 P2P Main Service initializing with userName: $userName');
@@ -136,25 +140,31 @@ class P2PMainService extends P2PBaseService {
   WiFiDirectService? get wifiDirectService => _wifiDirectService;
   HotspotService get hotspotService => _hotspotService ?? HotspotService.instance;
 
+  /// Debounce connection state changes to prevent race conditions
+  void _debounceConnectionStateChange(VoidCallback callback) {
+    _connectionStateDebounceTimer?.cancel();
+    _connectionStateDebounceTimer = Timer(_connectionStateDebounceDelay, callback);
+  }
+
   void _setupWiFiDirectSync() {
     _wifiDirectService?.connectionStream.listen((connectionState) {
       debugPrint('🔗 WiFi Direct connection state changed: $connectionState');
 
-      if (connectionState == WiFiDirectConnectionState.connected) {
-        _currentConnectionMode = P2PConnectionMode.wifiDirect;
-        updateConnectionStatus(true);
-
-        _refreshConnectedPeers();
-      } else if (connectionState == WiFiDirectConnectionState.disconnected) {
-        if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
-          _currentConnectionMode = P2PConnectionMode.none;
-          updateConnectionStatus(false);
-
-          // Clear WiFi Direct connected devices
-          _clearWiFiDirectDevices();
+      // Use a debounce mechanism to avoid rapid state changes
+      _debounceConnectionStateChange(() {
+        if (connectionState == WiFiDirectConnectionState.connected) {
+          _currentConnectionMode = P2PConnectionMode.wifiDirect;
+          updateConnectionStatus(true);
+          _refreshConnectedPeers();
+        } else if (connectionState == WiFiDirectConnectionState.disconnected) {
+          if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
+            _currentConnectionMode = P2PConnectionMode.none;
+            updateConnectionStatus(false);
+            _clearWiFiDirectDevices();
+          }
         }
-      }
-      notifyListeners();
+        notifyListeners();
+      });
     });
 
     _wifiDirectService?.peersStream.listen((peers) {
@@ -207,6 +217,23 @@ class P2PMainService extends P2PBaseService {
           debugPrint('📨 WiFi Direct message received: $message from $from');
           _handleIncomingMessage(message, from);
         }
+      }
+
+      // Handle new socket events
+      if (state['serverSocketReady'] == true) {
+        final socketInfo = state['socketInfo'] as Map<String, dynamic>?;
+        debugPrint('🔌 Server socket ready: $socketInfo');
+        _addMessageTrace('Server socket ready on port ${socketInfo?['port']}');
+      }
+
+      if (state['connectionError'] == true) {
+        final error = state['error'] as String?;
+        final details = state['details'] as String?;
+        debugPrint('❌ Connection error: $error - $details');
+        _addMessageTrace('Connection error: $error');
+
+        // Try to recover from connection errors
+        _handleConnectionError(error, details);
       }
     });
   }
@@ -290,12 +317,10 @@ class P2PMainService extends P2PBaseService {
     notifyListeners();
   }
 
-  /// NEW METHOD: Refresh connected peers from WiFi Direct
   Future<void> _refreshConnectedPeers() async {
     try {
       debugPrint('🔄 Refreshing connected WiFi Direct peers...');
 
-      // Get current peer list
       final peers = await _wifiDirectService?.getPeerList() ?? [];
 
       // Process connected peers
@@ -827,6 +852,43 @@ class P2PMainService extends P2PBaseService {
       notifyListeners();
     } catch (e) {
       debugPrint('❌ Failed to clear forced role: $e');
+    }
+  }
+
+  /// Handle connection errors with recovery mechanisms
+  Future<void> _handleConnectionError(String? error, String? details) async {
+    debugPrint('🔧 Attempting to recover from connection error: $error');
+
+    try {
+      // Reset connection state
+      if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
+        _currentConnectionMode = P2PConnectionMode.none;
+        updateConnectionStatus(false);
+      }
+
+      // Wait a moment before attempting recovery
+      await Future.delayed(Duration(seconds: 2));
+
+      // Try to establish new connections
+      if (error?.contains('connect') == true || error?.contains('socket') == true) {
+        debugPrint('🔄 Retrying WiFi Direct connection...');
+        await checkForExistingConnections();
+
+        // If still not connected, try discovery
+        if (!isConnected) {
+          await discoverDevices(force: true);
+        }
+      }
+
+      // Trigger fallback mechanisms if available
+      if (!isConnected) {
+        debugPrint('🔄 Triggering connection fallback...');
+        // The fallback manager will handle alternative connection methods
+      }
+
+    } catch (e) {
+      debugPrint('❌ Connection recovery failed: $e');
+      _addMessageTrace('Connection recovery failed: $e');
     }
   }
 
@@ -1401,6 +1463,7 @@ ${_messageTrace.take(5).join('\n')}
     debugPrint('🗑️ P2P Main Service disposing...');
 
     _hotspotVerificationTimer?.cancel();
+    _connectionStateDebounceTimer?.cancel();
 
     _networkService.dispose();
     _discoveryService.dispose();
