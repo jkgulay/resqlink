@@ -546,7 +546,9 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
                     contentResolver,
                     android.provider.Settings.Secure.ANDROID_ID
                 ))
-                put("deviceName", Build.MODEL)
+                // CRITICAL FIX: Use a proper user name instead of device model
+                put("userName", "User_${System.currentTimeMillis().toString().substring(8)}")
+                put("deviceName", Build.MODEL) // Keep device model for reference
                 put("timestamp", System.currentTimeMillis())
                 put("protocol_version", "1.0")
             }
@@ -610,14 +612,25 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
                                     lastHeartbeat = System.currentTimeMillis()
                                     // Don't forward heartbeats to Flutter
                                 }
+                                "handshake_response", "ack" -> {
+                                    android.util.Log.d("WiFiDirect", "Received system response: $messageType")
+                                    // Don't forward system responses to Flutter as chat messages
+                                }
                                 else -> {
                                     android.util.Log.d("WiFiDirect", "Received $messageType from $remoteAddress: $line")
                                     runOnUiThread {
-                                        wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
-                                            "message" to line,
-                                            "from" to remoteAddress,
-                                            "messageType" to messageType
-                                        ))
+                                        // CRITICAL FIX: Ensure message is properly forwarded
+                                        try {
+                                            wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
+                                                "message" to line,
+                                                "from" to remoteAddress,
+                                                "messageType" to messageType,
+                                                "timestamp" to System.currentTimeMillis()
+                                            ))
+                                            android.util.Log.d("WiFiDirect", "✅ Message forwarded to Flutter successfully")
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("WiFiDirect", "❌ Failed to forward message to Flutter", e)
+                                        }
                                     }
                                 }
                             }
@@ -625,11 +638,17 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
                             // Treat as plain text message if not valid JSON
                             android.util.Log.d("WiFiDirect", "Received text message from $remoteAddress: $line")
                             runOnUiThread {
-                                wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
-                                    "message" to line,
-                                    "from" to remoteAddress,
-                                    "messageType" to "text"
-                                ))
+                                try {
+                                    wifiMethodChannel.invokeMethod("onMessageReceived", mapOf(
+                                        "message" to line,
+                                        "from" to remoteAddress,
+                                        "messageType" to "text",
+                                        "timestamp" to System.currentTimeMillis()
+                                    ))
+                                    android.util.Log.d("WiFiDirect", "✅ Text message forwarded to Flutter successfully")
+                                } catch (ex: Exception) {
+                                    android.util.Log.e("WiFiDirect", "❌ Failed to forward text message to Flutter", ex)
+                                }
                             }
                         }
                     }

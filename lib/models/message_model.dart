@@ -29,6 +29,11 @@ class MessageModel {
   final MessageType messageType;
   final String? chatSessionId;
   final String? deviceId;
+  // Database-generated fields (read-only, not set in constructor)
+  final int? retryCount;
+  final int? lastRetryTime;
+  final int? priority;
+  final int? createdAt;
 
   MessageModel({
     this.id,
@@ -53,6 +58,11 @@ class MessageModel {
     MessageType? messageType,
     this.chatSessionId,
     this.deviceId,
+    // Database-generated fields (typically null when creating new messages)
+    this.retryCount,
+    this.lastRetryTime,
+    this.priority,
+    this.createdAt,
   }) : type = type ?? (isEmergency ? 'emergency' : 'message'),
        messageType =
            messageType ??
@@ -64,8 +74,8 @@ class MessageModel {
   // Check if message has location
   bool get hasLocation => latitude != null && longitude != null;
 
-  // Get message priority (for sorting/display)
-  int get priority {
+  // Get computed message priority (for sorting/display)
+  int get computedPriority {
     if (type == 'sos') return 3;
     if (type == 'emergency' || isEmergency) return 2;
     if (type == 'location') return 1;
@@ -96,6 +106,10 @@ class MessageModel {
     MessageType? messageType,
     String? chatSessionId,
     String? deviceId,
+    int? retryCount,
+    int? lastRetryTime,
+    int? priority,
+    int? createdAt,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -120,57 +134,65 @@ class MessageModel {
       messageType: messageType ?? this.messageType,
       chatSessionId: chatSessionId ?? this.chatSessionId,
       deviceId: deviceId ?? this.deviceId,
+      retryCount: retryCount ?? this.retryCount,
+      lastRetryTime: lastRetryTime ?? this.lastRetryTime,
+      priority: priority ?? this.priority,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 
-  // Convert to Map for database storage
+  // Convert to Map for database storage (matches exact database schema)
   Map<String, dynamic> toMap() {
     return {
       if (id != null) 'id': id,
-      'endpoint_id': endpointId,
-      'from_user': fromUser,
+      'messageId': messageId,
+      'endpointId': endpointId,
+      'fromUser': fromUser,
       'message': message,
-      'is_me': isMe ? 1 : 0,
-      'is_emergency': isEmergency ? 1 : 0,
       'timestamp': timestamp,
-      'latitude': latitude,
-      'longitude': longitude,
-      'synced': synced ? 1 : 0,
-      'synced_to_firebase': syncedToFirebase ? 1 : 0,
-      'message_id': messageId,
+      'isMe': isMe ? 1 : 0,
+      'isEmergency': isEmergency ? 1 : 0,
       'type': type,
       'status': status.index,
-      'route_path': routePath?.join(','),
+      'latitude': latitude,
+      'longitude': longitude,
+      'routePath': routePath?.join(','),
       'ttl': ttl,
-      'connection_type': connectionType,
-      'device_info': deviceInfo != null ? jsonEncode(deviceInfo!) : null,
-      'target_device_id': targetDeviceId,
-      'message_type': messageType.index,
-      'chat_session_id': chatSessionId,
-      'device_id': deviceId,
+      'connectionType': connectionType,
+      'deviceInfo': deviceInfo != null ? jsonEncode(deviceInfo!) : null,
+      'targetDeviceId': targetDeviceId,
+      'messageType': messageType.index,
+      'chatSessionId': chatSessionId,
+      'synced': synced ? 1 : 0,
+      'syncedToFirebase': syncedToFirebase ? 1 : 0,
+      'deviceId': deviceId,
+      // NOTE: retryCount, lastRetryTime, priority, createdAt are database-generated fields
+      // They don't need to be in the insert map, but can be read from query results
     };
   }
 
-  // Create from database Map (matches database schema with camelCase)
+  // Create from database Map (matches exact database schema)
   factory MessageModel.fromMap(Map<String, dynamic> map) {
     return MessageModel(
       id: map['id'],
+      messageId: map['messageId'],
       endpointId: map['endpointId'] ?? '',
       fromUser: map['fromUser'] ?? '',
       message: map['message'] ?? '',
+      timestamp: map['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
       isMe: map['isMe'] == 1,
       isEmergency: map['isEmergency'] == 1,
-      timestamp: map['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
-      latitude: map['latitude']?.toDouble(),
-      longitude: map['longitude']?.toDouble(),
-      synced: map['synced'] == 1,
-      syncedToFirebase: map['syncedToFirebase'] == 1,
-      messageId: map['messageId'],
       type: map['type'] ?? 'message',
       status: map['status'] != null
-          ? MessageStatus.values[map['status']]
+          ? (map['status'] is int
+              ? MessageStatus.values[map['status']]
+              : MessageStatus.values.firstWhere(
+                  (e) => e.name == map['status'],
+                  orElse: () => MessageStatus.pending))
           : MessageStatus.pending,
-      routePath: map['routePath'] != null
+      latitude: map['latitude']?.toDouble(),
+      longitude: map['longitude']?.toDouble(),
+      routePath: map['routePath'] != null && map['routePath'] != ''
           ? (map['routePath'] as String).split(',')
           : null,
       ttl: map['ttl'],
@@ -180,10 +202,21 @@ class MessageModel {
           : null,
       targetDeviceId: map['targetDeviceId'],
       messageType: map['messageType'] != null
-          ? MessageType.values[map['messageType']]
+          ? (map['messageType'] is int
+              ? MessageType.values[map['messageType']]
+              : MessageType.values.firstWhere(
+                  (e) => e.name == map['messageType'],
+                  orElse: () => MessageType.text))
           : MessageType.text,
       chatSessionId: map['chatSessionId'],
+      synced: map['synced'] == 1,
+      syncedToFirebase: map['syncedToFirebase'] == 1,
       deviceId: map['deviceId'],
+      // Database-generated fields (may be null for new messages)
+      retryCount: map['retryCount'],
+      lastRetryTime: map['lastRetryTime'],
+      priority: map['priority'],
+      createdAt: map['createdAt'],
     );
   }
 
@@ -226,6 +259,10 @@ class MessageModel {
           : MessageType.text,
       chatSessionId: map['chatSessionId'],
       deviceId: map['deviceId'],
+      retryCount: map['retryCount'],
+      lastRetryTime: map['lastRetryTime'],
+      priority: map['priority'],
+      createdAt: map['createdAt'],
     );
   }
 

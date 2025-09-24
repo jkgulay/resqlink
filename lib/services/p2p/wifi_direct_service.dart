@@ -533,6 +533,21 @@ class WiFiDirectService {
       case 'onMessageReceived':
         final args = call.arguments as Map<String, dynamic>;
         debugPrint('📨 Message received: ${args['message']}');
+
+        // CRITICAL FIX: Process the message through the message router
+        final message = args['message'] as String?;
+        final from = args['from'] as String?;
+
+        if (message != null && from != null) {
+          // Send to message router for processing
+          _messageController.add({
+            'type': 'message_received',
+            'message': message,
+            'from': from,
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+          });
+        }
+
         _stateController.add({
           'messageReceived': true,
           'message': args['message'],

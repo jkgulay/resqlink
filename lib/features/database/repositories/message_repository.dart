@@ -44,7 +44,12 @@ class MessageRepository {
           'chatSessionId': chatSessionId,
           'deviceId': message.deviceId,
           'synced': message.synced ? 1 : 0,
+          'syncedToFirebase': message.syncedToFirebase ? 1 : 0,
+          // Database fields with defaults (optional to set)
+          'retryCount': 0,
+          'lastRetryTime': 0,
           'priority': message.isEmergency ? 1 : 0,
+          // Note: createdAt has database default, no need to set
         };
 
         final id = await txn.insert(_tableName, messageMap);
@@ -714,6 +719,7 @@ class MessageRepository {
       'chatSessionId': message.chatSessionId,
       'deviceId': message.deviceId,
       'priority': message.isEmergency ? 1 : 0,
+      'retryCount': 0,
       'lastRetryTime': 0,
     };
   }
