@@ -50,7 +50,9 @@ class P2PMainService extends P2PBaseService {
 
   // Debounce mechanism for connection state changes
   Timer? _connectionStateDebounceTimer;
-  static const Duration _connectionStateDebounceDelay = Duration(milliseconds: 500);
+  static const Duration _connectionStateDebounceDelay = Duration(
+    milliseconds: 500,
+  );
 
   @override
   Future<bool> initialize(String userName, {String? preferredRole}) async {
@@ -99,7 +101,9 @@ class P2PMainService extends P2PBaseService {
 
       // CRITICAL: Set callback for device connections
       _socketProtocol.onDeviceConnected = (deviceId, userName) {
-        debugPrint('🔗 Device connected via SocketProtocol: $userName ($deviceId)');
+        debugPrint(
+          '🔗 Device connected via SocketProtocol: $userName ($deviceId)',
+        );
         addConnectedDevice(deviceId, userName);
         onDeviceConnected?.call(deviceId, userName);
       };
@@ -141,31 +145,37 @@ class P2PMainService extends P2PBaseService {
   ConnectionFallbackManager get connectionFallbackManager =>
       _connectionFallbackManager;
   WiFiDirectService? get wifiDirectService => _wifiDirectService;
-  HotspotService get hotspotService => _hotspotService ?? HotspotService.instance;
+  HotspotService get hotspotService =>
+      _hotspotService ?? HotspotService.instance;
 
   /// Debounce connection state changes to prevent race conditions
   void _debounceConnectionStateChange(VoidCallback callback) {
     _connectionStateDebounceTimer?.cancel();
-    _connectionStateDebounceTimer = Timer(_connectionStateDebounceDelay, callback);
+    _connectionStateDebounceTimer = Timer(
+      _connectionStateDebounceDelay,
+      callback,
+    );
   }
 
   /// CRITICAL FIX: Setup WiFi Direct message stream listener
   void _setupWiFiDirectMessageStream() {
-    _wifiDirectService?.messageStream.listen((messageData) {
-      debugPrint('📨 WiFi Direct message stream received: $messageData');
+    _wifiDirectService?.messageStream
+        .listen((messageData) {
+          debugPrint('📨 WiFi Direct message stream received: $messageData');
 
-      final messageType = messageData['type'] as String?;
-      if (messageType == 'message_received') {
-        final message = messageData['message'] as String?;
-        final from = messageData['from'] as String?;
+          final messageType = messageData['type'] as String?;
+          if (messageType == 'message_received') {
+            final message = messageData['message'] as String?;
+            final from = messageData['from'] as String?;
 
-        if (message != null && from != null) {
-          _handleIncomingMessage(message, from);
-        }
-      }
-    }).onError((error) {
-      debugPrint('❌ WiFi Direct message stream error: $error');
-    });
+            if (message != null && from != null) {
+              _handleIncomingMessage(message, from);
+            }
+          }
+        })
+        .onError((error) {
+          debugPrint('❌ WiFi Direct message stream error: $error');
+        });
 
     debugPrint('✅ WiFi Direct message stream listener setup complete');
   }
@@ -207,11 +217,9 @@ class P2PMainService extends P2PBaseService {
 
       // Handle connection changes
       if (state['connectionChanged'] == true) {
-        final connectionInfo = state['connectionInfo'] as Map<String, dynamic>?;
-        if (connectionInfo != null) {
-          _handleWiFiDirectConnectionChange(connectionInfo);
-        }
-      }
+        final connectionInfo = Map<String, dynamic>.from(state['connectionInfo'] as Map? ?? {});
+        _handleWiFiDirectConnectionChange(connectionInfo);
+            }
 
       if (state['socketReady'] == true) {
         debugPrint('🔌 WiFi Direct socket communication ready');
@@ -219,20 +227,16 @@ class P2PMainService extends P2PBaseService {
       }
 
       if (state['socketEstablished'] == true) {
-        final connectionInfo = state['connectionInfo'] as Map<String, dynamic>?;
-        if (connectionInfo != null) {
-          debugPrint('✅ Socket established: $connectionInfo');
-          _handleSocketEstablished(connectionInfo);
-        }
-      }
+        final connectionInfo = Map<String, dynamic>.from(state['connectionInfo'] as Map? ?? {});
+        debugPrint('✅ Socket established: $connectionInfo');
+        _handleSocketEstablished(connectionInfo);
+            }
 
       if (state['existingConnection'] == true) {
-        final connectionInfo = state['connectionInfo'] as Map<String, dynamic>?;
-        if (connectionInfo != null) {
-          debugPrint('🔗 Existing connection detected: $connectionInfo');
-          _handleExistingConnection(connectionInfo);
-        }
-      }
+        final connectionInfo = Map<String, dynamic>.from(state['connectionInfo'] as Map? ?? {});
+        debugPrint('🔗 Existing connection detected: $connectionInfo');
+        _handleExistingConnection(connectionInfo);
+            }
 
       if (state['messageReceived'] == true) {
         final message = state['message'] as String?;
@@ -245,9 +249,9 @@ class P2PMainService extends P2PBaseService {
 
       // Handle new socket events
       if (state['serverSocketReady'] == true) {
-        final socketInfo = state['socketInfo'] as Map<String, dynamic>?;
+        final socketInfo = Map<String, dynamic>.from(state['socketInfo'] as Map? ?? {});
         debugPrint('🔌 Server socket ready: $socketInfo');
-        _addMessageTrace('Server socket ready on port ${socketInfo?['port']}');
+        _addMessageTrace('Server socket ready on port ${socketInfo['port']}');
       }
 
       if (state['connectionError'] == true) {
@@ -352,9 +356,13 @@ class P2PMainService extends P2PBaseService {
         final deviceAddress = peerData['deviceAddress'] as String? ?? '';
         final deviceName =
             peerData['deviceName'] as String? ?? 'Unknown Device';
-        final status = peerData['status'] as String? ?? '';
+        final statusValue = peerData['status'];
+        final statusInt = statusValue is int
+            ? statusValue
+            : int.tryParse(statusValue.toString()) ?? -1;
 
-        if (status == 'connected' && deviceAddress.isNotEmpty) {
+        // WiFi Direct status: 0 = connected, 1 = invited, 2 = failed, 3 = available, 4 = unavailable
+        if (statusInt == 0 && deviceAddress.isNotEmpty) {
           debugPrint('✅ Found connected peer: $deviceName ($deviceAddress)');
 
           // Add to connected devices if not already there
@@ -597,7 +605,7 @@ class P2PMainService extends P2PBaseService {
       debugPrint('🔍 Checking for system-level connections...');
       await _wifiDirectService?.checkForSystemConnection();
     } catch (e) {
-      debugPrint('❌ Error checking system connections: $e');
+      debugPrint('❌ Error checking system connection: $e');
     }
   }
 
@@ -897,7 +905,8 @@ class P2PMainService extends P2PBaseService {
       await Future.delayed(Duration(seconds: 2));
 
       // Try to establish new connections
-      if (error?.contains('connect') == true || error?.contains('socket') == true) {
+      if (error?.contains('connect') == true ||
+          error?.contains('socket') == true) {
         debugPrint('🔄 Retrying WiFi Direct connection...');
         await checkForExistingConnections();
 
@@ -912,7 +921,6 @@ class P2PMainService extends P2PBaseService {
         debugPrint('🔄 Triggering connection fallback...');
         // The fallback manager will handle alternative connection methods
       }
-
     } catch (e) {
       debugPrint('❌ Connection recovery failed: $e');
       _addMessageTrace('Connection recovery failed: $e');
@@ -1060,7 +1068,7 @@ class P2PMainService extends P2PBaseService {
         'signalLevel': peer.signalLevel ?? -50,
         'lastSeen': DateTime.now().millisecondsSinceEpoch,
         'isConnected': isConnected,
-        'status': peer.status.name, // Add WiFi Direct status
+        'status': peer.status.toString(), // Add WiFi Direct status
         'isEmergency':
             peer.deviceName.toLowerCase().contains('resqlink') ||
             peer.deviceName.toLowerCase().contains('emergency'),
@@ -1102,7 +1110,8 @@ class P2PMainService extends P2PBaseService {
       if (deviceId.isNotEmpty && !deviceMap.containsKey(deviceId)) {
         deviceMap[deviceId] = {
           'deviceId': deviceId,
-          'deviceName': 'Device_$deviceId', // Use a more user-friendly placeholder name
+          'deviceName':
+              'Device_$deviceId', // Use a more user-friendly placeholder name
           'deviceAddress': network['bssid'] ?? deviceId,
           'connectionType': 'hotspot',
           'isAvailable': true,
@@ -1121,11 +1130,14 @@ class P2PMainService extends P2PBaseService {
       if (deviceMap.containsKey(connectedDevice.deviceId)) {
         deviceMap[connectedDevice.deviceId] = {
           ...deviceMap[connectedDevice.deviceId]!,
-          'deviceName': connectedDevice.userName, // Use real name from connection handshake
+          'deviceName': connectedDevice
+              .userName, // Use real name from connection handshake
           'isConnected': true,
           'isOnline': connectedDevice.isOnline,
         };
-        debugPrint('🔄 Updated device name from connection: ${connectedDevice.userName} (${connectedDevice.deviceId})');
+        debugPrint(
+          '🔄 Updated device name from connection: ${connectedDevice.userName} (${connectedDevice.deviceId})',
+        );
       }
     }
 
@@ -1329,10 +1341,15 @@ class P2PMainService extends P2PBaseService {
 
       // Check if connected, otherwise queue the message
       if (!isConnected) {
-        debugPrint('📥 Device not connected, queuing message for later delivery');
+        debugPrint(
+          '📥 Device not connected, queuing message for later delivery',
+        );
 
         // Queue message for later delivery with enhanced service
-        final sessionId = await _getOrCreateChatSession(targetDeviceId ?? 'broadcast', actualSenderName);
+        final sessionId = await _getOrCreateChatSession(
+          targetDeviceId ?? 'broadcast',
+          actualSenderName,
+        );
         await _messageQueueService.queueMessage(
           sessionId: sessionId,
           deviceId: targetDeviceId ?? 'broadcast',
@@ -1343,7 +1360,9 @@ class P2PMainService extends P2PBaseService {
             'latitude': latitude,
             'longitude': longitude,
           },
-          priority: type == MessageType.emergency || type == MessageType.sos ? 2 : 0,
+          priority: type == MessageType.emergency || type == MessageType.sos
+              ? 2
+              : 0,
         );
 
         // Update status to pending
@@ -1386,7 +1405,10 @@ class P2PMainService extends P2PBaseService {
         debugPrint('❌ Primary send failed, queuing message for retry');
 
         // Queue message for retry if primary send fails with enhanced service
-        final sessionId = await _getOrCreateChatSession(targetDeviceId ?? 'broadcast', actualSenderName);
+        final sessionId = await _getOrCreateChatSession(
+          targetDeviceId ?? 'broadcast',
+          actualSenderName,
+        );
         await _messageQueueService.queueMessage(
           sessionId: sessionId,
           deviceId: targetDeviceId ?? 'broadcast',
@@ -1397,7 +1419,9 @@ class P2PMainService extends P2PBaseService {
             'latitude': latitude,
             'longitude': longitude,
           },
-          priority: type == MessageType.emergency || type == MessageType.sos ? 2 : 0,
+          priority: type == MessageType.emergency || type == MessageType.sos
+              ? 2
+              : 0,
         );
 
         // Update status to pending for retry
@@ -1416,7 +1440,10 @@ class P2PMainService extends P2PBaseService {
   }
 
   /// Helper method to get or create chat session for queue operations
-  Future<String> _getOrCreateChatSession(String deviceId, String deviceName) async {
+  Future<String> _getOrCreateChatSession(
+    String deviceId,
+    String deviceName,
+  ) async {
     try {
       return await ChatRepository.createOrUpdate(
         deviceId: deviceId,
@@ -1433,7 +1460,9 @@ class P2PMainService extends P2PBaseService {
   /// Initialize socket protocol after successful WiFi Direct connection
   Future<void> _initializeSocketProtocolAfterConnection() async {
     try {
-      debugPrint('🔌 Initializing socket protocol after WiFi Direct connection...');
+      debugPrint(
+        '🔌 Initializing socket protocol after WiFi Direct connection...',
+      );
 
       // Get WiFi Direct connection info to determine role
       final connectionInfo = await _wifiDirectService?.getConnectionInfo();
@@ -1447,12 +1476,16 @@ class P2PMainService extends P2PBaseService {
         debugPrint('📱 Connecting to socket server at: $groupOwnerAddress');
         await _socketProtocol.connectToServer(groupOwnerAddress);
       } else {
-        debugPrint('⚠️ Cannot determine socket connection - trying server mode');
+        debugPrint(
+          '⚠️ Cannot determine socket connection - trying server mode',
+        );
         await _socketProtocol.startServer();
       }
 
       debugPrint('✅ Socket protocol initialized successfully');
-      _addMessageTrace('Socket protocol initialized after WiFi Direct connection');
+      _addMessageTrace(
+        'Socket protocol initialized after WiFi Direct connection',
+      );
     } catch (e) {
       debugPrint('❌ Socket protocol initialization failed: $e');
       _addMessageTrace('Socket protocol initialization error: $e');

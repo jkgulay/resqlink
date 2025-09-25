@@ -7,7 +7,7 @@ import 'package:path/path.dart';
 class DatabaseManager {
   static Database? _database;
   static const String _dbName = 'resqlink_enhanced.db';
-  static const int _dbVersion = 8;
+  static const int _dbVersion = 10;
 
   // Singleton
   static DatabaseManager? _instance;
@@ -93,20 +93,15 @@ class DatabaseManager {
 
     try {
       await db.execute('PRAGMA synchronous = NORMAL');
-    } catch (e) {
-      debugPrint('⚠️ Could not set synchronous mode: $e');
-    }
-
-    try {
       await db.execute('PRAGMA cache_size = 10000');
-    } catch (e) {
-      debugPrint('⚠️ Could not set cache size: $e');
-    }
-
-    try {
       await db.execute('PRAGMA temp_store = MEMORY');
+      await db.execute('PRAGMA journal_size_limit = 10485760'); // 10MB
+      await db.execute('PRAGMA page_size = 4096');
+      await db.execute('PRAGMA auto_vacuum = INCREMENTAL');
+      await db.execute('PRAGMA busy_timeout = 30000'); // 30 second timeout
+      debugPrint('✅ Database optimizations applied');
     } catch (e) {
-      debugPrint('⚠️ Could not set temp store: $e');
+      debugPrint('⚠️ Some database optimizations failed: $e');
     }
   }
 
@@ -133,10 +128,12 @@ class DatabaseManager {
           routePath TEXT,
           ttl INTEGER,
           connectionType TEXT,
+          connection_type TEXT,
           deviceInfo TEXT,
           targetDeviceId TEXT,
           messageType INTEGER DEFAULT 0,
           chatSessionId TEXT,
+          deviceId TEXT,
           synced INTEGER DEFAULT 0,
           syncedToFirebase INTEGER DEFAULT 0,
           retryCount INTEGER DEFAULT 0,
@@ -284,6 +281,7 @@ class DatabaseManager {
           queued_at INTEGER NOT NULL,
           retry_count INTEGER DEFAULT 0,
           last_retry_at INTEGER,
+          last_error TEXT,
           priority INTEGER DEFAULT 0,
           metadata TEXT
         )
@@ -378,6 +376,12 @@ class DatabaseManager {
       }
       if (oldVersion < 8) {
         await _upgradeToV8(db);
+      }
+      if (oldVersion < 9) {
+        await _upgradeToV9(db);
+      }
+      if (oldVersion < 10) {
+        await _upgradeToV10(db);
       }
 
       debugPrint('✅ Database upgrade completed successfully');
@@ -690,6 +694,48 @@ class DatabaseManager {
     }
   }
 
+  static Future<void> _upgradeToV9(Database db) async {
+    debugPrint('🔄 Upgrading to database version 9...');
+
+    try {
+      // Add missing last_error column to message_queue table
+      await db.execute(
+        'ALTER TABLE message_queue ADD COLUMN last_error TEXT',
+      );
+      debugPrint('✅ Added last_error column to message_queue table');
+    } catch (e) {
+      debugPrint('⚠️ last_error column may already exist: $e');
+    }
+
+    try {
+      // Add missing deviceId column to messages table
+      await db.execute(
+        'ALTER TABLE messages ADD COLUMN deviceId TEXT',
+      );
+      debugPrint('✅ Added deviceId column to messages table');
+    } catch (e) {
+      debugPrint('⚠️ deviceId column may already exist: $e');
+    }
+
+    debugPrint('✅ Database upgrade to version 9 completed');
+  }
+
+  static Future<void> _upgradeToV10(Database db) async {
+    debugPrint('🔄 Upgrading to database version 10...');
+
+    try {
+      // Add missing connection_type column to messages table
+      await db.execute(
+        'ALTER TABLE messages ADD COLUMN connection_type TEXT',
+      );
+      debugPrint('✅ Added connection_type column to messages table');
+    } catch (e) {
+      debugPrint('⚠️ connection_type column may already exist: $e');
+    }
+
+    debugPrint('✅ Database upgrade to version 10 completed');
+  }
+
   static Future<int> _getDatabaseSize() async {
     try {
       final dbPath = await getDatabasesPath();
@@ -713,12 +759,18 @@ class DatabaseManager {
     }
   }
 
-  /// Execute a transaction safely
+  /// Execute a transaction safely with timeout and retry
   static Future<T> transaction<T>(
     Future<T> Function(Transaction txn) action,
   ) async {
     final db = await database;
-    return await db.transaction(action);
+    return await db.transaction(action).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () {
+        debugPrint('⚠️ Database transaction timeout after 15 seconds');
+        throw TimeoutException('Database transaction timeout', const Duration(seconds: 15));
+      },
+    );
   }
 
   /// Execute raw query with error handling

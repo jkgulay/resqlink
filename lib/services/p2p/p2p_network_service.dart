@@ -288,7 +288,8 @@ class P2PNetworkService {
   /// Handle message
   void _handleMessage(Map<String, dynamic> data, String senderAddress) {
     try {
-      final messageData = data['messageData'] as Map<String, dynamic>?;
+      final messageData = data['messageData'] != null ?
+        Map<String, dynamic>.from(data['messageData'] as Map? ?? {}) : null;
       if (messageData != null) {
         final message = MessageModel.fromNetworkJson(messageData);
 
