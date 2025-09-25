@@ -10,7 +10,7 @@ import 'chat_repository.dart';
 class MessageRepository {
   static const String _tableName = 'messages';
 
-  /// Insert a new message
+  /// Insert a new message with optimized transaction handling
   static Future<int> insert(MessageModel message, {String? currentUserId}) async {
     try {
       return await DatabaseManager.transaction((txn) async {
@@ -52,11 +52,15 @@ class MessageRepository {
           // Note: createdAt has database default, no need to set
         };
 
-        final id = await txn.insert(_tableName, messageMap);
+        final id = await txn.insert(_tableName, messageMap).timeout(const Duration(seconds: 2));
 
-        // Update chat session if applicable
+        // Update chat session counts directly in transaction to avoid separate calls
         if (chatSessionId != null) {
-          await ChatRepository.updateMessageCount(chatSessionId);
+          // Direct update without separate query to prevent deadlocks
+          await txn.rawUpdate(
+            'UPDATE chat_sessions SET message_count = message_count + 1, unread_count = unread_count + ?, last_message_at = ? WHERE id = ?',
+            [message.isMe ? 0 : 1, message.timestamp, chatSessionId]
+          ).timeout(const Duration(seconds: 1));
         }
 
         return id;
@@ -67,7 +71,7 @@ class MessageRepository {
     }
   }
 
-  /// Get messages for a specific chat session with pagination
+  /// Get messages for a specific chat session with pagination (optimized with timeout)
   static Future<List<MessageModel>> getMessagesForSession(
     String sessionId, {
     int? limit,
@@ -83,7 +87,7 @@ class MessageRepository {
         orderBy: 'timestamp ${ascending ? 'ASC' : 'DESC'}',
         limit: limit,
         offset: offset,
-      );
+      ).timeout(const Duration(seconds: 3));
 
       return results.map((row) => MessageModel.fromMap(row)).toList();
     } catch (e) {
@@ -350,20 +354,21 @@ class MessageRepository {
     }
   }
 
-  /// Bulk update message sync status
+  /// Bulk update message sync status (optimized with timeout and transaction)
   static Future<bool> markMessagesAsSynced(List<String> messageIds) async {
     try {
       if (messageIds.isEmpty) return true;
 
-      final db = await DatabaseManager.database;
-      final placeholders = List.filled(messageIds.length, '?').join(',');
+      return await DatabaseManager.transaction((txn) async {
+        final placeholders = List.filled(messageIds.length, '?').join(',');
 
-      await db.rawUpdate(
-        'UPDATE $_tableName SET synced = 1 WHERE messageId IN ($placeholders)',
-        messageIds,
-      );
+        await txn.rawUpdate(
+          'UPDATE $_tableName SET synced = 1 WHERE messageId IN ($placeholders)',
+          messageIds,
+        ).timeout(const Duration(seconds: 2));
 
-      return true;
+        return true;
+      });
     } catch (e) {
       debugPrint('❌ Error marking messages as synced: $e');
       return false;

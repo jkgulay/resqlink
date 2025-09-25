@@ -9,16 +9,37 @@ class DatabaseManager {
   static const String _dbName = 'resqlink_enhanced.db';
   static const int _dbVersion = 10;
 
+  // Add connection pooling and state tracking
+  static bool _isInitializing = false;
+  static final Set<String> _activeTransactions = {};
+
   // Singleton
   static DatabaseManager? _instance;
   factory DatabaseManager() => _instance ??= DatabaseManager._internal();
   DatabaseManager._internal();
 
-  /// Get database instance
+  /// Get database instance with proper initialization handling
   static Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+
+    // Prevent multiple simultaneous initializations
+    if (_isInitializing) {
+      // Wait for initialization to complete
+      int attempts = 0;
+      while (_isInitializing && attempts < 100) { // 10 second timeout
+        await Future.delayed(const Duration(milliseconds: 100));
+        attempts++;
+      }
+      if (_database != null) return _database!;
+    }
+
+    _isInitializing = true;
+    try {
+      _database = await _initDatabase();
+      return _database!;
+    } finally {
+      _isInitializing = false;
+    }
   }
 
   /// Initialize database with tables and migrations
@@ -74,34 +95,27 @@ class DatabaseManager {
 
   /// Configure database settings
   static Future<void> _configureDatabase(Database db) async {
+    // Critical database configuration for preventing deadlocks
     try {
       await db.execute('PRAGMA foreign_keys = ON');
-    } catch (e) {
-      debugPrint('⚠️ Could not enable foreign keys: $e');
-    }
-
-    try {
-      await db.execute('PRAGMA journal_mode = WAL');
-    } catch (e) {
-      debugPrint('⚠️ Could not set WAL mode (falling back to default): $e');
-      try {
-        await db.execute('PRAGMA journal_mode = DELETE');
-      } catch (e2) {
-        debugPrint('⚠️ Could not set DELETE mode: $e2');
-      }
-    }
-
-    try {
-      await db.execute('PRAGMA synchronous = NORMAL');
+      await db.execute('PRAGMA journal_mode = MEMORY'); // Use memory journaling to prevent locks
+      await db.execute('PRAGMA synchronous = OFF'); // Fastest, less safe but prevents locks
+      await db.execute('PRAGMA locking_mode = EXCLUSIVE'); // Exclusive locking mode
       await db.execute('PRAGMA cache_size = 10000');
       await db.execute('PRAGMA temp_store = MEMORY');
-      await db.execute('PRAGMA journal_size_limit = 10485760'); // 10MB
+      await db.execute('PRAGMA busy_timeout = 5000'); // 5 second timeout instead of 30
+      debugPrint('✅ Database anti-deadlock configuration applied');
+    } catch (e) {
+      debugPrint('⚠️ Database configuration error: $e');
+    }
+
+    // Additional optimization settings
+    try {
       await db.execute('PRAGMA page_size = 4096');
       await db.execute('PRAGMA auto_vacuum = INCREMENTAL');
-      await db.execute('PRAGMA busy_timeout = 30000'); // 30 second timeout
-      debugPrint('✅ Database optimizations applied');
+      debugPrint('✅ Additional database optimizations applied');
     } catch (e) {
-      debugPrint('⚠️ Some database optimizations failed: $e');
+      debugPrint('⚠️ Some additional optimizations failed: $e');
     }
   }
 
@@ -759,18 +773,34 @@ class DatabaseManager {
     }
   }
 
-  /// Execute a transaction safely with timeout and retry
+  /// Execute a transaction safely with deadlock prevention
   static Future<T> transaction<T>(
-    Future<T> Function(Transaction txn) action,
-  ) async {
-    final db = await database;
-    return await db.transaction(action).timeout(
-      const Duration(seconds: 15),
-      onTimeout: () {
-        debugPrint('⚠️ Database transaction timeout after 15 seconds');
-        throw TimeoutException('Database transaction timeout', const Duration(seconds: 15));
-      },
-    );
+    Future<T> Function(Transaction txn) action, {
+    String? debugTag,
+  }) async {
+    final transactionId = debugTag ?? DateTime.now().millisecondsSinceEpoch.toString();
+
+    // Check if we already have too many active transactions
+    if (_activeTransactions.length > 3) {
+      debugPrint('⚠️ Too many active transactions (${_activeTransactions.length}), waiting...');
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+
+    _activeTransactions.add(transactionId);
+
+    try {
+      final db = await database;
+      final result = await db.transaction(action).timeout(
+        const Duration(seconds: 5), // Shorter timeout to prevent deadlocks
+        onTimeout: () {
+          debugPrint('⚠️ Database transaction timeout after 5 seconds: $transactionId');
+          throw TimeoutException('Database transaction timeout: $transactionId', const Duration(seconds: 5));
+        },
+      );
+      return result;
+    } finally {
+      _activeTransactions.remove(transactionId);
+    }
   }
 
   /// Execute raw query with error handling

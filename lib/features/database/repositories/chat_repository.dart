@@ -131,69 +131,67 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
   /// Get all chat sessions with summary information
   static Future<List<ChatSessionSummary>> getAllSessions() async {
     try {
-      final db = await DatabaseManager.database;
+      return await DatabaseManager.transaction((txn) async {
+        // Use simpler queries with timeout to avoid deadlocks
+        final sessions = await txn.query(
+          _tableName,
+          orderBy: 'last_message_at DESC',
+        ).timeout(const Duration(seconds: 3));
 
-      const sessionQuery =
-          '''
-        SELECT
-          cs.id as sessionId,
-          cs.device_id as deviceId,
-          cs.device_name as deviceName,
-          cs.unread_count as unreadCount,
-          cs.last_connection_at as lastConnectionAt,
-          m.message as lastMessage,
-          m.timestamp as lastMessageTime,
-          m.connection_type as connectionType
-        FROM $_tableName cs
-        LEFT JOIN (
-          SELECT DISTINCT chatSessionId, message, timestamp, connection_type,
-            ROW_NUMBER() OVER (PARTITION BY chatSessionId ORDER BY timestamp DESC) as rn
-          FROM messages
-          WHERE chatSessionId IS NOT NULL
-        ) m ON cs.id = m.chatSessionId AND m.rn = 1
-        ORDER BY COALESCE(m.timestamp, cs.last_message_at) DESC
-      ''';
+        final List<ChatSessionSummary> summaries = [];
 
-      final results = await db.rawQuery(sessionQuery);
+        for (final sessionRow in sessions) {
+          // Get last message for each session separately with timeout
+          final lastMessageResult = await txn.query(
+            'messages',
+            where: 'chatSessionId = ?',
+            whereArgs: [sessionRow['id']],
+            orderBy: 'timestamp DESC',
+            limit: 1,
+          ).timeout(const Duration(seconds: 1));
 
-      return results.map((row) {
-        ConnectionType? connectionType;
-        final connTypeStr = row['connectionType'] as String?;
-        if (connTypeStr != null) {
-          if (connTypeStr.toLowerCase().contains('wifi_direct')) {
-            connectionType = ConnectionType.wifiDirect;
-          } else if (connTypeStr.toLowerCase().contains('hotspot')) {
-            connectionType = ConnectionType.hotspot;
-          } else {
-            connectionType = ConnectionType.unknown;
+          final lastMessage = lastMessageResult.isNotEmpty ? lastMessageResult.first : null;
+
+          ConnectionType? connectionType;
+          final connTypeStr = lastMessage?['connection_type'] as String?;
+          if (connTypeStr != null) {
+            if (connTypeStr.toLowerCase().contains('wifi_direct')) {
+              connectionType = ConnectionType.wifiDirect;
+            } else if (connTypeStr.toLowerCase().contains('hotspot')) {
+              connectionType = ConnectionType.hotspot;
+            } else {
+              connectionType = ConnectionType.unknown;
+            }
           }
+
+          final lastConnectionAt = sessionRow['last_connection_at'] as int?;
+          final isOnline =
+              lastConnectionAt != null &&
+              DateTime.now()
+                      .difference(
+                        DateTime.fromMillisecondsSinceEpoch(lastConnectionAt),
+                      )
+                      .inMinutes <
+                  5;
+
+          summaries.add(ChatSessionSummary(
+            sessionId: sessionRow['id'] as String,
+            deviceId: sessionRow['device_id'] as String,
+            deviceName: sessionRow['device_name'] as String,
+            lastMessage: lastMessage?['message'] as String?,
+            lastMessageTime: lastMessage?['timestamp'] != null
+                ? DateTime.fromMillisecondsSinceEpoch(
+                    lastMessage!['timestamp'] as int,
+                  )
+                : null,
+            unreadCount: sessionRow['unread_count'] as int? ?? 0,
+            isOnline: isOnline,
+            connectionType: connectionType,
+          ));
         }
 
-        final lastConnectionAt = row['lastConnectionAt'] as int?;
-        final isOnline =
-            lastConnectionAt != null &&
-            DateTime.now()
-                    .difference(
-                      DateTime.fromMillisecondsSinceEpoch(lastConnectionAt),
-                    )
-                    .inMinutes <
-                5;
-
-        return ChatSessionSummary(
-          sessionId: row['sessionId'] as String,
-          deviceId: row['deviceId'] as String,
-          deviceName: row['deviceName'] as String,
-          lastMessage: row['lastMessage'] as String?,
-          lastMessageTime: row['lastMessageTime'] != null
-              ? DateTime.fromMillisecondsSinceEpoch(
-                  row['lastMessageTime'] as int,
-                )
-              : null,
-          unreadCount: row['unreadCount'] as int? ?? 0,
-          isOnline: isOnline,
-          connectionType: connectionType,
-        );
-      }).toList();
+        return summaries;
+      });
     } catch (e) {
       debugPrint('❌ Error getting chat sessions: $e');
       return [];
@@ -239,44 +237,44 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
     }
   }
 
-  /// Update message count and timestamps for a session
+  /// Update message count and timestamps for a session (optimized with timeout)
   static Future<bool> updateMessageCount(String sessionId) async {
     try {
-      final db = await DatabaseManager.database;
+      return await DatabaseManager.transaction((txn) async {
+        // Use simpler query with timeout to prevent locks
+        final messageCountResult = await txn.rawQuery(
+          '''
+          SELECT
+            COUNT(*) as total_messages,
+            COUNT(CASE WHEN synced = 0 AND isMe = 0 THEN 1 END) as unread_count,
+            MAX(timestamp) as last_message_time
+          FROM messages
+          WHERE chatSessionId = ?
+        ''',
+          [sessionId],
+        ).timeout(const Duration(seconds: 2));
 
-      // Get message count and unread count
-      final messageCountResult = await db.rawQuery(
-        '''
-        SELECT
-          COUNT(*) as total_messages,
-          COUNT(CASE WHEN synced = 0 AND isMe = 0 THEN 1 END) as unread_count,
-          MAX(timestamp) as last_message_time
-        FROM messages
-        WHERE chatSessionId = ?
-      ''',
-        [sessionId],
-      );
+        if (messageCountResult.isNotEmpty) {
+          final row = messageCountResult.first;
+          final messageCount = row['total_messages'] as int? ?? 0;
+          final unreadCount = row['unread_count'] as int? ?? 0;
+          final lastMessageTime = row['last_message_time'] as int?;
 
-      if (messageCountResult.isNotEmpty) {
-        final row = messageCountResult.first;
-        final messageCount = row['total_messages'] as int? ?? 0;
-        final unreadCount = row['unread_count'] as int? ?? 0;
-        final lastMessageTime = row['last_message_time'] as int?;
+          await txn.update(
+            _tableName,
+            {
+              'message_count': messageCount,
+              'unread_count': unreadCount,
+              if (lastMessageTime != null) 'last_message_at': lastMessageTime,
+            },
+            where: 'id = ?',
+            whereArgs: [sessionId],
+          ).timeout(const Duration(seconds: 1));
 
-        await db.update(
-          _tableName,
-          {
-            'message_count': messageCount,
-            'unread_count': unreadCount,
-            if (lastMessageTime != null) 'last_message_at': lastMessageTime,
-          },
-          where: 'id = ?',
-          whereArgs: [sessionId],
-        );
-
-        return true;
-      }
-      return false;
+          return true;
+        }
+        return false;
+      });
     } catch (e) {
       debugPrint('❌ Error updating chat session message count: $e');
       return false;
