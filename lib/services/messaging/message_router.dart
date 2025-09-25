@@ -18,7 +18,12 @@ class MessageRouter {
   final Map<String, List<MessageModel>> _messageQueue = {};
   
   // Track device connections for proper routing
-  final Map<String, String> _deviceConnections = {}; 
+  final Map<String, String> _deviceConnections = {};
+
+  // Message deduplication to prevent duplicate processing
+  final Set<String> _processedMessageIds = {};
+  final Map<String, DateTime> _messageTimestamps = {};
+  static const Duration _deduplicationWindow = Duration(minutes: 5); 
 
   void registerDeviceConnection(String deviceId, String socketId) {
     _deviceConnections[socketId] = deviceId;
@@ -47,6 +52,21 @@ class MessageRouter {
 
   Future<void> routeMessage(MessageModel message) async {
     try {
+      final messageId = message.messageId ?? 'unknown';
+
+      // Check for duplicate messages
+      if (_processedMessageIds.contains(messageId)) {
+        debugPrint('⚠️ Duplicate message blocked by MessageRouter: $messageId');
+        return;
+      }
+
+      // Clean up old entries periodically
+      _cleanupOldEntries();
+
+      // Mark as processed
+      _processedMessageIds.add(messageId);
+      _messageTimestamps[messageId] = DateTime.now();
+
       debugPrint('📨 Routing message:');
       debugPrint('  From: ${message.fromUser} (${message.deviceId})');
       debugPrint('  To: ${message.endpointId}');
@@ -112,6 +132,27 @@ class MessageRouter {
         _messageQueue.remove(deviceId);
         debugPrint('✅ Processed ${messages.length} queued messages for $deviceId');
       }
+    }
+  }
+
+  /// Clean up old deduplication entries
+  void _cleanupOldEntries() {
+    final cutoff = DateTime.now().subtract(_deduplicationWindow);
+    final toRemove = <String>[];
+
+    _messageTimestamps.forEach((messageId, timestamp) {
+      if (timestamp.isBefore(cutoff)) {
+        toRemove.add(messageId);
+      }
+    });
+
+    for (final messageId in toRemove) {
+      _processedMessageIds.remove(messageId);
+      _messageTimestamps.remove(messageId);
+    }
+
+    if (toRemove.isNotEmpty) {
+      debugPrint('🧹 Cleaned up ${toRemove.length} old message entries from MessageRouter');
     }
   }
 

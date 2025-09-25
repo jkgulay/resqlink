@@ -312,8 +312,9 @@ class P2PMainService extends P2PBaseService {
           );
           addConnectedDevice(peer.deviceAddress, peer.deviceName);
 
-          // Trigger connection callback
-          onDeviceConnected?.call(peer.deviceAddress, peer.deviceName);
+          // DON'T trigger onDeviceConnected here - wait for socket/handshake completion
+          // This prevents duplicate connection notifications from WiFi Direct peer discovery
+          debugPrint('⏳ Waiting for socket connection establishment with ${peer.deviceName}');
         }
       }
     }

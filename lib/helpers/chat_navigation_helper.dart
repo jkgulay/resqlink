@@ -570,8 +570,27 @@ class ChatNavigationHelper {
   }
 
   static Future<String> _getDisplayName([String? fallbackDeviceName]) async {
-    // Return the device's name directly - this is for displaying OTHER devices in navigation
-    return fallbackDeviceName ?? 'Unknown Device';
+    if (fallbackDeviceName == null) return 'Unknown Device';
+
+    try {
+      // First, try to get display name from chat sessions (most reliable)
+      final sessions = await ChatRepository.getAllSessions();
+      final matchingSession = sessions.where((session) =>
+        session.deviceId == fallbackDeviceName ||
+        session.deviceName == fallbackDeviceName
+      ).firstOrNull;
+
+      if (matchingSession != null) {
+        return matchingSession.deviceName;
+      }
+
+      // If not found in sessions, return the fallback name
+      return fallbackDeviceName;
+
+    } catch (e) {
+      debugPrint('⚠️ Error getting display name from database: $e');
+      return fallbackDeviceName;
+    }
   }
 
   /// Show snackbar safely with duplicate prevention

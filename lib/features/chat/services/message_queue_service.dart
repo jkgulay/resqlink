@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:resqlink/features/database/repositories/message_repository.dart';
 import '../../../models/message_model.dart';
 import '../../database/core/database_manager.dart';
 import '../../p2p/events/p2p_event_bus.dart';
@@ -624,8 +625,58 @@ class MessageQueueService extends ChangeNotifier {
     }
   }
 
+  /// EMERGENCY: Clear message backlog and duplicate messages
+  Future<void> emergencyCleanup() async {
+    try {
+      debugPrint('🚨 EMERGENCY CLEANUP: Starting...');
+
+      final db = await DatabaseManager.database;
+
+      // 1. Clear all queued messages
+      await db.delete(_queueTableName);
+      _deviceQueues.clear();
+
+      // 2. Remove duplicate messages from main messages table
+      await db.rawDelete('''
+        DELETE FROM messages
+        WHERE id NOT IN (
+          SELECT MIN(id)
+          FROM messages
+          GROUP BY messageId
+        )
+      ''');
+
+      // 3. Remove messages older than 1 hour to reduce load
+      final oneHourAgo = DateTime.now().subtract(Duration(hours: 1)).millisecondsSinceEpoch;
+      await db.rawDelete('DELETE FROM messages WHERE timestamp < ?', [oneHourAgo]);
+
+      // 4. Reset processing caches
+      if (MessageRepository.processingMessageIds.isNotEmpty) {
+        MessageRepository.processingMessageIds.clear();
+      }
+      if (MessageRepository.recentlyProcessed.isNotEmpty) {
+        MessageRepository.recentlyProcessed.clear();
+      }
+
+      notifyListeners();
+      debugPrint('🚨 EMERGENCY CLEANUP: Completed successfully');
+
+    } catch (e) {
+      debugPrint('❌ EMERGENCY CLEANUP FAILED: $e');
+    }
+  }
+
   List<QueuedMessage> getQueueForDevice(String deviceId) {
     return List.from(_deviceQueues[deviceId] ?? []);
+  }
+
+  /// Get total count of all queued messages across all devices
+  int getTotalQueuedMessageCount() {
+    int total = 0;
+    for (final queue in _deviceQueues.values) {
+      total += queue.length;
+    }
+    return total;
   }
 
   Future<void> processQueueForDevice(String deviceId) async {

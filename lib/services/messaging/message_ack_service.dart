@@ -17,9 +17,9 @@ class MessageAcknowledgmentService {
 
   // Initialize with P2P service
   void initialize(P2PConnectionService p2pService) {
-    p2pService.onMessageReceived = (message) {
-      _handleIncomingMessage(message as P2PMessage, p2pService);
-    };
+    // DO NOT override onMessageReceived - use MessageRouter system instead
+    // This prevents conflicts with the centralized message handling
+    debugPrint('⚠️ MessageAcknowledgmentService initialized - using MessageRouter for message handling');
   }
 
   // Send message with acknowledgment tracking
@@ -60,51 +60,7 @@ class MessageAcknowledgmentService {
     }
   }
 
-  void _handleIncomingMessage(P2PMessage message, P2PConnectionService p2pService) {
-    // Send acknowledgment for received messages
-    if (message.type != MessageType.system) {
-      _sendAcknowledgment(message, p2pService);
-    }
 
-    // Handle acknowledgment messages
-    if (message.message.startsWith('ACK:')) {
-      _handleAcknowledgment(message);
-    }
-  }
-
-  Future<void> _sendAcknowledgment(
-    P2PMessage originalMessage, 
-    P2PConnectionService p2pService,
-  ) async {
-    try {
-      final ackMessage = 'ACK:${originalMessage.id}';
-      
-      await p2pService.sendMessage(
-        message: ackMessage,
-        type: MessageType.system,
-        targetDeviceId: originalMessage.senderId, senderName: '',
-      );
-
-      debugPrint("📨 ACK sent for message: ${originalMessage.id}");
-    } catch (e) {
-      debugPrint("❌ Failed to send ACK: $e");
-    }
-  }
-
-  void _handleAcknowledgment(P2PMessage ackMessage) {
-    final messageId = ackMessage.message.substring(4); // Remove 'ACK:' prefix
-    
-    if (_pendingAcks.containsKey(messageId)) {
-      _pendingAcks.remove(messageId);
-      _ackTimeouts[messageId]?.cancel();
-      _ackTimeouts.remove(messageId);
-
-      // Update message status to delivered
-      MessageRepository.updateStatus(messageId, MessageStatus.delivered);
-      
-      debugPrint("✅ ACK received for message: $messageId");
-    }
-  }
 
   void _handleAckTimeout(String messageId, P2PConnectionService p2pService) {
     debugPrint("⏰ ACK timeout for message: $messageId");

@@ -86,7 +86,8 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   }
 
   void _setupMessageListener() {
-    widget.p2pService.onMessageReceived = _onMessageReceived;
+    // Note: Use event bus or message router for message handling to prevent conflicts
+    // widget.p2pService.onMessageReceived = _onMessageReceived;
   }
 
   void _setupMessageRouterListener() {
@@ -149,23 +150,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     await ChatRepository.markSessionMessagesAsRead(widget.sessionId);
   }
 
-  void _onMessageReceived(MessageModel message) async {
-    if (!mounted) return;
 
-    // Check if this message belongs to the current chat session
-    if (message.chatSessionId == widget.sessionId ||
-        (_chatSession != null && message.endpointId == _chatSession!.deviceId)) {
-
-      // Update message with chat session ID if not set
-      if (message.chatSessionId == null) {
-        final updatedMessage = message.copyWith(chatSessionId: widget.sessionId);
-        await MessageRepository.insert(updatedMessage);
-      }
-
-      await _loadChatData();
-      _markMessagesAsRead();
-    }
-  }
 
   /// Handle messages from MessageRouter (real-time)
   void _onRouterMessage(MessageModel message) async {
@@ -174,19 +159,32 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     debugPrint('📨 ChatSession received router message from ${message.fromUser}: ${message.message}');
 
     // Update message with chat session ID if not set
+    MessageModel messageToAdd = message;
     if (message.chatSessionId == null) {
-      final updatedMessage = message.copyWith(chatSessionId: widget.sessionId);
-      await MessageRepository.insert(updatedMessage);
+      messageToAdd = message.copyWith(chatSessionId: widget.sessionId);
+      await MessageRepository.insert(messageToAdd);
     }
 
-    // Reload chat data to show new message
-    await _loadChatData();
+    // Check if message is not already in our current messages list (avoid duplicates)
+    final alreadyExists = _messages.any((m) =>
+      m.messageId == messageToAdd.messageId ||
+      (m.timestamp == messageToAdd.timestamp && m.fromUser == messageToAdd.fromUser && m.message == messageToAdd.message)
+    );
+
+    if (!alreadyExists) {
+      // Add message directly to UI instead of reloading everything
+      setState(() {
+        _messages.add(messageToAdd);
+        // Sort by timestamp to maintain order
+        _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      });
+
+      // Scroll to bottom to show new message
+      _scrollToBottom();
+    }
 
     // Mark messages as read
     await _markMessagesAsRead();
-
-    // Scroll to bottom to show new message
-    _scrollToBottom();
 
     // Update queued message count
     _updateQueuedMessageCount();
@@ -232,6 +230,13 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       // Save message to database
       await MessageRepository.insert(message);
 
+      // Update UI immediately with the new message (optimistic update)
+      setState(() {
+        _messages.add(message);
+      });
+      _scrollToBottom();
+      _messageController.clear();
+
       // Send via P2P if connected
       if (_isConnected) {
         try {
@@ -244,17 +249,41 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
           // Update message status to sent
           await MessageRepository.updateStatus(messageId, MessageStatus.sent);
+
+          // Update the message in UI to show sent status
+          final updatedMessage = message.copyWith(status: MessageStatus.sent);
+          setState(() {
+            final index = _messages.indexWhere((m) => m.messageId == messageId);
+            if (index != -1) {
+              _messages[index] = updatedMessage;
+            }
+          });
         } catch (e) {
           debugPrint('❌ Error sending P2P message: $e');
           await MessageRepository.updateStatus(messageId, MessageStatus.failed);
+
+          // Update the message in UI to show failed status
+          final failedMessage = message.copyWith(status: MessageStatus.failed);
+          setState(() {
+            final index = _messages.indexWhere((m) => m.messageId == messageId);
+            if (index != -1) {
+              _messages[index] = failedMessage;
+            }
+          });
         }
       } else {
         // Mark as failed if not connected
         await MessageRepository.updateStatus(messageId, MessageStatus.failed);
-      }
 
-      _messageController.clear();
-      await _loadChatData();
+        // Update the message in UI to show failed status
+        final failedMessage = message.copyWith(status: MessageStatus.failed);
+        setState(() {
+          final index = _messages.indexWhere((m) => m.messageId == messageId);
+          if (index != -1) {
+            _messages[index] = failedMessage;
+          }
+        });
+      }
 
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
@@ -376,6 +405,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     return Scaffold(
       backgroundColor: ResQLinkTheme.backgroundDark,
       appBar: _buildAppBar(),
+      resizeToAvoidBottomInset: true, // Allow proper keyboard handling for standalone chat
       body: _buildBody(),
     );
   }

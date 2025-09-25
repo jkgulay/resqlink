@@ -257,10 +257,17 @@ class P2PDiscoveryService {
   Future<void> _discoverBroadcastDevices() async {
     try {
       debugPrint('🔍 Starting UDP broadcast discovery...');
-      
+
+      // Check network connectivity first
+      final interfaces = await NetworkInterface.list();
+      if (interfaces.isEmpty || !interfaces.any((interface) => interface.addresses.isNotEmpty)) {
+        debugPrint('⚠️ No network interfaces available, skipping broadcast discovery');
+        return;
+      }
+
       final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
       socket.broadcastEnabled = true;
-      
+
       // Send discovery broadcast
       final discoveryMessage = jsonEncode({
         'type': 'discovery_request',
@@ -268,9 +275,44 @@ class P2PDiscoveryService {
         'userName': _baseService.userName,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
-      
+
       final data = utf8.encode(discoveryMessage);
-      socket.send(data, InternetAddress('255.255.255.255'), P2PBaseService.defaultPort);
+
+      // Try sending to different broadcast addresses to improve reliability
+      final broadcastAddresses = ['255.255.255.255'];
+
+      // Add specific subnet broadcasts for available interfaces
+      for (final interface in interfaces) {
+        for (final addr in interface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+            // Calculate broadcast address for this subnet (assuming /24)
+            final parts = addr.address.split('.');
+            if (parts.length == 4) {
+              final broadcastAddr = '${parts[0]}.${parts[1]}.${parts[2]}.255';
+              if (!broadcastAddresses.contains(broadcastAddr)) {
+                broadcastAddresses.add(broadcastAddr);
+              }
+            }
+          }
+        }
+      }
+
+      bool sentSuccessfully = false;
+      for (final broadcastAddr in broadcastAddresses) {
+        try {
+          socket.send(data, InternetAddress(broadcastAddr), P2PBaseService.defaultPort);
+          sentSuccessfully = true;
+          debugPrint('📡 Discovery broadcast sent to $broadcastAddr');
+        } catch (e) {
+          debugPrint('⚠️ Failed to send broadcast to $broadcastAddr: $e');
+        }
+      }
+
+      if (!sentSuccessfully) {
+        debugPrint('❌ Failed to send broadcast to any address');
+        socket.close();
+        return;
+      }
       
       debugPrint('📡 Discovery broadcast sent');
       

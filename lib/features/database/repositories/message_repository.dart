@@ -10,8 +10,35 @@ import 'chat_repository.dart';
 class MessageRepository {
   static const String _tableName = 'messages';
 
+  // Global message deduplication cache to prevent duplicate insertions
+  static final Set<String> _processingMessageIds = <String>{};
+  static final Map<String, DateTime> _recentlyProcessed = <String, DateTime>{};
+
+  // Emergency cleanup access
+  static Set<String> get processingMessageIds => _processingMessageIds;
+  static Map<String, DateTime> get recentlyProcessed => _recentlyProcessed;
+  static const Duration _deduplicationWindow = Duration(minutes: 5);
+
   /// Insert a new message with optimized transaction handling
   static Future<int> insert(MessageModel message, {String? currentUserId}) async {
+    final messageId = message.messageId ?? 'msg_${DateTime.now().millisecondsSinceEpoch}';
+
+    // Check for duplicate processing
+    if (_processingMessageIds.contains(messageId)) {
+      debugPrint('⚠️ Message already being processed: $messageId');
+      return -1;
+    }
+
+    // Check recently processed messages
+    _cleanupOldEntries();
+    if (_recentlyProcessed.containsKey(messageId)) {
+      debugPrint('⚠️ Message recently processed: $messageId');
+      return -1;
+    }
+
+    // Mark as processing
+    _processingMessageIds.add(messageId);
+
     try {
       return await DatabaseManager.transaction((txn) async {
         // Generate or use existing chat session ID
@@ -52,7 +79,7 @@ class MessageRepository {
           // Note: createdAt has database default, no need to set
         };
 
-        final id = await txn.insert(_tableName, messageMap).timeout(const Duration(seconds: 2));
+        final id = await txn.insert(_tableName, messageMap).timeout(const Duration(seconds: 1)); // Reduced timeout
 
         // Update chat session counts directly in transaction to avoid separate calls
         if (chatSessionId != null) {
@@ -63,12 +90,23 @@ class MessageRepository {
           ).timeout(const Duration(seconds: 1));
         }
 
+        // Mark as successfully processed
+        _recentlyProcessed[messageId] = DateTime.now();
         return id;
       });
     } catch (e) {
       debugPrint('❌ Error inserting message: $e');
       return -1;
+    } finally {
+      // Always remove from processing set
+      _processingMessageIds.remove(messageId);
     }
+  }
+
+  /// Clean up old entries from deduplication cache
+  static void _cleanupOldEntries() {
+    final cutoff = DateTime.now().subtract(_deduplicationWindow);
+    _recentlyProcessed.removeWhere((messageId, timestamp) => timestamp.isBefore(cutoff));
   }
 
   /// Get messages for a specific chat session with pagination (optimized with timeout)
