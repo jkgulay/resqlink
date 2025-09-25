@@ -232,7 +232,7 @@ class WiFiDirectService {
       if (result != null && result['peers'] != null) {
         final peerList = result['peers'] as List;
         final peers = peerList
-            .map((peer) => WiFiDirectPeer.fromMap(peer as Map<String, dynamic>))
+            .map((peer) => WiFiDirectPeer.fromMap(Map<String, dynamic>.from(peer as Map? ?? {})))
             .toList();
 
         if (!_peersEqual(_discoveredPeers, peers)) {
@@ -480,19 +480,19 @@ class WiFiDirectService {
 
     switch (call.method) {
       case 'onStateChanged':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         _stateController.add(args);
 
       case 'onPeersChanged':
         await _refreshPeerList();
 
       case 'onPeersAvailable':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         if (args['peers'] != null) {
           final peerList = args['peers'] as List;
           final peers = peerList
               .map(
-                (peer) => WiFiDirectPeer.fromMap(peer as Map<String, dynamic>),
+                (peer) => WiFiDirectPeer.fromMap(Map<String, dynamic>.from(peer as Map? ?? {})),
               )
               .toList();
           _discoveredPeers = peers;
@@ -503,14 +503,14 @@ class WiFiDirectService {
         }
 
       case 'onConnectionChanged':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         await _handleConnectionChanged(args);
 
       case 'onSystemConnectionDetected':
-        await _handleSystemConnection(call.arguments as Map<String, dynamic>);
+        await _handleSystemConnection(Map<String, dynamic>.from(call.arguments as Map? ?? {}));
 
       case 'onSocketEstablished':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         debugPrint('🔌 Socket established: $args');
         _stateController.add({
           'socketEstablished': true,
@@ -518,7 +518,7 @@ class WiFiDirectService {
         });
 
       case 'onExistingConnectionFound':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         debugPrint('🔗 Existing connection found: $args');
         _connectionState = WiFiDirectConnectionState.connected;
         _connectionController.add(_connectionState);
@@ -531,7 +531,7 @@ class WiFiDirectService {
         await _refreshPeerList();
 
       case 'onMessageReceived':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         debugPrint('📨 Message received: ${args['message']}');
 
         // CRITICAL FIX: Process the message through the message router
@@ -555,12 +555,12 @@ class WiFiDirectService {
         });
 
       case 'onPeersUpdated':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         if (args['peers'] != null) {
           final peerList = args['peers'] as List;
           final peers = peerList
               .map(
-                (peer) => WiFiDirectPeer.fromMap(peer as Map<String, dynamic>),
+                (peer) => WiFiDirectPeer.fromMap(Map<String, dynamic>.from(peer as Map? ?? {})),
               )
               .toList();
           _discoveredPeers = peers;
@@ -571,13 +571,13 @@ class WiFiDirectService {
         }
 
       case 'onDeviceChanged':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         debugPrint(
           '📱 Device info: ${args['deviceName']} (${args['deviceAddress']})',
         );
 
       case 'onServerSocketReady':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         debugPrint('🔌 Server socket ready on port ${args['port']}');
         _stateController.add({
           'serverSocketReady': true,
@@ -585,7 +585,7 @@ class WiFiDirectService {
         });
 
       case 'onConnectionError':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         debugPrint('❌ Connection error: ${args['error']}');
         _stateController.add({
           'connectionError': true,
@@ -674,7 +674,7 @@ class WiFiDirectService {
 
     switch (call.method) {
       case 'onPermissionResult':
-        final args = call.arguments as Map<String, dynamic>;
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         final permission = args['permission'] as String?;
         final granted = args['granted'] as bool? ?? false;
         debugPrint('📋 Permission result: $permission = $granted');
@@ -692,7 +692,8 @@ class WiFiDirectService {
   Future<void> _handleSystemConnection(Map<String, dynamic> data) async {
     debugPrint('🔗 System WiFi Direct connection detected!');
 
-    final connectionInfo = data['connectionInfo'] as Map<String, dynamic>?;
+    final connectionInfo = data['connectionInfo'] != null ?
+      Map<String, dynamic>.from(data['connectionInfo'] as Map? ?? {}) : null;
     final peers = data['peers'] as List?;
 
     if (connectionInfo != null) {
@@ -710,7 +711,7 @@ class WiFiDirectService {
         if (peers != null) {
           final systemPeers = peers
               .map(
-                (peer) => WiFiDirectPeer.fromMap(peer as Map<String, dynamic>),
+                (peer) => WiFiDirectPeer.fromMap(Map<String, dynamic>.from(peer as Map? ?? {})),
               )
               .toList();
           _discoveredPeers = systemPeers;
@@ -759,7 +760,7 @@ class WiFiDirectService {
         debugPrint('  - Group Owner: ${result['isGroupOwner']}');
         debugPrint('  - Group Formed: ${result['groupFormed']}');
 
-        return Map<String, dynamic>.from(result);
+        return Map<String, dynamic>.from(result as Map? ?? {});
       }
 
       return null;

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:english_words/english_words.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:resqlink/features/database/repositories/system_repository.dart';
 import 'package:resqlink/features/database/core/database_manager.dart';
 import 'package:resqlink/pages/landing_page.dart';
 import 'package:resqlink/widgets/message/notification_service.dart';
@@ -19,15 +18,19 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
+    debugPrint('🔥 Initializing Firebase...');
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
-    );
+    ).timeout(const Duration(seconds: 30));
+    debugPrint('✅ Firebase initialized');
 
     if (kDebugMode) {
-      await FirebaseDebugService.checkFirebaseSetup();
+      debugPrint('🔍 Running Firebase debug checks...');
+      await FirebaseDebugService.checkFirebaseSetup().timeout(const Duration(seconds: 10));
+      debugPrint('✅ Firebase debug checks completed');
     }
   } catch (e) {
-    debugPrint('Firebase init failed (offline?): $e');
+    debugPrint('❌ Firebase init failed (offline?): $e');
   }
 
   await _initializeServices();
@@ -36,34 +39,45 @@ Future<void> main() async {
 }
 
 Future<void> _initializeServices() async {
-  // Initialize map service early
+  debugPrint('🚀 Starting service initialization...');
+
+  // Initialize other services with timeout
   try {
-    await PhilippinesMapService.instance.initialize();
+    debugPrint('📱 Initializing notification service...');
+    await NotificationService.initialize().timeout(const Duration(seconds: 10));
+    debugPrint('✅ Notification service initialized');
+  } catch (e) {
+    debugPrint('❌ Notification service failed: $e');
+  }
+
+  try {
+    debugPrint('⚙️ Loading settings...');
+    await SettingsService.instance.loadSettings().timeout(const Duration(seconds: 10));
+    debugPrint('✅ Settings loaded');
+  } catch (e) {
+    debugPrint('❌ Settings loading failed: $e');
+  }
+
+  // Initialize map service with timeout
+  try {
+    debugPrint('🗺️ Initializing map service...');
+    await PhilippinesMapService.instance.initialize().timeout(const Duration(seconds: 15));
     debugPrint('✅ Map service initialized in main');
   } catch (e) {
     debugPrint('❌ Map service init failed in main: $e');
   }
 
-  // Initialize other services
-  await NotificationService.initialize();
-  await SettingsService.instance.loadSettings();
-
-  // FORCE database recreation to fix schema issues
+  // Initialize database (preserve existing data)
   try {
-    debugPrint('🗑️ Deleting old database to fix schema...');
-    await SystemRepository.deleteDatabaseFile();
-    debugPrint('✅ Old database deleted');
-  } catch (e) {
-    debugPrint('⚠️ Could not delete old database: $e');
-  }
-
-  // Initialize database with new schema
-  try {
-    await DatabaseManager.database;
-    debugPrint('✅ New database initialized successfully');
+    debugPrint('💾 Initializing database...');
+    await DatabaseManager.database.timeout(const Duration(seconds: 15));
+    debugPrint('✅ Database initialized successfully');
   } catch (e) {
     debugPrint('❌ Database initialization failed: $e');
+    // Only in case of critical error, consider migration instead of deletion
   }
+
+  debugPrint('🎯 Service initialization completed');
 }
 
 class MyApp extends StatelessWidget {
