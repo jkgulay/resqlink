@@ -67,14 +67,14 @@ Future<void> _initializeServices() async {
     debugPrint('❌ Map service init failed in main: $e');
   }
 
-  // Initialize database (preserve existing data)
+  // Initialize database (preserve existing data) - DO THIS ONLY ONCE
   try {
     debugPrint('💾 Initializing database...');
-    await DatabaseManager.database.timeout(const Duration(seconds: 15));
+    await DatabaseManager.database.timeout(const Duration(seconds: 10));
     debugPrint('✅ Database initialized successfully');
   } catch (e) {
     debugPrint('❌ Database initialization failed: $e');
-    // Only in case of critical error, consider migration instead of deletion
+    // If database fails, the app can still work in memory-only mode
   }
 
   debugPrint('🎯 Service initialization completed');

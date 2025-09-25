@@ -61,6 +61,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   bool _isTyping = false;
   Timer? _refreshTimer;
   Timer? _typingTimer;
+  Timer? _loadConversationsDebounce;
+  bool _isLoadingConversations = false;
 
   // Current user info
   String get _currentUserId => widget.p2pService.deviceId ?? 'unknown';
@@ -81,11 +83,25 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     _setupMessageRouterListener();
   }
 
+  bool _conversationsEqual(List<MessageSummary> a, List<MessageSummary> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].endpointId != b[i].endpointId ||
+          a[i].messageCount != b[i].messageCount ||
+          a[i].unreadCount != b[i].unreadCount ||
+          a[i].lastMessage?.timestamp != b[i].lastMessage?.timestamp) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   @override
   void dispose() {
     _refreshTimer?.cancel();
     _typingTimer?.cancel();
     _queueProcessingTimer?.cancel();
+    _loadConversationsDebounce?.cancel();
 
     // Unregister MessageRouter listener
     if (_selectedEndpointId != null) {
@@ -265,12 +281,24 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
   Future<void> _loadConversations() async {
-    if (!mounted) return;
+    if (!mounted || _isLoadingConversations) return;
+
+    // Increased debounce to reduce database calls
+    _loadConversationsDebounce?.cancel();
+    _loadConversationsDebounce = Timer(const Duration(milliseconds: 1000), () async {
+      await _loadConversationsInternal();
+    });
+  }
+
+  Future<void> _loadConversationsInternal() async {
+    if (!mounted || _isLoadingConversations) return;
+
+    _isLoadingConversations = true;
 
     try {
-      // Load both messages and chat sessions for comprehensive conversation list
-      final messages = await MessageRepository.getAllMessages().timeout(Duration(seconds: 10));
-      final chatSessions = await ChatRepository.getAllSessions();
+      // Use smaller limits and shorter timeouts to prevent database locks
+      final messages = await MessageRepository.getAllMessages(limit: 500).timeout(Duration(seconds: 2));
+      final chatSessions = await ChatRepository.getAllSessions().timeout(Duration(seconds: 2));
       if (!mounted) return;
 
       final connectedDevices = widget.p2pService.connectedDevices;
@@ -349,20 +377,32 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       }
 
       if (mounted) {
-        setState(() {
-          _conversations = conversationMap.values.toList()
-            ..sort((a, b) => (b.lastMessage?.dateTime ?? DateTime(0))
-                .compareTo(a.lastMessage?.dateTime ?? DateTime(0)));
-          _isLoading = false;
-        });
+        final newConversations = conversationMap.values.toList()
+          ..sort((a, b) => (b.lastMessage?.dateTime ?? DateTime(0))
+              .compareTo(a.lastMessage?.dateTime ?? DateTime(0)));
 
-        debugPrint('✅ Loaded ${_conversations.length} conversations (${connectedDevices.length} connected)');
+        // Only update state if data actually changed to prevent unnecessary rebuilds
+        if (_conversations.length != newConversations.length ||
+            !_conversationsEqual(_conversations, newConversations)) {
+          setState(() {
+            _conversations = newConversations;
+            _isLoading = false;
+          });
+          debugPrint('✅ Updated ${_conversations.length} conversations (${connectedDevices.length} connected)');
+        } else {
+          setState(() => _isLoading = false);
+        }
       }
     } catch (e) {
       debugPrint('❌ Error loading conversations: $e');
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          // Keep existing conversations on error
+        });
       }
+    } finally {
+      _isLoadingConversations = false;
     }
   }
 
@@ -402,7 +442,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     if (!mounted) return;
 
     try {
-      await _loadConversations();
+      if (widget.p2pService.isConnected) {
+        _loadConversations();
+      }
       if (mounted) {
         setState(() {});
       }

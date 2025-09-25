@@ -126,7 +126,6 @@ class ConnectionManager {
     }
   }
 
-  /// Navigate to chat using the robust ChatNavigationHelper
   Future<void> navigateToChat(
     BuildContext context,
     Map<String, dynamic> device,
