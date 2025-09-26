@@ -81,9 +81,16 @@ class _ChatListPageState extends State<ChatListPage>
     }
   }
 
-  /// Get queue statistics for display
+  /// Get queue statistics for display - DISABLED
   Map<String, dynamic> _getQueueStatistics() {
-    return widget.p2pService.messageQueueService.statistics;
+    // Message queue service removed - return empty stats
+    return {
+      'totalQueued': 0,
+      'totalSent': 0,
+      'totalFailed': 0,
+      'currentQueueSize': 0,
+      'queuesByDevice': <String, int>{},
+    };
   }
 
   void _startPeriodicRefresh() {

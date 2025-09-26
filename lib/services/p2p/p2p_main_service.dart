@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:resqlink/features/database/repositories/chat_repository.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_discovery_service.dart';
@@ -15,7 +14,6 @@ import '../connection_fallback.dart';
 import '../../helpers/chat_navigation_helper.dart';
 import '../../services/p2p/protocols/socket_protocol.dart';
 import '../messaging/message_router.dart';
-import '../../features/chat/services/message_queue_service.dart';
 
 /// Main P2P service that orchestrates all P2P operations
 class P2PMainService extends P2PBaseService {
@@ -30,7 +28,6 @@ class P2PMainService extends P2PBaseService {
   late SocketProtocol _socketProtocol;
   late MessageRouter _messageRouter;
   // ChatNavigationHelper is used statically, no instance needed
-  late MessageQueueService _messageQueueService;
 
   // Enhanced state
   bool _hotspotCreationInProgress = false;
@@ -47,6 +44,11 @@ class P2PMainService extends P2PBaseService {
 
   // Message tracing for debugging
   final List<String> _messageTrace = [];
+
+  // Message deduplication at WiFi Direct level
+  final Set<String> _processedMessages = {};
+  final Map<String, DateTime> _messageTimestamps = {};
+  static const Duration _messageDedupWindow = Duration(seconds: 30);
 
   // Debounce mechanism for connection state changes
   Timer? _connectionStateDebounceTimer;
@@ -104,8 +106,8 @@ class P2PMainService extends P2PBaseService {
         debugPrint(
           '🔗 Device connected via SocketProtocol: $userName ($deviceId)',
         );
+        // addConnectedDevice will handle the onDeviceConnected callback to prevent duplicates
         addConnectedDevice(deviceId, userName);
-        onDeviceConnected?.call(deviceId, userName);
       };
 
       _messageRouter = MessageRouter();
@@ -113,12 +115,7 @@ class P2PMainService extends P2PBaseService {
 
       // ChatNavigationHelper is used statically, no initialization needed
 
-      // Initialize enhanced message queue service
-      _messageQueueService = MessageQueueService();
-      await _messageQueueService.initialize();
-
-      // Connect P2P service to message queue
-      MessageQueueService.setP2PService(this);
+      // Message queue service initialization removed
 
       // Setup WiFi Direct state synchronization
       if (_wifiDirectService != null) {
@@ -157,7 +154,7 @@ class P2PMainService extends P2PBaseService {
     );
   }
 
-  /// CRITICAL FIX: Setup WiFi Direct message stream listener
+  /// CRITICAL FIX: Setup WiFi Direct message stream listener with deduplication
   void _setupWiFiDirectMessageStream() {
     _wifiDirectService?.messageStream
         .listen((messageData) {
@@ -169,6 +166,22 @@ class P2PMainService extends P2PBaseService {
             final from = messageData['from'] as String?;
 
             if (message != null && from != null) {
+              // Create a unique identifier for this message to prevent duplicates
+              final messageHash = '${from}_${message.hashCode}_${DateTime.now().millisecondsSinceEpoch ~/ 1000}';
+
+              // Clean up old entries
+              _cleanupMessageDeduplication();
+
+              // Check for recent duplicates
+              if (_processedMessages.contains(messageHash)) {
+                debugPrint('⚠️ Duplicate WiFi Direct message blocked: $messageHash');
+                return;
+              }
+
+              // Mark as processed
+              _processedMessages.add(messageHash);
+              _messageTimestamps[messageHash] = DateTime.now();
+
               _handleIncomingMessage(message, from);
             }
           }
@@ -177,7 +190,7 @@ class P2PMainService extends P2PBaseService {
           debugPrint('❌ WiFi Direct message stream error: $error');
         });
 
-    debugPrint('✅ WiFi Direct message stream listener setup complete');
+    debugPrint('✅ WiFi Direct message stream listener setup complete with deduplication');
   }
 
   void _setupWiFiDirectSync() {
@@ -1334,40 +1347,18 @@ class P2PMainService extends P2PBaseService {
         'longitude': longitude,
       });
 
-      // Check if connected, otherwise queue the message
+      // Send immediately - message queue functionality removed
       if (!isConnected) {
-        debugPrint(
-          '📥 Device not connected, queuing message for later delivery',
-        );
+        debugPrint('📥 Device not connected, message will not be queued');
 
-        // Queue message for later delivery with enhanced service
-        final sessionId = await _getOrCreateChatSession(
-          targetDeviceId ?? 'broadcast',
-          actualSenderName,
-        );
-        await _messageQueueService.queueMessage(
-          sessionId: sessionId,
-          deviceId: targetDeviceId ?? 'broadcast',
-          message: message,
-          type: type,
-          metadata: {
-            'senderName': actualSenderName,
-            'latitude': latitude,
-            'longitude': longitude,
-          },
-          priority: type == MessageType.emergency || type == MessageType.sos
-              ? 2
-              : 0,
-        );
-
-        // Update status to pending
+        // Update status to failed instead of queuing
         await MessageRepository.updateMessageStatus(
           messageModel.messageId!,
-          MessageStatus.pending,
+          MessageStatus.failed,
         );
 
-        _addMessageTrace('Message queued: ${messageModel.messageId}');
-        return;
+        _addMessageTrace('Message failed - device not connected');
+        throw Exception('Device not connected');
       }
 
       // Send via appropriate protocol based on connection mode
@@ -1397,33 +1388,16 @@ class P2PMainService extends P2PBaseService {
           'Message sent successfully: ${messageModel.messageId}',
         );
       } else {
-        debugPrint('❌ Primary send failed, queuing message for retry');
+        debugPrint('❌ Primary send failed, message queue disabled');
 
-        // Queue message for retry if primary send fails with enhanced service
-        final sessionId = await _getOrCreateChatSession(
-          targetDeviceId ?? 'broadcast',
-          actualSenderName,
-        );
-        await _messageQueueService.queueMessage(
-          sessionId: sessionId,
-          deviceId: targetDeviceId ?? 'broadcast',
-          message: message,
-          type: type,
-          metadata: {
-            'senderName': actualSenderName,
-            'latitude': latitude,
-            'longitude': longitude,
-          },
-          priority: type == MessageType.emergency || type == MessageType.sos
-              ? 2
-              : 0,
-        );
-
-        // Update status to pending for retry
+        // Update status to failed instead of queuing
         await MessageRepository.updateMessageStatus(
           messageModel.messageId!,
-          MessageStatus.pending,
+          MessageStatus.failed,
         );
+
+        _addMessageTrace('Message send failed');
+        throw Exception('Message send failed');
       }
 
       debugPrint('✅ Message processing completed');
@@ -1434,23 +1408,7 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  /// Helper method to get or create chat session for queue operations
-  Future<String> _getOrCreateChatSession(
-    String deviceId,
-    String deviceName,
-  ) async {
-    try {
-      return await ChatRepository.createOrUpdate(
-        deviceId: deviceId,
-        deviceName: deviceName,
-        currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
-      );
-    } catch (e) {
-      debugPrint('❌ Error creating chat session: $e');
-      // Return a fallback session ID
-      return 'session_${deviceId}_${DateTime.now().millisecondsSinceEpoch}';
-    }
-  }
+  // Helper method removed - no longer needed without message queue
 
   /// Initialize socket protocol after successful WiFi Direct connection
   Future<void> _initializeSocketProtocolAfterConnection() async {
@@ -1484,6 +1442,27 @@ class P2PMainService extends P2PBaseService {
     } catch (e) {
       debugPrint('❌ Socket protocol initialization failed: $e');
       _addMessageTrace('Socket protocol initialization error: $e');
+    }
+  }
+
+  /// Clean up old message deduplication entries
+  void _cleanupMessageDeduplication() {
+    final cutoff = DateTime.now().subtract(_messageDedupWindow);
+    final toRemove = <String>[];
+
+    _messageTimestamps.forEach((messageHash, timestamp) {
+      if (timestamp.isBefore(cutoff)) {
+        toRemove.add(messageHash);
+      }
+    });
+
+    for (final messageHash in toRemove) {
+      _processedMessages.remove(messageHash);
+      _messageTimestamps.remove(messageHash);
+    }
+
+    if (toRemove.isNotEmpty) {
+      debugPrint('🧹 Cleaned up ${toRemove.length} old message entries from WiFi Direct deduplication');
     }
   }
 
@@ -1565,7 +1544,7 @@ ${_messageTrace.take(5).join('\n')}
     _networkService.dispose();
     _discoveryService.dispose();
     _connectionFallbackManager.dispose();
-    _messageQueueService.dispose();
+    // Message queue service disposal removed
 
     // Stop hotspot and dispose service
     if (_isHotspotEnabled) {
@@ -1574,6 +1553,8 @@ ${_messageTrace.take(5).join('\n')}
     _hotspotService?.dispose();
 
     _messageTrace.clear();
+    _processedMessages.clear();
+    _messageTimestamps.clear();
 
     super.dispose();
   }
@@ -1604,8 +1585,7 @@ ${_messageTrace.take(5).join('\n')}
 
   /// Use ChatNavigationHelper statically for chat navigation
 
-  /// Get enhanced message queue service for external access
-  MessageQueueService get messageQueueService => _messageQueueService;
+  // Message queue service getter removed
 
   /// Manually open WiFi Direct settings
   Future<void> openWiFiDirectSettings() async {

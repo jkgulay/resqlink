@@ -229,9 +229,20 @@ abstract class P2PBaseService with ChangeNotifier {
     return _processedMessageIds.contains(messageId);
   }
 
-  /// Add connected device
+  /// Add connected device with deduplication
   void addConnectedDevice(String deviceId, String userName) {
     final now = DateTime.now();
+
+    // Check if device is already connected to prevent duplicate processing
+    final existingDevice = _connectedDevices[deviceId];
+    bool isNewConnection = existingDevice == null;
+    bool nameChanged = existingDevice?.userName != userName;
+
+    if (!isNewConnection && !nameChanged) {
+      debugPrint('ℹ️ Device already connected with same name: $userName ($deviceId)');
+      return;
+    }
+
     final device = DeviceModel(
       id: deviceId,
       deviceId: deviceId,
@@ -239,9 +250,9 @@ abstract class P2PBaseService with ChangeNotifier {
       isHost: false,
       isOnline: true,
       lastSeen: now,
-      createdAt: now,
+      createdAt: existingDevice?.createdAt ?? now, // Preserve original creation time
     );
-    
+
     _connectedDevices[deviceId] = device;
 
     // Also update the discovered device with the correct name if it exists
@@ -259,10 +270,15 @@ abstract class P2PBaseService with ChangeNotifier {
       debugPrint('📝 Updated discovered device name: $userName ($deviceId)');
     }
 
-    onDeviceConnected?.call(deviceId, userName);
-    notifyListeners();
+    // Only call the connection callback for new connections
+    if (isNewConnection) {
+      onDeviceConnected?.call(deviceId, userName);
+      debugPrint('✅ NEW device connected: $userName ($deviceId)');
+    } else if (nameChanged) {
+      debugPrint('🔄 Device name updated: $userName ($deviceId)');
+    }
 
-    debugPrint('✅ Device connected: $userName ($deviceId)');
+    notifyListeners();
   }
 
   /// Remove connected device

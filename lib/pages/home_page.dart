@@ -14,7 +14,6 @@ import '../services/p2p/p2p_base_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';
 import '../services/temporary_identity_service.dart';
-import '../features/chat/services/message_queue_service.dart';
 import '../features/database/repositories/chat_repository.dart';
 import '../controllers/home_controller.dart';
 import '../helpers/chat_navigation_helper.dart';
@@ -399,20 +398,17 @@ Future<void> _onAppResumed() async {
       _p2pService.addListener(_updateUI);
       _p2pService.emergencyMode = true;
 
-      // Initialize message queue service with P2P service
-      MessageQueueService.setP2PService(_p2pService);
-      await MessageQueueService().initialize();
-      debugPrint('✅ Message Queue Service initialized with P2P integration');
+      // Message queue service initialization removed
+      debugPrint('✅ P2P Service initialized without message queue');
 
-      // EMERGENCY: Auto-cleanup if too many messages are queued
+      // Clean up any duplicate chat sessions that might exist
       try {
-        final totalQueued = MessageQueueService().getTotalQueuedMessageCount();
-        if (totalQueued > 1000) {
-          debugPrint('🚨 EMERGENCY: $totalQueued messages queued - running auto cleanup');
-          await MessageQueueService().emergencyCleanup();
+        final duplicatesRemoved = await ChatRepository.cleanupDuplicateSessions();
+        if (duplicatesRemoved > 0) {
+          debugPrint('🧹 Cleaned up $duplicatesRemoved duplicate chat sessions on startup');
         }
       } catch (e) {
-        debugPrint('❌ Emergency cleanup check failed: $e');
+        debugPrint('❌ Error cleaning up duplicate sessions: $e');
       }
     } else {
       setState(() => _isP2PInitialized = false);
@@ -960,10 +956,31 @@ Future<void> _onAppResumed() async {
     );
   }
 
-  /// Create persistent conversation for connected device
+  /// Create persistent conversation for connected device with deduplication
   Future<void> _createPersistentConversationForDevice(String deviceId, String deviceName) async {
     try {
-      debugPrint('📱 Creating persistent conversation for: $deviceName ($deviceId)');
+      // Check if session already exists to avoid duplicate creation
+      final existingSession = await ChatRepository.getSessionByDeviceId(deviceId);
+
+      if (existingSession != null) {
+        debugPrint('📋 Session already exists for $deviceName ($deviceId)');
+
+        // Update device name if it's different (prioritize connection display name)
+        if (existingSession.deviceName != deviceName) {
+          debugPrint('🔄 Updating device name from "${existingSession.deviceName}" to "$deviceName"');
+          await ChatRepository.createOrUpdate(
+            deviceId: deviceId,
+            deviceName: deviceName, // Use the display name from the connection
+            currentUserId: 'local',
+          );
+          debugPrint('✅ Device name updated to: $deviceName');
+        } else {
+          debugPrint('ℹ️ Device name already correct: $deviceName');
+        }
+        return;
+      }
+
+      debugPrint('📱 Creating NEW persistent conversation for: $deviceName ($deviceId)');
 
       final sessionId = await ChatRepository.createOrUpdate(
         deviceId: deviceId,
@@ -972,7 +989,7 @@ Future<void> _onAppResumed() async {
       );
 
       if (sessionId.isNotEmpty) {
-        debugPrint('✅ Chat session created/updated: $sessionId');
+        debugPrint('✅ NEW chat session created: $sessionId');
       } else {
         debugPrint('❌ Failed to create chat session');
       }

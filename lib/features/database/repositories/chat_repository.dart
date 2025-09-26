@@ -8,7 +8,7 @@ import '../core/database_manager.dart';
 class ChatRepository {
   static const String _tableName = 'chat_sessions';
 
-  /// Create or update a chat session
+  /// Create or update a chat session with enhanced deduplication
   static Future<String> createOrUpdate({
     required String deviceId,
     required String deviceName,
@@ -23,25 +23,54 @@ class ChatRepository {
       );
 
       final now = DateTime.now();
+
+      // Check if session exists by both ID and device_id to prevent duplicates
       final existingSession = await db.query(
         _tableName,
-        where: 'id = ?',
-        whereArgs: [sessionId],
+        where: 'id = ? OR device_id = ?',
+        whereArgs: [sessionId, deviceId],
         limit: 1,
       );
 
       if (existingSession.isNotEmpty) {
-        // Update existing session
-        await db.update(
-          _tableName,
-          {
-            'device_name': deviceName,
-            'device_address': deviceAddress,
-            'last_connection_at': now.millisecondsSinceEpoch,
-          },
-          where: 'id = ?',
-          whereArgs: [sessionId],
-        );
+        final existing = existingSession.first;
+        final existingDeviceName = existing['device_name'] as String?;
+        final existingId = existing['id'] as String;
+
+        // Only update if device name is different or connection info changed
+        bool needsUpdate = false;
+        final updateData = <String, dynamic>{
+          'last_connection_at': now.millisecondsSinceEpoch,
+        };
+
+        if (existingDeviceName != deviceName) {
+          updateData['device_name'] = deviceName;
+          needsUpdate = true;
+          debugPrint('🔄 Updating device name from "$existingDeviceName" to "$deviceName"');
+        }
+
+        if (deviceAddress != null && deviceAddress != existing['device_address']) {
+          updateData['device_address'] = deviceAddress;
+          needsUpdate = true;
+        }
+
+        if (needsUpdate || DateTime.now().difference(
+            DateTime.fromMillisecondsSinceEpoch(
+              existing['last_connection_at'] as int? ?? 0
+            )
+          ).inMinutes > 1) {
+          await db.update(
+            _tableName,
+            updateData,
+            where: 'id = ?',
+            whereArgs: [existingId],
+          );
+          debugPrint('✅ Chat session updated: $existingId');
+        } else {
+          debugPrint('ℹ️ Chat session already up to date: $existingId');
+        }
+
+        return existingId;
       } else {
         // Create new session
         final session = ChatSession(
@@ -55,10 +84,9 @@ class ChatRepository {
         );
 
         await db.insert(_tableName, session.toMap());
+        debugPrint('✅ NEW chat session created: $sessionId');
+        return sessionId;
       }
-
-      debugPrint('✅ Chat session created/updated: $sessionId');
-      return sessionId;
     } catch (e) {
       debugPrint('❌ Error creating/updating chat session: $e');
       return '';
@@ -462,7 +490,7 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
     }
   }
 
-  /// Clean up duplicate sessions for the same device
+  /// Clean up duplicate sessions for the same device (enhanced)
   static Future<int> cleanupDuplicateSessions() async {
     try {
       final db = await DatabaseManager.database;
@@ -470,7 +498,9 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
 
       // Find all sessions grouped by device_id
       final sessions = await db.rawQuery('''
-        SELECT device_id, COUNT(*) as count, MIN(created_at) as oldest_created
+        SELECT device_id, COUNT(*) as count,
+               MIN(created_at) as oldest_created,
+               MAX(last_connection_at) as latest_connection
         FROM $_tableName
         GROUP BY device_id
         HAVING count > 1
@@ -478,20 +508,47 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
 
       for (final group in sessions) {
         final deviceId = group['device_id'] as String;
-        final oldestCreated = group['oldest_created'] as int;
+        final count = group['count'] as int;
+        debugPrint('🔍 Found $count duplicate sessions for device: $deviceId');
 
-        // Delete all sessions for this device except the oldest one
-        final deleted = await db.delete(
+        // Get all sessions for this device to find the best one to keep
+        final deviceSessions = await db.query(
           _tableName,
-          where: 'device_id = ? AND created_at > ?',
-          whereArgs: [deviceId, oldestCreated],
+          where: 'device_id = ?',
+          whereArgs: [deviceId],
+          orderBy: 'last_connection_at DESC, message_count DESC, created_at ASC',
         );
 
-        deletedCount += deleted;
-        debugPrint('🧹 Cleaned up $deleted duplicate sessions for device: $deviceId');
+        if (deviceSessions.length > 1) {
+          // Keep the session with the most recent connection and highest message count
+          final sessionToKeep = deviceSessions.first;
+          final keepId = sessionToKeep['id'] as String;
+          final keepName = sessionToKeep['device_name'] as String;
+
+          debugPrint('🎆 Keeping session: $keepId ($keepName)');
+
+          // Delete all other sessions for this device
+          for (int i = 1; i < deviceSessions.length; i++) {
+            final sessionToDelete = deviceSessions[i];
+            final deleteId = sessionToDelete['id'] as String;
+
+            await db.delete(
+              _tableName,
+              where: 'id = ?',
+              whereArgs: [deleteId],
+            );
+
+            deletedCount++;
+            debugPrint('🧹 Deleted duplicate session: $deleteId');
+          }
+        }
       }
 
-      debugPrint('✅ Total duplicate sessions cleaned up: $deletedCount');
+      if (deletedCount > 0) {
+        debugPrint('✅ Total duplicate sessions cleaned up: $deletedCount');
+      } else {
+        debugPrint('ℹ️ No duplicate sessions found to clean up');
+      }
       return deletedCount;
     } catch (e) {
       debugPrint('❌ Error cleaning up duplicate sessions: $e');
