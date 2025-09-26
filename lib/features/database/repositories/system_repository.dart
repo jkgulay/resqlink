@@ -344,7 +344,6 @@ class SystemRepository {
     }
   }
 
-  /// Delete database file completely
   static Future<void> deleteDatabaseFile() async {
     try {
       final dbPath = await getDatabasesPath();

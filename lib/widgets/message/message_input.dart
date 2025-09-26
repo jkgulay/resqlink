@@ -17,7 +17,8 @@ class MessageInput extends StatelessWidget {
     required this.onSendLocation,
     required this.onSendLocationP2P,
     required this.onSendEmergency,
-    required this.onTyping, required bool enabled,
+    required this.onTyping,
+    required bool enabled,
   });
 
   @override

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:resqlink/pages/gps_page.dart';
 import 'package:resqlink/services/messaging/message_sync_service.dart';
-import 'package:resqlink/services/settings_service.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../features/database/repositories/message_repository.dart';
 import '../features/database/repositories/chat_repository.dart';
@@ -17,7 +15,6 @@ import '../widgets/message/loading_view.dart';
 import '../widgets/message/empty_chat_view.dart';
 import '../widgets/message/emergency_dialog.dart';
 import '../widgets/message/connection_banner.dart';
-import '../widgets/message/notification_service.dart';
 import 'dart:async';
 
 class MessagePage extends StatefulWidget {
@@ -64,8 +61,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   Timer? _loadConversationsDebounce;
   bool _isLoadingConversations = false;
 
-  // Current user info
-  String get _currentUserId => widget.p2pService.deviceId ?? 'unknown';
+  // Current user info - use consistent 'local' to match session generation across the app
+  String get _currentUserId => 'local';
   LocationModel? get _currentLocation => widget.currentLocation;
 
   Duration get _refreshInterval {
@@ -130,11 +127,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
       widget.p2pService.addListener(_onP2PConnectionChanged);
       widget.p2pService.onDevicesDiscovered = _onDevicesDiscovered;
-      widget.p2pService.onDeviceConnected = (deviceId, userName) async {
-        if (!mounted) return;
-        await _createPersistentConversationForDevice(deviceId, userName);
-        _showSuccessMessage('Connected to $userName');
-      };
+
+      // Note: onDeviceConnected is handled globally by home_page.dart
+      // Don't override here to prevent duplicate session creation
 
       widget.p2pService.onDeviceDisconnected = (deviceId) {
         if (!mounted) return;
@@ -143,7 +138,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       };
 
       widget.p2pService.addListener(_onP2PUpdate);
-      widget.p2pService.onMessageReceived = _onMessageReceived;
+      // Note: Use event bus or message router for message handling instead of direct callback
+      // widget.p2pService.onMessageReceived = _onMessageReceived;
 
       await _loadConversations();
 
@@ -169,9 +165,25 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     if (mounted) {
       _loadConversations();
 
-      // If we're in a specific conversation, refresh that too
-      if (_isChatView && _selectedEndpointId != null) {
-        _loadMessagesForDevice(_selectedEndpointId!);
+      // If we're in a specific conversation, add the message directly instead of full reload
+      if (_isChatView && _selectedEndpointId != null && message is MessageModel) {
+        // Check if this message is for the currently selected conversation
+        if (message.endpointId == _selectedEndpointId) {
+          // Check for duplicates before adding
+          final alreadyExists = _selectedConversationMessages.any((m) =>
+            m.messageId == message.messageId ||
+            (m.timestamp == message.timestamp && m.fromUser == message.fromUser && m.message == message.message)
+          );
+
+          if (!alreadyExists) {
+            setState(() {
+              _selectedConversationMessages.add(message);
+              // Sort by timestamp to maintain order
+              _selectedConversationMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            });
+            _scrollToBottom();
+          }
+        }
       }
     }
   }
@@ -453,172 +465,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  void _onMessageReceived(MessageModel message) async {
-    if (!mounted) return;
 
-    try {
-      final messageId = message.messageId ?? 'unknown';
-      final senderId = message.endpointId;
-
-      final existingMessage = await MessageRepository.getById(messageId);
-      if (existingMessage != null) {
-        debugPrint('⚠️ Duplicate message received: $messageId');
-        return;
-      }
-
-      await MessageRepository.insert(message);
-
-      if (!mounted) return;
-
-      await _batchUIUpdates(() async {
-        await _loadConversations();
-
-        if (message.messageType == MessageType.emergency ||
-            message.messageType == MessageType.sos) {
-          await _showEmergencyNotification(message);
-        }
-
-        if (_isChatView && _selectedEndpointId == senderId) {
-          await _loadMessagesForDevice(_selectedEndpointId!);
-        } else {
-          _showInAppNotification(message);
-        }
-      });
-    } catch (e) {
-      debugPrint('❌ Error in _onMessageReceived: $e');
-      if (mounted) {
-        _showErrorMessage('Failed to process received message');
-      }
-    }
-  }
-
-  Future<void> _batchUIUpdates(Future<void> Function() updates) async {
-    try {
-      await updates();
-    } catch (e) {
-      debugPrint('❌ Error in batch UI updates: $e');
-    }
-  }
-
-  Future<void> _showEmergencyNotification(MessageModel message) async {
-    if (!mounted) return;
-
-    try {
-      final settings = context.read<SettingsService>();
-
-      if (!settings.emergencyNotifications) return;
-
-      final playSound = settings.soundNotifications && !settings.silentMode;
-      final vibrate = settings.vibrationNotifications && !settings.silentMode;
-
-      await NotificationService.showEmergencyNotification(
-        title: '${message.messageType.name.toUpperCase()} from ${message.fromUser}',
-        body: message.message,
-        playSound: playSound,
-        vibrate: vibrate,
-      );
-
-      if (!mounted) return;
-
-      String body = message.message;
-      if (message.latitude != null && message.longitude != null) {
-        body += '\nLocation: ${message.latitude!.toStringAsFixed(6)}, ${message.longitude!.toStringAsFixed(6)}';
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.warning, color: Colors.white),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${message.messageType.name.toUpperCase()} from ${message.fromUser}',
-                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-                        maxLines: 1,
-                      ),
-                      Text(
-                        body,
-                        style: TextStyle(color: Colors.white),
-                        maxLines: 2,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: ResQLinkTheme.primaryRed,
-            duration: Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'VIEW',
-              textColor: Colors.white,
-              onPressed: () => _openConversation(message.endpointId, message.fromUser),
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error showing emergency notification: $e');
-    }
-  }
-
-  void _showInAppNotification(MessageModel message) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: message.messageType == MessageType.emergency ||
-                      message.messageType == MessageType.sos
-                  ? ResQLinkTheme.primaryRed
-                  : ResQLinkTheme.safeGreen,
-              child: Icon(
-                message.messageType == MessageType.emergency ||
-                        message.messageType == MessageType.sos
-                    ? Icons.warning
-                    : Icons.message,
-                color: Colors.white,
-                size: 16,
-              ),
-            ),
-            SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'New message from ${message.fromUser}',
-                    style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
-                    maxLines: 1,
-                  ),
-                  Text(
-                    message.message,
-                    style: TextStyle(color: Colors.white70),
-                    maxLines: 1,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: ResQLinkTheme.cardDark,
-        action: SnackBarAction(
-          label: 'VIEW',
-          textColor: ResQLinkTheme.primaryRed,
-          onPressed: () => _openConversation(message.endpointId, message.fromUser),
-        ),
-      ),
-    );
-  }
 
   String _generateMessageId() {
     return 'msg_${DateTime.now().millisecondsSinceEpoch}_${_currentUserId.hashCode}';
@@ -666,8 +513,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       // Insert into local database FIRST for immediate UI update
       await MessageRepository.insert(dbMessage);
 
-      // Update UI immediately to show the sent message
-      await _loadMessagesForDevice(_selectedEndpointId!);
+      // Update UI immediately to show the sent message (optimistic update)
+      setState(() {
+        _selectedConversationMessages.add(dbMessage);
+      });
+      _scrollToBottom();
 
       // Then send via P2P service (this might queue if not connected)
       await widget.p2pService.sendMessage(

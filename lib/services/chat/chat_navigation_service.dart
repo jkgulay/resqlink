@@ -138,7 +138,7 @@ class ChatNavigationService {
       final sessionId = await ChatRepository.createOrUpdate(
         deviceId: deviceId,
         deviceName: deviceName,
-        currentUserId: _p2pService!.deviceId,
+        currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
       );
 
       if (sessionId.isNotEmpty && _context != null) {
@@ -313,7 +313,7 @@ class ChatNavigationService {
       final sessionId = await ChatRepository.createOrUpdate(
         deviceId: deviceId,
         deviceName: deviceName,
-        currentUserId: p2pService.deviceId,
+        currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
       );
 
       if (sessionId.isNotEmpty && context.mounted) {
@@ -461,7 +461,7 @@ class ChatNavigationService {
               final sessionId = await ChatRepository.createOrUpdate(
                 deviceId: deviceId,
                 deviceName: deviceName,
-                currentUserId: p2pService.deviceId,
+                currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
               );
 
               if (sessionId.isNotEmpty) {

@@ -27,14 +27,19 @@ class ConnectionHeader extends StatelessWidget {
           Expanded(child: _buildStatusText(context)),
           if (controller.p2pService.hotspotService.isEnabled)
             _buildHotspotIndicator(context),
+          SizedBox(width: ResponsiveHelper.getContentSpacing(context) / 2),
+          _buildWiFiDirectSettingsButton(context),
         ],
       ),
     );
   }
 
   Widget _buildStatusIcon(BuildContext context) {
-    final iconPadding = ResponsiveHelper.isDesktop(context) ? 16.0 : 
-                      ResponsiveHelper.isTablet(context) ? 14.0 : 12.0;
+    final iconPadding = ResponsiveHelper.isDesktop(context)
+        ? 16.0
+        : ResponsiveHelper.isTablet(context)
+        ? 14.0
+        : 12.0;
     final iconSize = ResponsiveHelper.getIconSize(context, narrow: 24.0);
 
     return Container(
@@ -60,7 +65,10 @@ class ConnectionHeader extends StatelessWidget {
 
   Widget _buildStatusText(BuildContext context) {
     final titleSize = ResponsiveHelper.getTitleSize(context, narrow: 18.0);
-    final subtitleSize = ResponsiveHelper.getSubtitleSize(context, narrow: 13.0);
+    final subtitleSize = ResponsiveHelper.getSubtitleSize(
+      context,
+      narrow: 13.0,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -76,10 +84,7 @@ class ConnectionHeader extends StatelessWidget {
         SizedBox(height: 4),
         Text(
           _getConnectionStatusText(),
-          style: TextStyle(
-            fontSize: subtitleSize,
-            color: Colors.white70,
-          ),
+          style: TextStyle(fontSize: subtitleSize, color: Colors.white70),
         ),
       ],
     );
@@ -119,18 +124,12 @@ class ConnectionHeader extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.orange.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: Colors.orange.withValues(alpha: 0.4),
-        ),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.wifi_tethering,
-            color: Colors.orange,
-            size: 16,
-          ),
+          Icon(Icons.wifi_tethering, color: Colors.orange, size: 16),
           SizedBox(width: 4),
           Text(
             '$clientCount',
@@ -143,5 +142,66 @@ class ConnectionHeader extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Widget _buildWiFiDirectSettingsButton(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.4)),
+      ),
+      child: IconButton(
+        onPressed: () => _openWiFiDirectSettings(context),
+        icon: Icon(
+          Icons.settings,
+          color: Colors.blue,
+          size: ResponsiveHelper.getIconSize(context, narrow: 20.0),
+        ),
+        tooltip: 'Open WiFi Direct Settings',
+        constraints: BoxConstraints(
+          minWidth: ResponsiveHelper.isDesktop(context) ? 48 : 40,
+          minHeight: ResponsiveHelper.isDesktop(context) ? 48 : 40,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openWiFiDirectSettings(BuildContext context) async {
+    try {
+      await controller.p2pService.wifiDirectService?.openWiFiDirectSettings();
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.settings, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Text('WiFi Direct settings opened'),
+              ],
+            ),
+            backgroundColor: Colors.blue,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.error, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Text('Failed to open WiFi Direct settings'),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 }

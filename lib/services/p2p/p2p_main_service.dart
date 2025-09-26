@@ -238,14 +238,8 @@ class P2PMainService extends P2PBaseService {
         _handleExistingConnection(connectionInfo);
             }
 
-      if (state['messageReceived'] == true) {
-        final message = state['message'] as String?;
-        final from = state['from'] as String?;
-        if (message != null) {
-          debugPrint('📨 WiFi Direct message received: $message from $from');
-          _handleIncomingMessage(message, from);
-        }
-      }
+      // Message handling is now done ONLY via messageStream to prevent duplicates
+      // Removed duplicate message processing from stateStream
 
       // Handle new socket events
       if (state['serverSocketReady'] == true) {
@@ -312,8 +306,9 @@ class P2PMainService extends P2PBaseService {
           );
           addConnectedDevice(peer.deviceAddress, peer.deviceName);
 
-          // Trigger connection callback
-          onDeviceConnected?.call(peer.deviceAddress, peer.deviceName);
+          // DON'T trigger onDeviceConnected here - wait for socket/handshake completion
+          // This prevents duplicate connection notifications from WiFi Direct peer discovery
+          debugPrint('⏳ Waiting for socket connection establishment with ${peer.deviceName}');
         }
       }
     }
@@ -1448,7 +1443,7 @@ class P2PMainService extends P2PBaseService {
       return await ChatRepository.createOrUpdate(
         deviceId: deviceId,
         deviceName: deviceName,
-        currentUserId: this.deviceId,
+        currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
       );
     } catch (e) {
       debugPrint('❌ Error creating chat session: $e');
@@ -1611,6 +1606,11 @@ ${_messageTrace.take(5).join('\n')}
 
   /// Get enhanced message queue service for external access
   MessageQueueService get messageQueueService => _messageQueueService;
+
+  /// Manually open WiFi Direct settings
+  Future<void> openWiFiDirectSettings() async {
+    await _wifiDirectService?.openWiFiDirectSettings();
+  }
 }
 
 // Backwards compatibility typedef

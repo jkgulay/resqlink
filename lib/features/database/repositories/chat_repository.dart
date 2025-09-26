@@ -462,6 +462,43 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
     }
   }
 
+  /// Clean up duplicate sessions for the same device
+  static Future<int> cleanupDuplicateSessions() async {
+    try {
+      final db = await DatabaseManager.database;
+      int deletedCount = 0;
+
+      // Find all sessions grouped by device_id
+      final sessions = await db.rawQuery('''
+        SELECT device_id, COUNT(*) as count, MIN(created_at) as oldest_created
+        FROM $_tableName
+        GROUP BY device_id
+        HAVING count > 1
+      ''');
+
+      for (final group in sessions) {
+        final deviceId = group['device_id'] as String;
+        final oldestCreated = group['oldest_created'] as int;
+
+        // Delete all sessions for this device except the oldest one
+        final deleted = await db.delete(
+          _tableName,
+          where: 'device_id = ? AND created_at > ?',
+          whereArgs: [deviceId, oldestCreated],
+        );
+
+        deletedCount += deleted;
+        debugPrint('🧹 Cleaned up $deleted duplicate sessions for device: $deviceId');
+      }
+
+      debugPrint('✅ Total duplicate sessions cleaned up: $deletedCount');
+      return deletedCount;
+    } catch (e) {
+      debugPrint('❌ Error cleaning up duplicate sessions: $e');
+      return 0;
+    }
+  }
+
   // Compatibility methods for existing code
   static Future<List<ChatSessionSummary>> getChatSessions() => getAllSessions();
   static Future<bool> markSessionMessagesAsRead(String sessionId) =>

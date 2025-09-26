@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/controllers/gps_controller.dart';
-import 'package:resqlink/models/message_model.dart';
 import 'package:resqlink/services/settings_service.dart';
 import '../utils/responsive_utils.dart';
 import 'message_page.dart';
@@ -16,6 +15,7 @@ import '../services/map_service.dart';
 import '../services/location_state_service.dart';
 import '../services/temporary_identity_service.dart';
 import '../features/chat/services/message_queue_service.dart';
+import '../features/database/repositories/chat_repository.dart';
 import '../controllers/home_controller.dart';
 import '../helpers/chat_navigation_helper.dart';
 import '../widgets/home/emergency_mode_card.dart';
@@ -46,6 +46,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final List<Widget> pages;
   GlobalKey? _messagePageKey;
 
+  // Track recently connected devices to prevent duplicate processing
+  final Map<String, DateTime> _recentlyConnectedDevices = {};
+
   @override
   void initState() {
     super.initState();
@@ -62,6 +65,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     _initializeP2P();
     _initializeMapService();
+
+    // Clean up any existing duplicate chat sessions
+    _cleanupDuplicateSessions();
 
     // Create MessagePage with key for external control
     _messagePageKey = GlobalKey();
@@ -386,7 +392,8 @@ Future<void> _onAppResumed() async {
     if (success) {
       setState(() => _isP2PInitialized = true);
 
-      _p2pService.onMessageReceived = _showNotification;
+      // Note: Message handling is centralized in P2PMainService and MessageRouter
+      // Individual pages should use event listeners instead of overriding onMessageReceived
       _p2pService.onDeviceConnected = _onDeviceConnected;
       _p2pService.onDeviceDisconnected = _onDeviceDisconnected;
       _p2pService.addListener(_updateUI);
@@ -396,6 +403,17 @@ Future<void> _onAppResumed() async {
       MessageQueueService.setP2PService(_p2pService);
       await MessageQueueService().initialize();
       debugPrint('✅ Message Queue Service initialized with P2P integration');
+
+      // EMERGENCY: Auto-cleanup if too many messages are queued
+      try {
+        final totalQueued = MessageQueueService().getTotalQueuedMessageCount();
+        if (totalQueued > 1000) {
+          debugPrint('🚨 EMERGENCY: $totalQueued messages queued - running auto cleanup');
+          await MessageQueueService().emergencyCleanup();
+        }
+      } catch (e) {
+        debugPrint('❌ Emergency cleanup check failed: $e');
+      }
     } else {
       setState(() => _isP2PInitialized = false);
       debugPrint("❌ Failed to initialize P2P service");
@@ -411,8 +429,22 @@ Future<void> _onAppResumed() async {
     });
   }
 
-  void _onDeviceConnected(String deviceId, String userName) {
+  void _onDeviceConnected(String deviceId, String userName) async {
     debugPrint("✅ Device connected: $userName ($deviceId)");
+
+    // Prevent duplicate connection processing for the same device
+    if (_recentlyConnectedDevices.containsKey(deviceId)) {
+      final lastConnection = _recentlyConnectedDevices[deviceId]!;
+      final timeSinceLastConnection = DateTime.now().difference(lastConnection);
+      if (timeSinceLastConnection.inSeconds < 30) { // Increased from 10s to 30s
+        debugPrint("⚠️ Ignoring duplicate connection for $userName ($deviceId) - connected ${timeSinceLastConnection.inSeconds}s ago");
+        return;
+      }
+    }
+
+    // Mark device as recently connected
+    _recentlyConnectedDevices[deviceId] = DateTime.now();
+
     if (mounted) {
       // Create device map for navigation
       final device = {
@@ -421,6 +453,13 @@ Future<void> _onAppResumed() async {
         'deviceName': userName,
         'isConnected': true,
       };
+
+      // Create persistent conversation for the device
+      try {
+        await _createPersistentConversationForDevice(deviceId, userName);
+      } catch (e) {
+        debugPrint('❌ Error creating persistent conversation: $e');
+      }
 
       // Show enhanced connection notification with display name
       _showDisplayNameConnectedSnackBar(userName, device);
@@ -470,69 +509,7 @@ Future<void> _onAppResumed() async {
     setState(() {});
   }
 
-  void _showNotification(MessageModel message) {
-    if (!mounted) return;
-
-    if (message.messageType == MessageType.emergency ||
-        message.messageType == MessageType.sos) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          backgroundColor: Colors.red.shade900,
-          title: Row(
-            children: [
-              Icon(Icons.warning, color: Colors.white),
-              SizedBox(width: 8),
-              Text('EMERGENCY ALERT', style: TextStyle(color: Colors.white)),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'From: ${message.fromUser}',
-                style: TextStyle(color: Colors.white),
-              ),
-              SizedBox(height: 8),
-              Text(
-                message.message,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              if (message.latitude != null && message.longitude != null) ...[
-                SizedBox(height: 8),
-                Text(
-                  'Location: ${message.latitude!.toStringAsFixed(4)}, ${message.longitude!.toStringAsFixed(4)}',
-                  style: TextStyle(color: Colors.white70),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text('OK', style: TextStyle(color: Colors.white)),
-            ),
-            if (message.latitude != null && message.longitude != null)
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  setState(() => selectedIndex = 2);
-                },
-                child: Text(
-                  'View in Chat',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-          ],
-        ),
-      );
-    }
-  }
+ 
 
   void _onLocationShare(LocationModel location) {
     // Handle location sharing
@@ -565,6 +542,16 @@ Future<void> _onAppResumed() async {
         ),
       ),
     );
+  }
+
+  /// Clean up duplicate chat sessions on app startup
+  Future<void> _cleanupDuplicateSessions() async {
+    try {
+      await ChatRepository.cleanupDuplicateSessions();
+      debugPrint('✅ Chat session cleanup completed');
+    } catch (e) {
+      debugPrint('❌ Chat session cleanup failed: $e');
+    }
   }
 
   @override
@@ -857,6 +844,7 @@ Future<void> _onAppResumed() async {
 
     return Scaffold(
       appBar: _buildResponsiveAppBar(context),
+      resizeToAvoidBottomInset: false, // Prevent bottom navigation from moving up with keyboard
       body: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth < 450) {
@@ -970,5 +958,26 @@ Future<void> _onAppResumed() async {
       deviceName: userName,
       onChatTap: () => _onDeviceChatTap(device),
     );
+  }
+
+  /// Create persistent conversation for connected device
+  Future<void> _createPersistentConversationForDevice(String deviceId, String deviceName) async {
+    try {
+      debugPrint('📱 Creating persistent conversation for: $deviceName ($deviceId)');
+
+      final sessionId = await ChatRepository.createOrUpdate(
+        deviceId: deviceId,
+        deviceName: deviceName,
+        currentUserId: 'local', // Use a consistent local user ID
+      );
+
+      if (sessionId.isNotEmpty) {
+        debugPrint('✅ Chat session created/updated: $sessionId');
+      } else {
+        debugPrint('❌ Failed to create chat session');
+      }
+    } catch (e) {
+      debugPrint('❌ Error creating persistent conversation: $e');
+    }
   }
 }
