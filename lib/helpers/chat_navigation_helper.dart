@@ -56,7 +56,7 @@ class ChatNavigationHelper {
       final sessionId = await _createOrUpdateSession(
         deviceId: deviceId,
         deviceName: deviceName,
-        currentUserId: p2pService.deviceId,
+        currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
       );
 
       if (sessionId.isEmpty) {
@@ -374,7 +374,7 @@ class ChatNavigationHelper {
       final sessionId = await _createOrUpdateSession(
         deviceId: deviceId,
         deviceName: deviceName,
-        currentUserId: p2pService.deviceId,
+        currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
       );
 
       if (context.mounted && sessionId.isNotEmpty) {

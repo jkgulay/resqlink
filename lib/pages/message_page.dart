@@ -61,8 +61,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   Timer? _loadConversationsDebounce;
   bool _isLoadingConversations = false;
 
-  // Current user info
-  String get _currentUserId => widget.p2pService.deviceId ?? 'unknown';
+  // Current user info - use consistent 'local' to match session generation across the app
+  String get _currentUserId => 'local';
   LocationModel? get _currentLocation => widget.currentLocation;
 
   Duration get _refreshInterval {

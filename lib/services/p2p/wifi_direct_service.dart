@@ -63,8 +63,8 @@ class WiFiDirectService {
         return false;
       }
 
-      // Enable WiFi if needed
-      await _wifiChannel.invokeMethod('enableWifi');
+      // WiFi will be enabled manually when user clicks the settings button
+      // No automatic WiFi settings opening on app startup
 
       _isInitialized = true;
       debugPrint('✅ WiFiDirectService: Initialized successfully');
@@ -539,7 +539,7 @@ class WiFiDirectService {
         final from = args['from'] as String?;
 
         if (message != null && from != null) {
-          // Send to message router for processing
+          // Send ONLY to message stream to prevent duplicate processing
           _messageController.add({
             'type': 'message_received',
             'message': message,
@@ -548,11 +548,7 @@ class WiFiDirectService {
           });
         }
 
-        _stateController.add({
-          'messageReceived': true,
-          'message': args['message'],
-          'from': args['from'],
-        });
+        // Removed duplicate state stream message sending to prevent double processing
 
       case 'onPeersUpdated':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
@@ -828,6 +824,16 @@ class WiFiDirectService {
       'peersFound': _discoveredPeers.length,
       'peersDetails': _discoveredPeers.map((p) => p.toMap()).toList(),
     };
+  }
+
+  /// Manually open WiFi Direct settings when user requests it
+  Future<void> openWiFiDirectSettings() async {
+    try {
+      await _wifiChannel.invokeMethod('enableWifi');
+      debugPrint('📱 WiFi Direct settings opened manually');
+    } catch (e) {
+      debugPrint('❌ Failed to open WiFi Direct settings: $e');
+    }
   }
 
   void dispose() {

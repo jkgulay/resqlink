@@ -143,6 +143,8 @@ class MessageQueueService extends ChangeNotifier {
   Timer? _processTimer;
   Timer? _cleanupTimer;
   bool _isProcessing = false;
+  // Device-level processing locks to prevent duplicate queue processing
+  final Map<String, bool> _deviceProcessingLocks = {};
 
   // Event subscriptions
   late StreamSubscription<DeviceConnectionEvent> _deviceConnectedSub;
@@ -312,44 +314,72 @@ class MessageQueueService extends ChangeNotifier {
 
   // Process queue for specific device
   Future<void> _processQueueForDevice(String deviceId) async {
+    // Check if this device queue is already being processed
+    if (_deviceProcessingLocks[deviceId] == true) {
+      debugPrint('⚠️ Device queue already being processed for $deviceId, skipping...');
+      return;
+    }
+
     final deviceQueue = _deviceQueues[deviceId];
     if (deviceQueue == null || deviceQueue.isEmpty) return;
 
-    final messagesToRemove = <QueuedMessage>[];
+    // Set processing lock for this device
+    _deviceProcessingLocks[deviceId] = true;
 
-    for (final queuedMessage in List.from(deviceQueue)) {
-      // Check if message is expired
-      if (queuedMessage.isExpired) {
-        debugPrint('⏰ Message expired: ${queuedMessage.id}');
-        messagesToRemove.add(queuedMessage);
-        continue;
-      }
+    try {
+      final messagesToRemove = <QueuedMessage>[];
 
-      // Check if message should be retried
-      if (!queuedMessage.shouldRetry) {
-        continue;
-      }
-
-      try {
-        // Attempt to send the message
-        final success = await _sendQueuedMessage(queuedMessage);
-
-        if (success) {
-          debugPrint('✅ Queued message sent successfully: ${queuedMessage.id}');
+      for (final queuedMessage in List.from(deviceQueue)) {
+        // Check if message is expired
+        if (queuedMessage.isExpired) {
+          debugPrint('⏰ Message expired: ${queuedMessage.id}');
           messagesToRemove.add(queuedMessage);
-          _totalMessagesSent++;
+          continue;
+        }
 
-          // Emit success event
-          P2PEventBus().emitMessageSendStatus(
-            messageId: queuedMessage.id,
-            status: MessageStatus.sent,
-          );
-        } else {
+        // Check if message should be retried
+        if (!queuedMessage.shouldRetry) {
+          continue;
+        }
+
+        try {
+          // Attempt to send the message
+          final success = await _sendQueuedMessage(queuedMessage);
+
+          if (success) {
+            debugPrint('✅ Queued message sent successfully: ${queuedMessage.id}');
+            messagesToRemove.add(queuedMessage);
+            _totalMessagesSent++;
+
+            // Emit success event
+            P2PEventBus().emitMessageSendStatus(
+              messageId: queuedMessage.id,
+              status: MessageStatus.sent,
+            );
+          } else {
+            // Update retry count and error
+            final updatedMessage = queuedMessage.copyWith(
+              retryCount: queuedMessage.retryCount + 1,
+              lastRetryAt: DateTime.now(),
+              lastError: 'Send failed',
+            );
+
+            final index = deviceQueue.indexOf(queuedMessage);
+            if (index != -1) {
+              deviceQueue[index] = updatedMessage;
+              await _updateMessageInDatabase(updatedMessage);
+            }
+
+            debugPrint('⚠️ Message send failed, retry ${updatedMessage.retryCount}: ${queuedMessage.id}');
+          }
+        } catch (e) {
+          debugPrint('❌ Error processing queued message: $e');
+
           // Update retry count and error
           final updatedMessage = queuedMessage.copyWith(
             retryCount: queuedMessage.retryCount + 1,
             lastRetryAt: DateTime.now(),
-            lastError: 'Send failed',
+            lastError: e.toString(),
           );
 
           final index = deviceQueue.indexOf(queuedMessage);
@@ -357,50 +387,36 @@ class MessageQueueService extends ChangeNotifier {
             deviceQueue[index] = updatedMessage;
             await _updateMessageInDatabase(updatedMessage);
           }
-
-          debugPrint('⚠️ Message send failed, retry ${updatedMessage.retryCount}: ${queuedMessage.id}');
-        }
-      } catch (e) {
-        debugPrint('❌ Error processing queued message: $e');
-
-        // Update retry count and error
-        final updatedMessage = queuedMessage.copyWith(
-          retryCount: queuedMessage.retryCount + 1,
-          lastRetryAt: DateTime.now(),
-          lastError: e.toString(),
-        );
-
-        final index = deviceQueue.indexOf(queuedMessage);
-        if (index != -1) {
-          deviceQueue[index] = updatedMessage;
-          await _updateMessageInDatabase(updatedMessage);
         }
       }
-    }
 
-    // Remove successfully sent or expired messages
-    for (final message in messagesToRemove) {
-      deviceQueue.remove(message);
-      await _removeMessageFromDatabase(message.id);
+      // Remove successfully sent or expired messages
+      for (final message in messagesToRemove) {
+        deviceQueue.remove(message);
+        await _removeMessageFromDatabase(message.id);
 
-      if (message.isExpired || message.retryCount >= message._getMaxRetries()) {
-        _totalMessagesFailed++;
+        if (message.isExpired || message.retryCount >= message._getMaxRetries()) {
+          _totalMessagesFailed++;
 
-        // Emit failure event
-        P2PEventBus().emitMessageSendStatus(
-          messageId: message.id,
-          status: MessageStatus.failed,
-          error: message.lastError,
-        );
+          // Emit failure event
+          P2PEventBus().emitMessageSendStatus(
+            messageId: message.id,
+            status: MessageStatus.failed,
+            error: message.lastError,
+          );
+        }
       }
-    }
 
-    // Clean up empty device queues
-    if (deviceQueue.isEmpty) {
-      _deviceQueues.remove(deviceId);
-    }
+      // Clean up empty device queues
+      if (deviceQueue.isEmpty) {
+        _deviceQueues.remove(deviceId);
+      }
 
-    notifyListeners();
+      notifyListeners();
+    } finally {
+      // Always release the processing lock for this device
+      _deviceProcessingLocks[deviceId] = false;
+    }
   }
 
   // Start periodic processing

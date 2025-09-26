@@ -66,6 +66,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _initializeP2P();
     _initializeMapService();
 
+    // Clean up any existing duplicate chat sessions
+    _cleanupDuplicateSessions();
+
     // Create MessagePage with key for external control
     _messagePageKey = GlobalKey();
 
@@ -539,6 +542,16 @@ Future<void> _onAppResumed() async {
         ),
       ),
     );
+  }
+
+  /// Clean up duplicate chat sessions on app startup
+  Future<void> _cleanupDuplicateSessions() async {
+    try {
+      await ChatRepository.cleanupDuplicateSessions();
+      debugPrint('✅ Chat session cleanup completed');
+    } catch (e) {
+      debugPrint('❌ Chat session cleanup failed: $e');
+    }
   }
 
   @override
