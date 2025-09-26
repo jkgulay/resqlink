@@ -181,8 +181,10 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           if (!alreadyExists) {
             setState(() {
               _selectedConversationMessages.add(message);
-              // Sort by timestamp to maintain order
+              // Sort by timestamp to maintain chronological order (oldest first, newest at bottom)
               _selectedConversationMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+              debugPrint('📨 Added incoming message to conversation. Total messages: ${_selectedConversationMessages.length}');
+              debugPrint('🕙 Last message timestamp: ${_selectedConversationMessages.last.timestamp}');
             });
             _scrollToBottom();
             debugPrint('✅ Added message to conversation without database reload');
@@ -411,10 +413,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       if (!mounted) return;
 
       setState(() {
+        // Ensure messages are sorted chronologically (oldest first, newest at bottom)
         _selectedConversationMessages = messages;
+        _selectedConversationMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       });
 
-      _scrollToBottom();
+      // Scroll to bottom to show latest messages
+      _scrollToBottomImmediate();
 
       for (final message in messages.where((m) => !m.isMe && !m.synced)) {
         if (!mounted) return;
@@ -501,8 +506,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       // Update UI immediately to show the sent message (optimistic update)
       setState(() {
         _selectedConversationMessages.add(dbMessage);
+        // Sort by timestamp to maintain chronological order
+        _selectedConversationMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        debugPrint('💬 Added sent message to conversation. Total messages: ${_selectedConversationMessages.length}');
+        debugPrint('🕙 Last message timestamp: ${_selectedConversationMessages.last.timestamp}');
       });
-      _scrollToBottom();
+      // Immediate scroll for sent messages
+      _scrollToBottomImmediate();
 
       // Then send via P2P service (this might queue if not connected)
       await widget.p2pService.sendMessage(
@@ -689,13 +699,41 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void _scrollToBottom() {
     if (!mounted) return;
 
+    // Use multiple frame callbacks to ensure reliable scrolling after UI updates
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        // Schedule another frame callback to ensure layout is complete
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+        });
+      }
+    });
+  }
+
+  void _scrollToBottomImmediate() {
+    if (!mounted) return;
+
+    // Immediate scroll for sent messages
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) {
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+
+        // Also schedule an animated scroll to ensure we're at the very bottom
+        Future.delayed(Duration(milliseconds: 100), () {
+          if (mounted && _scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+          }
+        });
       }
     });
   }
