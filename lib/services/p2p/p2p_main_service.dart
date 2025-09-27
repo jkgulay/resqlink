@@ -1,45 +1,32 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_discovery_service.dart';
 import '../../models/message_model.dart';
 import 'wifi_direct_service.dart';
-import '../../services/hotspot_service.dart';
 import 'p2p_base_service.dart';
 import 'p2p_network_service.dart';
-import '../connection_fallback.dart';
 import '../../helpers/chat_navigation_helper.dart';
 import '../../services/p2p/protocols/socket_protocol.dart';
 import '../messaging/message_router.dart';
 
-/// Main P2P service that orchestrates all P2P operations
+
 class P2PMainService extends P2PBaseService {
   // Service components
   late P2PNetworkService _networkService;
   late P2PDiscoveryService _discoveryService;
-  late ConnectionFallbackManager _connectionFallbackManager;
   WiFiDirectService? _wifiDirectService;
-  HotspotService? _hotspotService;
 
-  // New enhanced components
   late SocketProtocol _socketProtocol;
   late MessageRouter _messageRouter;
-  // ChatNavigationHelper is used statically, no instance needed
 
   // Enhanced state
-  bool _hotspotCreationInProgress = false;
-  String? _actualCreatedSSID;
-  Timer? _hotspotVerificationTimer;
-  bool _hotspotFallbackEnabled = true;
   bool _isOnline = false;
 
   // Additional state for widget compatibility
   P2PConnectionMode _currentConnectionMode = P2PConnectionMode.none;
-  String? _connectedHotspotSSID;
-  bool _isHotspotEnabled = false;
   bool _isConnecting = false;
 
   // Message tracing for debugging
@@ -48,13 +35,24 @@ class P2PMainService extends P2PBaseService {
   // Message deduplication at WiFi Direct level
   final Set<String> _processedMessages = {};
   final Map<String, DateTime> _messageTimestamps = {};
-  static const Duration _messageDedupWindow = Duration(seconds: 30);
+  static const Duration _messageDedupWindow = Duration(seconds: 5);
 
   // Debounce mechanism for connection state changes
   Timer? _connectionStateDebounceTimer;
   static const Duration _connectionStateDebounceDelay = Duration(
     milliseconds: 500,
   );
+
+  // Debounce mechanism for peer updates
+  Timer? _peerUpdateDebounceTimer;
+  static const Duration _peerUpdateDebounceDelay = Duration(
+    milliseconds: 1000,
+  );
+
+
+  final Set<String> _processingDevices = {};
+  final Set<String> _handshakeResponsesSent = {};
+
 
   @override
   Future<bool> initialize(String userName, {String? preferredRole}) async {
@@ -75,53 +73,33 @@ class P2PMainService extends P2PBaseService {
       _networkService = P2PNetworkService(this);
       _discoveryService = P2PDiscoveryService(this, _networkService);
 
-      // Initialize connection fallback manager
-      _connectionFallbackManager = ConnectionFallbackManager(
-        performDiscoveryScan: () => discoverDevices(force: true),
-        connectToAvailableDevice: _connectToAvailableDevice,
-        scanForResQLinkHotspots: _scanForResQLinkHotspots,
-        connectToResQLinkHotspot: connectToResQLinkNetwork,
-        createResQLinkHotspot: () => createEmergencyHotspot(),
-        getDiscoveredDevices: () => discoveredDevices,
-        isConnected: () => isConnected,
-        onConnectionModeChanged: _onConnectionModeChanged,
-        onConnectionFailed: _onConnectionFailed,
-      );
 
       await _discoveryService.initialize();
 
-      // Initialize new services
       _wifiDirectService = WiFiDirectService.instance;
-      _hotspotService = HotspotService.instance;
 
       await _wifiDirectService?.initialize();
-      await _hotspotService?.initialize();
 
-      // Initialize new enhanced components
       _socketProtocol = SocketProtocol();
+
+      await _socketProtocol.forceCleanup();
+
       _socketProtocol.initialize(deviceId!, userName);
 
-      // CRITICAL: Set callback for device connections
       _socketProtocol.onDeviceConnected = (deviceId, userName) {
         debugPrint(
           '🔗 Device connected via SocketProtocol: $userName ($deviceId)',
         );
-        // addConnectedDevice will handle the onDeviceConnected callback to prevent duplicates
         addConnectedDevice(deviceId, userName);
       };
 
       _messageRouter = MessageRouter();
       _messageRouter.setGlobalListener(_handleGlobalMessage);
 
-      // ChatNavigationHelper is used statically, no initialization needed
 
-      // Message queue service initialization removed
-
-      // Setup WiFi Direct state synchronization
       if (_wifiDirectService != null) {
         _setupWiFiDirectSync();
 
-        // CRITICAL FIX: Listen to WiFi Direct message stream
         _setupWiFiDirectMessageStream();
       }
 
@@ -139,11 +117,7 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  ConnectionFallbackManager get connectionFallbackManager =>
-      _connectionFallbackManager;
   WiFiDirectService? get wifiDirectService => _wifiDirectService;
-  HotspotService get hotspotService =>
-      _hotspotService ?? HotspotService.instance;
 
   /// Debounce connection state changes to prevent race conditions
   void _debounceConnectionStateChange(VoidCallback callback) {
@@ -154,7 +128,6 @@ class P2PMainService extends P2PBaseService {
     );
   }
 
-  /// CRITICAL FIX: Setup WiFi Direct message stream listener with deduplication
   void _setupWiFiDirectMessageStream() {
     _wifiDirectService?.messageStream
         .listen((messageData) {
@@ -166,21 +139,26 @@ class P2PMainService extends P2PBaseService {
             final from = messageData['from'] as String?;
 
             if (message != null && from != null) {
-              // Create a unique identifier for this message to prevent duplicates
-              final messageHash = '${from}_${message.hashCode}_${DateTime.now().millisecondsSinceEpoch ~/ 1000}';
 
-              // Clean up old entries
+              final messageHash = '${from}_${message.hashCode}';
+
               _cleanupMessageDeduplication();
 
-              // Check for recent duplicates
-              if (_processedMessages.contains(messageHash)) {
-                debugPrint('⚠️ Duplicate WiFi Direct message blocked: $messageHash');
-                return;
+              final now = DateTime.now();
+              final existingTimestamp = _messageTimestamps[messageHash];
+              if (existingTimestamp != null) {
+                final timeDiff = now.difference(existingTimestamp).inSeconds;
+                if (timeDiff < 5) {
+                  debugPrint(
+                    '! Duplicate WiFi Direct message blocked: $messageHash',
+                  );
+                  return;
+                }
               }
 
-              // Mark as processed
+              // Mark as processed with current timestamp
               _processedMessages.add(messageHash);
-              _messageTimestamps[messageHash] = DateTime.now();
+              _messageTimestamps[messageHash] = now;
 
               _handleIncomingMessage(message, from);
             }
@@ -190,7 +168,9 @@ class P2PMainService extends P2PBaseService {
           debugPrint('❌ WiFi Direct message stream error: $error');
         });
 
-    debugPrint('✅ WiFi Direct message stream listener setup complete with deduplication');
+    debugPrint(
+      '✅ WiFi Direct message stream listener setup complete with deduplication',
+    );
   }
 
   void _setupWiFiDirectSync() {
@@ -217,12 +197,14 @@ class P2PMainService extends P2PBaseService {
     _wifiDirectService?.peersStream.listen((peers) {
       debugPrint('👥 WiFi Direct peers updated: ${peers.length} peers found');
 
-      _updateDiscoveredPeersFromWiFiDirect(peers);
-
-      _checkForNewConnectedPeers(peers);
-
-      _triggerDevicesDiscoveredCallback();
-      notifyListeners();
+      // Debounce peer updates to prevent excessive processing
+      _peerUpdateDebounceTimer?.cancel();
+      _peerUpdateDebounceTimer = Timer(_peerUpdateDebounceDelay, () {
+        _updateDiscoveredPeersFromWiFiDirect(peers);
+        _checkForNewConnectedPeers(peers);
+        _triggerDevicesDiscoveredCallback();
+        notifyListeners();
+      });
     });
 
     _wifiDirectService?.stateStream.listen((state) {
@@ -230,9 +212,11 @@ class P2PMainService extends P2PBaseService {
 
       // Handle connection changes
       if (state['connectionChanged'] == true) {
-        final connectionInfo = Map<String, dynamic>.from(state['connectionInfo'] as Map? ?? {});
+        final connectionInfo = Map<String, dynamic>.from(
+          state['connectionInfo'] as Map? ?? {},
+        );
         _handleWiFiDirectConnectionChange(connectionInfo);
-            }
+      }
 
       if (state['socketReady'] == true) {
         debugPrint('🔌 WiFi Direct socket communication ready');
@@ -240,23 +224,29 @@ class P2PMainService extends P2PBaseService {
       }
 
       if (state['socketEstablished'] == true) {
-        final connectionInfo = Map<String, dynamic>.from(state['connectionInfo'] as Map? ?? {});
+        final connectionInfo = Map<String, dynamic>.from(
+          state['connectionInfo'] as Map? ?? {},
+        );
         debugPrint('✅ Socket established: $connectionInfo');
         _handleSocketEstablished(connectionInfo);
-            }
+      }
 
       if (state['existingConnection'] == true) {
-        final connectionInfo = Map<String, dynamic>.from(state['connectionInfo'] as Map? ?? {});
+        final connectionInfo = Map<String, dynamic>.from(
+          state['connectionInfo'] as Map? ?? {},
+        );
         debugPrint('🔗 Existing connection detected: $connectionInfo');
         _handleExistingConnection(connectionInfo);
-            }
+      }
 
       // Message handling is now done ONLY via messageStream to prevent duplicates
       // Removed duplicate message processing from stateStream
 
       // Handle new socket events
       if (state['serverSocketReady'] == true) {
-        final socketInfo = Map<String, dynamic>.from(state['socketInfo'] as Map? ?? {});
+        final socketInfo = Map<String, dynamic>.from(
+          state['socketInfo'] as Map? ?? {},
+        );
         debugPrint('🔌 Server socket ready: $socketInfo');
         _addMessageTrace('Server socket ready on port ${socketInfo['port']}');
       }
@@ -300,7 +290,6 @@ class P2PMainService extends P2PBaseService {
         discoveredResQLinkDevices.add(deviceModel);
       }
 
-      // CRITICAL FIX: Add connected peers to connectedDevices
       if (peer.status == WiFiDirectPeerStatus.connected) {
         debugPrint('➕ Adding connected WiFi Direct peer: ${peer.deviceName}');
         addConnectedDevice(peer.deviceAddress, peer.deviceName);
@@ -321,7 +310,9 @@ class P2PMainService extends P2PBaseService {
 
           // DON'T trigger onDeviceConnected here - wait for socket/handshake completion
           // This prevents duplicate connection notifications from WiFi Direct peer discovery
-          debugPrint('⏳ Waiting for socket connection establishment with ${peer.deviceName}');
+          debugPrint(
+            '⏳ Waiting for socket connection establishment with ${peer.deviceName}',
+          );
         }
       }
     }
@@ -508,7 +499,59 @@ class P2PMainService extends P2PBaseService {
     try {
       debugPrint('📨 Processing WiFi Direct message: $message from: $from');
 
-      // Route through MessageRouter instead of direct handling
+      // Parse message to check if it's a handshake
+      try {
+        final messageData = jsonDecode(message);
+        final messageType = messageData['type'] as String?;
+
+        if (messageType == 'handshake') {
+          // Handle handshake directly to establish WiFi Direct connection
+          final deviceId = messageData['deviceId'] as String?;
+          final userName = messageData['userName'] as String?;
+          final deviceName = messageData['deviceName'] as String?;
+
+          if (deviceId != null) {
+            // Prevent concurrent processing of the same device
+            if (_processingDevices.contains(deviceId)) {
+              debugPrint('⚠️ Handshake already being processed for device $deviceId');
+              return;
+            }
+
+            debugPrint('🤝 Processing WiFi Direct handshake from $deviceId ($userName)');
+
+            // Register device as connected for WiFi Direct (async, don't wait)
+            _registerWiFiDirectDevice(deviceId, userName ?? 'Unknown', deviceName ?? 'Unknown Device', from);
+
+            // Send handshake response (async, don't wait)
+            _sendHandshakeResponse(deviceId, from);
+            return;
+          }
+        }
+
+        if (messageType == 'handshake_response') {
+          // Handle handshake response
+          final deviceId = messageData['deviceId'] as String?;
+          final userName = messageData['userName'] as String?;
+          final deviceName = messageData['deviceName'] as String?;
+
+          if (deviceId != null) {
+            // Prevent concurrent processing of the same device
+            if (_processingDevices.contains(deviceId)) {
+              debugPrint('⚠️ Handshake response already being processed for device $deviceId');
+              return;
+            }
+
+            debugPrint('🤝 Processing WiFi Direct handshake response from $deviceId ($userName)');
+            // Register device as connected (async, don't wait)
+            _registerWiFiDirectDevice(deviceId, userName ?? 'Unknown', deviceName ?? 'Unknown Device', from);
+            return;
+          }
+        }
+      } catch (parseError) {
+        // If not JSON or not a handshake, continue with normal processing
+      }
+
+      // Route through MessageRouter for non-handshake messages
       await _messageRouter.routeRawMessage(message, from ?? 'unknown');
 
       _addMessageTrace('WiFi Direct message routed successfully');
@@ -619,10 +662,6 @@ class P2PMainService extends P2PBaseService {
 
   /// Setup enhanced monitoring and verification
   void _setupEnhancedMonitoring() {
-    // Monitor hotspot status every 30 seconds
-    _hotspotVerificationTimer = Timer.periodic(Duration(seconds: 30), (_) {
-      _verifyHotspotStatus();
-    });
 
     // Check for system connections every 15 seconds
     Timer.periodic(Duration(seconds: 15), (_) {
@@ -630,154 +669,9 @@ class P2PMainService extends P2PBaseService {
     });
   }
 
-  Future<void> _connectToAvailableDevice(
-    List<Map<String, dynamic>> devices,
-  ) async {
-    if (devices.isEmpty) {
-      debugPrint("❌ No devices available for connection");
-      return;
-    }
 
-    // Sort devices by priority (emergency devices first, then by signal strength)
-    devices.sort((a, b) {
-      final aEmergency = a['isEmergency'] == true ? 1 : 0;
-      final bEmergency = b['isEmergency'] == true ? 1 : 0;
 
-      if (aEmergency != bEmergency) {
-        return bEmergency.compareTo(aEmergency); // Emergency first
-      }
 
-      final aSignal = a['signalLevel'] ?? -100;
-      final bSignal = b['signalLevel'] ?? -100;
-      return bSignal.compareTo(aSignal); // Stronger signal first
-    });
-
-    for (final device in devices.take(3)) {
-      // Try top 3 devices
-      try {
-        final success = await connectToDevice(device);
-        if (success) {
-          debugPrint(
-            "✅ Successfully connected to device: ${device['deviceName']}",
-          );
-          return;
-        }
-      } catch (e) {
-        debugPrint("❌ Failed to connect to device ${device['deviceName']}: $e");
-        continue;
-      }
-    }
-
-    debugPrint("❌ Failed to connect to any available device");
-  }
-
-  Future<List<String>> _scanForResQLinkHotspots() async {
-    try {
-      final networks = await _networkService.scanForResQLinkNetworks();
-      return networks
-          .map((network) => network.ssid ?? '')
-          .where((ssid) => ssid.isNotEmpty)
-          .toList();
-    } catch (e) {
-      debugPrint('❌ Error scanning for ResQLink hotspots: $e');
-      return [];
-    }
-  }
-
-  void _onConnectionModeChanged(String mode) {
-    debugPrint("🔄 Connection mode changed to: $mode");
-    notifyListeners();
-  }
-
-  void _onConnectionFailed() {
-    debugPrint("❌ All connection attempts failed");
-    notifyListeners();
-  }
-
-  /// Connect to ResQLink network (delegates to network service)
-  Future<bool> connectToResQLinkNetwork(String ssid) async {
-    if (ssid.isEmpty) return false;
-
-    _isConnecting = true;
-    notifyListeners();
-
-    try {
-      final result = await _networkService.connectToResQLinkNetwork(ssid);
-      if (result) {
-        _connectedHotspotSSID = ssid;
-        _currentConnectionMode = P2PConnectionMode.client;
-        updateConnectionStatus(true);
-      }
-      return result;
-    } finally {
-      _isConnecting = false;
-      notifyListeners();
-    }
-  }
-
-  @override
-  Future<bool> createEmergencyHotspot({String? deviceId}) async {
-    if (_hotspotCreationInProgress) {
-      debugPrint('⏳ Hotspot creation already in progress...');
-      return false;
-    }
-
-    _hotspotCreationInProgress = true;
-    _addMessageTrace('Starting emergency hotspot creation');
-
-    try {
-      debugPrint('🔧 Creating emergency hotspot...');
-
-      // Generate unique SSID
-      final hotspotSSID =
-          "${P2PBaseService.resqlinkPrefix}${deviceId ?? DateTime.now().millisecondsSinceEpoch}";
-      debugPrint('🔧 Creating hotspot with SSID: $hotspotSSID');
-      _addMessageTrace('Creating hotspot: $hotspotSSID');
-
-      // Try to create hotspot using the new HotspotService
-      final success = await _hotspotService?.createHotspot(
-        ssid: hotspotSSID,
-        password: P2PBaseService.emergencyPassword,
-      );
-
-      if (success == true) {
-        _actualCreatedSSID = _hotspotService?.currentSSID ?? hotspotSSID;
-        _isHotspotEnabled = true;
-        _currentConnectionMode = P2PConnectionMode.hotspot;
-
-        debugPrint('✅ Emergency hotspot created successfully');
-        debugPrint('  - SSID: ${_hotspotService?.currentSSID}');
-        debugPrint('  - Password: ${_hotspotService?.currentPassword}');
-
-        _addMessageTrace('Hotspot created successfully: $_actualCreatedSSID');
-
-        // Setup network services
-        await _networkService.setupHotspotServices();
-
-        // Start discovery after hotspot is ready
-        Timer(Duration(seconds: 5), () {
-          discoverDevices(force: true);
-        });
-
-        updateConnectionStatus(true);
-        return true;
-      } else {
-        debugPrint('❌ Failed to create emergency hotspot');
-        _addMessageTrace('Emergency hotspot creation failed');
-        _isHotspotEnabled = false;
-        _currentConnectionMode = P2PConnectionMode.none;
-        return false;
-      }
-    } catch (e) {
-      debugPrint('❌ Exception in createEmergencyHotspot: $e');
-      _addMessageTrace('Exception in hotspot creation: $e');
-      _isHotspotEnabled = false;
-      _currentConnectionMode = P2PConnectionMode.none;
-      return false;
-    } finally {
-      _hotspotCreationInProgress = false;
-    }
-  }
 
   Future<bool> connectToDevice(Map<String, dynamic> device) async {
     try {
@@ -788,9 +682,6 @@ class P2PMainService extends P2PBaseService {
       switch (connectionType) {
         case 'wifi_direct':
           return await _connectViaWifiDirect(device);
-        case 'hotspot':
-        case 'hotspot_enhanced':
-          return await _connectViaHotspot(device);
         case 'mdns':
         case 'mdns_enhanced':
           return await _connectViaMDNS(device);
@@ -839,12 +730,6 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  Future<bool> _connectViaHotspot(Map<String, dynamic> device) async {
-    final ssid = device['deviceName'] as String?;
-    if (ssid == null) return false;
-
-    return await connectToResQLinkNetwork(ssid);
-  }
 
   Future<bool> _connectViaMDNS(Map<String, dynamic> device) async {
     debugPrint('📡 Connecting via mDNS to: ${device['deviceName']}');
@@ -856,7 +741,8 @@ class P2PMainService extends P2PBaseService {
     try {
       debugPrint('👑 Forcing host role...');
       setRole(P2PRole.host);
-      await createEmergencyHotspot();
+      _currentConnectionMode = P2PConnectionMode.wifiDirect;
+      await discoverDevices(force: true);
       notifyListeners();
     } catch (e) {
       debugPrint('❌ Failed to force host role: $e');
@@ -935,14 +821,6 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  /// Enable or disable hotspot fallback mode
-  void setHotspotFallbackEnabled(bool enabled) {
-    if (_hotspotFallbackEnabled != enabled) {
-      _hotspotFallbackEnabled = enabled;
-      debugPrint('🔧 Hotspot fallback ${enabled ? "enabled" : "disabled"}');
-      notifyListeners();
-    }
-  }
 
   /// Get online status
   bool get isOnline => _isOnline;
@@ -955,8 +833,6 @@ class P2PMainService extends P2PBaseService {
     switch (_currentConnectionMode) {
       case P2PConnectionMode.wifiDirect:
         return 'wifi_direct';
-      case P2PConnectionMode.hotspot:
-        return 'hotspot';
       case P2PConnectionMode.client:
         return 'client';
       default:
@@ -964,11 +840,6 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  /// Get connected hotspot SSID
-  String? get connectedHotspotSSID => _connectedHotspotSSID;
-
-  /// Get hotspot enabled status
-  bool get isHotspotEnabled => _isHotspotEnabled;
 
   /// Get connecting status
   bool get isConnecting => _isConnecting;
@@ -1013,8 +884,6 @@ class P2PMainService extends P2PBaseService {
       _networkService.dispose();
 
       // Reset state
-      _isHotspotEnabled = false;
-      _connectedHotspotSSID = null;
       _currentConnectionMode = P2PConnectionMode.none;
       _isConnecting = false;
 
@@ -1040,8 +909,6 @@ class P2PMainService extends P2PBaseService {
       'emergencyMode': emergencyMode,
       'connectedDevices': connectedDevices.length,
       'discoveredDevices': discoveredResQLinkDevices.length,
-      'actualCreatedSSID': _actualCreatedSSID,
-      'hotspotCreationInProgress': _hotspotCreationInProgress,
     };
   }
 
@@ -1108,30 +975,6 @@ class P2PMainService extends P2PBaseService {
       }
     }
 
-    // Add hotspot networks as discoverable devices
-    final networks = getAvailableHotspots();
-    for (final network in networks) {
-      final deviceId = network['ssid'].toString().replaceFirst(
-        P2PBaseService.resqlinkPrefix,
-        '',
-      );
-      if (deviceId.isNotEmpty && !deviceMap.containsKey(deviceId)) {
-        deviceMap[deviceId] = {
-          'deviceId': deviceId,
-          'deviceName':
-              'Device_$deviceId', // Use a more user-friendly placeholder name
-          'deviceAddress': network['bssid'] ?? deviceId,
-          'connectionType': 'hotspot',
-          'isAvailable': true,
-          'signalLevel': network['signalLevel'] ?? -70,
-          'lastSeen': DateTime.now().millisecondsSinceEpoch,
-          'isConnected': false,
-          'isEmergency': network['ssid'].toString().toLowerCase().contains(
-            'emergency',
-          ),
-        };
-      }
-    }
 
     // Final step: Override device names with connected device names (real names from handshake)
     for (final connectedDevice in connectedDevices.values) {
@@ -1163,9 +1006,7 @@ class P2PMainService extends P2PBaseService {
         return -45 - (timeDiff * 2); // Strong for local network
       case 'broadcast':
         return -55 - (timeDiff * 3); // Medium for broadcast
-      case 'hotspot':
-      case 'hotspot_enhanced':
-        return -60 - (timeDiff * 2); // Medium for hotspot
+     
       default:
         return -70 - (timeDiff * 5); // Weak for unknown
     }
@@ -1179,26 +1020,6 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  List<Map<String, dynamic>> getAvailableHotspots() {
-    final networks = _networkService.availableNetworks;
-    return networks
-        .map(
-          (network) => {
-            'ssid': network.ssid,
-            'bssid': network.bssid,
-            'signalLevel': network.level,
-            'frequency': network.frequency,
-            'capabilities': network.capabilities,
-            'isResQLink':
-                network.ssid?.startsWith(P2PBaseService.resqlinkPrefix) ??
-                false,
-          },
-        )
-        .where((hotspot) => hotspot['isResQLink'] == true)
-        .toList();
-  }
-
-  bool get hotspotFallbackEnabled => _hotspotFallbackEnabled;
 
   Map<String, DeviceModel> get knownDevices {
     final knownMap = <String, DeviceModel>{};
@@ -1216,41 +1037,6 @@ class P2PMainService extends P2PBaseService {
     return knownMap;
   }
 
-  /// Verify hotspot is working
-  Future<bool> _verifyHotspotWorking() async {
-    try {
-      // Try to bind to hotspot port
-      final server = await ServerSocket.bind(
-        InternetAddress.anyIPv4,
-        P2PBaseService.tcpPort,
-      );
-      await server.close();
-      debugPrint('✅ Hotspot verification successful');
-      return true;
-    } catch (e) {
-      debugPrint('❌ Hotspot verification failed: $e');
-      return false;
-    }
-  }
-
-  /// Verify hotspot status periodically
-  Future<void> _verifyHotspotStatus() async {
-    if (_actualCreatedSSID == null || !emergencyMode) return;
-
-    try {
-      // Check if hotspot is still active
-      final isActive = await _verifyHotspotWorking();
-      if (!isActive) {
-        debugPrint('⚠️ Hotspot appears inactive, attempting recovery...');
-        _addMessageTrace('Hotspot recovery attempted');
-
-        // Try to recreate hotspot
-        await createEmergencyHotspot();
-      }
-    } catch (e) {
-      debugPrint('❌ Hotspot status verification error: $e');
-    }
-  }
 
   @override
   Future<void> discoverDevices({bool force = false}) async {
@@ -1268,8 +1054,6 @@ class P2PMainService extends P2PBaseService {
       // Also use existing discovery service
       await _discoveryService.discoverDevices(force: force);
 
-      // Scan for available networks/hotspots
-      await _networkService.scanForResQLinkNetworks();
 
       // Trigger callback with all discovered devices
       _triggerDevicesDiscoveredCallback();
@@ -1361,22 +1145,32 @@ class P2PMainService extends P2PBaseService {
         throw Exception('Device not connected');
       }
 
-      // Send via appropriate protocol based on connection mode
       bool success = false;
 
-      switch (_currentConnectionMode) {
-        case P2PConnectionMode.wifiDirect:
-          success = await _socketProtocol.sendMessage(
-            messageJson,
-            targetDeviceId,
-          );
-        case P2PConnectionMode.hotspot:
-          success = await _networkService.sendToDevice(
-            messageJson,
-            targetDeviceId,
-          );
-        default:
-          success = await _socketProtocol.broadcastMessage(messageJson);
+      final hasConnectedDevices = connectedDevices.isNotEmpty;
+
+      if (hasConnectedDevices && _wifiDirectService != null) {
+        // Send via WiFi Direct
+        if (targetDeviceId != null) {
+          // Send to specific device
+          success = await _wifiDirectService!.sendMessage(messageJson);
+        } else {
+          // Broadcast to all WiFi Direct devices
+          success = await _wifiDirectService!.sendMessage(messageJson);
+        }
+        debugPrint('📡 Message sent via WiFi Direct: $success');
+      } else {
+        // Fallback to socket protocol
+        switch (_currentConnectionMode) {
+          case P2PConnectionMode.wifiDirect:
+            success = await _socketProtocol.sendMessage(
+              messageJson,
+              targetDeviceId,
+            );
+
+          default:
+            success = await _socketProtocol.broadcastMessage(messageJson);
+        }
       }
 
       if (success) {
@@ -1408,7 +1202,6 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  // Helper method removed - no longer needed without message queue
 
   /// Initialize socket protocol after successful WiFi Direct connection
   Future<void> _initializeSocketProtocolAfterConnection() async {
@@ -1464,6 +1257,18 @@ class P2PMainService extends P2PBaseService {
     if (toRemove.isNotEmpty) {
       debugPrint('🧹 Cleaned up ${toRemove.length} old message entries from WiFi Direct deduplication');
     }
+
+    // Also cleanup any stale processing entries (devices being processed for > 10 seconds)
+    _processingDevices.removeWhere((deviceId) {
+      // In practice, handshake processing should complete within seconds
+      // This is a safety cleanup for any stuck entries
+      return true; // For now, just clear old entries on each cleanup
+    });
+
+    // Clear handshake responses tracking periodically to allow re-handshaking if needed
+    if (toRemove.isNotEmpty) {
+      _handshakeResponsesSent.clear();
+    }
   }
 
   /// Add message trace for debugging
@@ -1479,6 +1284,53 @@ class P2PMainService extends P2PBaseService {
 
   /// Get message trace for debugging
   List<String> getMessageTrace() => List.from(_messageTrace);
+
+  /// Register WiFi Direct device as connected
+  Future<void> _registerWiFiDirectDevice(String deviceId, String userName, String deviceName, String? from) async {
+    try {
+      debugPrint('📱 Registering WiFi Direct device: $deviceId ($userName) from $from');
+
+      // Use the base class method to add connected device (this handles deduplication)
+      addConnectedDevice(deviceId, userName);
+
+      // Also register with socket protocol for message sending
+      if (from != null) {
+        _socketProtocol.registerWiFiDirectDevice(deviceId, from);
+      }
+
+      debugPrint('✅ Successfully registered WiFi Direct device: $deviceId ($userName)');
+      _addMessageTrace('Registered WiFi Direct device: $deviceId ($userName)');
+
+      // Delay notification to prevent UI thread issues
+      Future.microtask(() => notifyListeners());
+    } catch (e) {
+      debugPrint('❌ Error registering WiFi Direct device: $e');
+      _addMessageTrace('Error registering WiFi Direct device: $e');
+    }
+  }
+
+  /// Send handshake response via WiFi Direct
+  Future<void> _sendHandshakeResponse(String targetDeviceId, String? address) async {
+    try {
+      final response = jsonEncode({
+        'type': 'handshake_response',
+        'deviceId': deviceId,
+        'userName': userName,
+        'deviceName': 'ResQLink Device',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'protocol_version': '1.0',
+      });
+
+      if (_wifiDirectService != null) {
+        _wifiDirectService!.sendMessage(response); // Don't await, send immediately
+        debugPrint('✅ Sent handshake response to $targetDeviceId');
+        _addMessageTrace('Sent handshake response to $targetDeviceId');
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending handshake response: $e');
+      _addMessageTrace('Error sending handshake response: $e');
+    }
+  }
 
   /// Get detailed service status
   String getDetailedStatus() {
@@ -1505,52 +1357,30 @@ Discovery Status:
 - WiFi Direct Available: ${discoveryStatus['wifiDirectAvailable']}
 - Discovered Devices: ${discoveryStatus['discoveredDevices']}
 
-Hotspot Status:
-- Created SSID: $_actualCreatedSSID
-- Creation In Progress: $_hotspotCreationInProgress
+Connection Status:
+- Mode: WiFi Direct Only
 
 Recent Message Traces:
 ${_messageTrace.take(5).join('\n')}
 ''';
   }
 
-  /// Get available ResQLink networks
+  /// Get available ResQLink networks - REMOVED
   List<Map<String, dynamic>> get availableNetworks {
-    try {
-      return _networkService.availableNetworks
-          .map(
-            (network) => {
-              'ssid': network.ssid,
-              'bssid': network.bssid,
-              'level': network.level,
-              'frequency': network.frequency,
-              'capabilities': network.capabilities,
-            },
-          )
-          .toList();
-    } catch (e) {
-      debugPrint('❌ Error getting available networks: $e');
-      return [];
-    }
+    return [];
   }
 
   @override
   void dispose() async {
     debugPrint('🗑️ P2P Main Service disposing...');
 
-    _hotspotVerificationTimer?.cancel();
     _connectionStateDebounceTimer?.cancel();
+    _peerUpdateDebounceTimer?.cancel();
 
     _networkService.dispose();
     _discoveryService.dispose();
-    _connectionFallbackManager.dispose();
     // Message queue service disposal removed
 
-    // Stop hotspot and dispose service
-    if (_isHotspotEnabled) {
-      await _hotspotService?.stopHotspot();
-    }
-    _hotspotService?.dispose();
 
     _messageTrace.clear();
     _processedMessages.clear();

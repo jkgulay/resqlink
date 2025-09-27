@@ -36,19 +36,41 @@ class SocketProtocol {
   /// Start socket server
   Future<bool> startServer({int port = defaultPort}) async {
     try {
-      if (_isRunning) {
-        debugPrint('⚠️ Socket server already running');
+      if (_isRunning && _serverSocket != null) {
+        debugPrint('✅ Socket server already running on port ${_serverSocket!.port}');
         return true;
       }
 
-      _serverSocket = await ServerSocket.bind(
-        InternetAddress.anyIPv4,
-        port,
-        shared: true,
-      );
+      // Try the specified port first, then try alternative ports if it fails
+      for (int attemptPort = port; attemptPort < port + 10; attemptPort++) {
+        try {
+          _serverSocket = await ServerSocket.bind(
+            InternetAddress.anyIPv4,
+            attemptPort,
+            shared: true,
+          );
 
-      _isRunning = true;
-      debugPrint('✅ Socket server started on port $port');
+          _isRunning = true;
+          debugPrint('✅ Socket server started on port $attemptPort');
+          break; // Success, exit the loop
+        } on SocketException catch (e) {
+          if (e.osError?.errorCode == 98) { // Address already in use
+            debugPrint('⚠️ Port $attemptPort already in use, trying next port...');
+            if (attemptPort == port + 9) {
+              // Last attempt failed
+              throw SocketException('All ports from $port to ${port + 9} are in use');
+            }
+            continue;
+          } else {
+            rethrow; // Other socket errors
+          }
+        }
+      }
+
+      if (_serverSocket == null) {
+        debugPrint('❌ Failed to bind to any port');
+        return false;
+      }
 
       _serverSubscription = _serverSocket!.listen(
         _handleClientConnection,
@@ -84,7 +106,14 @@ class SocketProtocol {
     final subscription = client.listen(
       (Uint8List data) => _handleSocketData(data, client),
       onError: (error) {
-        debugPrint('❌ Client error: $error');
+        // Handle different types of connection errors gracefully
+        if (error.toString().contains('Connection reset by peer')) {
+          debugPrint('🔄 Client connection reset by peer: $clientAddress:$clientPort (normal disconnection)');
+        } else if (error.toString().contains('Connection refused')) {
+          debugPrint('❌ Client connection refused: $clientAddress:$clientPort');
+        } else {
+          debugPrint('❌ Client connection error: $error ($clientAddress:$clientPort)');
+        }
         _removeClient(client);
       },
       onDone: () {
@@ -372,10 +401,28 @@ class SocketProtocol {
     // Disconnect as client
     _disconnectClient();
 
-    // Clear device sockets
+    // Clear device sockets and WiFi Direct devices
     _deviceSockets.clear();
+    _wifiDirectDevices.clear();
 
     debugPrint('🛑 Socket protocol stopped');
+  }
+
+  /// Force cleanup of existing connections (useful after system changes)
+  Future<void> forceCleanup() async {
+    debugPrint('🧹 Force cleaning up socket protocol...');
+
+    try {
+      // Stop everything first
+      await stop();
+
+      // Small delay to ensure cleanup
+      await Future.delayed(Duration(milliseconds: 500));
+
+      debugPrint('✅ Socket protocol force cleanup completed');
+    } catch (e) {
+      debugPrint('⚠️ Error during force cleanup: $e');
+    }
   }
 
   /// Get connection status
@@ -383,4 +430,27 @@ class SocketProtocol {
 
   /// Get connected device count
   int get connectedDeviceCount => _deviceSockets.length;
+
+  /// Register WiFi Direct device as connected (for message sending)
+  void registerWiFiDirectDevice(String deviceId, String address) {
+    try {
+      debugPrint('📱 Registering WiFi Direct device: $deviceId at $address');
+
+      // Store the device as connected without a socket
+      // The sendMessage method will be updated to handle WiFi Direct devices
+      _wifiDirectDevices[deviceId] = address;
+
+      debugPrint('✅ WiFi Direct device registered for messaging: $deviceId');
+    } catch (e) {
+      debugPrint('❌ Error registering WiFi Direct device: $e');
+    }
+  }
+
+  // Track WiFi Direct devices separately
+  final Map<String, String> _wifiDirectDevices = {};
+
+  /// Check if device is connected via WiFi Direct
+  bool isWiFiDirectDevice(String deviceId) {
+    return _wifiDirectDevices.containsKey(deviceId);
+  }
 }

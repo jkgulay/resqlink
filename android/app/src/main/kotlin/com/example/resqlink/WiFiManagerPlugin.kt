@@ -40,11 +40,6 @@ class WiFiManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
-            "createHotspot" -> {
-                val ssid = call.argument<String>("ssid")
-                val password = call.argument<String>("password")
-                createHotspot(ssid, password, result)
-            }
             "connectToWiFi" -> {
                 val ssid = call.argument<String>("ssid")
                 val password = call.argument<String>("password")
@@ -52,100 +47,10 @@ class WiFiManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             }
             "scanWifi" -> scanWiFi(result)
             "getCurrentWiFi" -> getCurrentWiFi(result)
-            "getHotspotInfo" -> getHotspotInfo(result)
             else -> result.notImplemented()
         }
     }
 
-    private fun createHotspot(ssid: String?, password: String?, result: Result) {
-        if (ssid == null || password == null) {
-            result.error("INVALID_ARGS", "SSID and password are required", null)
-            return
-        }
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Android 8.0+ - Use WifiManager.LocalOnlyHotspotReservation
-                createModernHotspot(ssid, password, result)
-            } else {
-                // Legacy method for older Android versions
-                createLegacyHotspot(ssid, password, result)
-            }
-        } catch (e: Exception) {
-            result.error("HOTSPOT_ERROR", "Failed to create hotspot: ${e.message}", null)
-        }
-    }
-
-    private fun createModernHotspot(ssid: String, password: String, result: Result) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                // Request LocalOnlyHotspot
-                wifiManager?.startLocalOnlyHotspot(object : WifiManager.LocalOnlyHotspotCallback() {
-                    override fun onStarted(reservation: WifiManager.LocalOnlyHotspotReservation?) {
-                        reservation?.let {
-                            val config = it.wifiConfiguration
-                            result.success(mapOf(
-                                "success" to true,
-                                "ssid" to (config?.SSID ?: ssid),
-                                "password" to (config?.preSharedKey ?: password),
-                                "message" to "Hotspot created successfully"
-                            ))
-                        } ?: result.error("HOTSPOT_ERROR", "Failed to get hotspot configuration", null)
-                    }
-
-                    override fun onStopped() {
-                        // Hotspot stopped
-                    }
-
-                    override fun onFailed(reason: Int) {
-                        val errorMsg = when (reason) {
-                            ERROR_INCOMPATIBLE_MODE -> "Incompatible mode"
-                            ERROR_NO_CHANNEL -> "No channel available"
-                            ERROR_GENERIC -> "Generic error"
-                            ERROR_TETHERING_DISALLOWED -> "Tethering not allowed"
-                            else -> "Unknown error: $reason"
-                        }
-                        result.error("HOTSPOT_FAILED", errorMsg, null)
-                    }
-                }, null)
-            } catch (e: SecurityException) {
-                result.error("PERMISSION_DENIED", "Location permission required for hotspot", null)
-            }
-        }
-    }
-
-    private fun createLegacyHotspot(ssid: String, password: String, result: Result) {
-        try {
-            // Legacy method using reflection (Android 7.1 and below)
-            val wifiConfig = WifiConfiguration().apply {
-                SSID = ssid
-                preSharedKey = password
-                allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK)
-            }
-
-            // Use reflection to access hidden API
-            val method: Method = wifiManager!!.javaClass.getMethod(
-                "setWifiApEnabled",
-                WifiConfiguration::class.java,
-                Boolean::class.java
-            )
-            
-            val success = method.invoke(wifiManager, wifiConfig, true) as Boolean
-            
-            if (success) {
-                result.success(mapOf(
-                    "success" to true,
-                    "ssid" to ssid,
-                    "password" to password,
-                    "message" to "Legacy hotspot created"
-                ))
-            } else {
-                result.error("HOTSPOT_FAILED", "Failed to enable legacy hotspot", null)
-            }
-        } catch (e: Exception) {
-            result.error("REFLECTION_ERROR", "Legacy hotspot failed: ${e.message}", null)
-        }
-    }
 
     private fun connectToWiFi(ssid: String?, password: String?, result: Result) {
         if (ssid == null || password == null) {
@@ -279,28 +184,6 @@ class WiFiManagerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
     }
 
-    private fun getHotspotInfo(result: Result) {
-        try {
-            // Try to get hotspot state using reflection
-            val method = wifiManager?.javaClass?.getMethod("getWifiApState")
-            val state = method?.invoke(wifiManager) as? Int
-
-            val isEnabled = when (state) {
-                12, 13 -> true // WIFI_AP_STATE_ENABLED or WIFI_AP_STATE_ENABLING
-                else -> false
-            }
-
-            result.success(mapOf(
-                "isEnabled" to isEnabled,
-                "state" to (state ?: -1)
-            ))
-        } catch (e: Exception) {
-            result.success(mapOf(
-                "isEnabled" to false,
-                "error" to e.message
-            ))
-        }
-    }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)

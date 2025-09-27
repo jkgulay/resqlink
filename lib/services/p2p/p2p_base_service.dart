@@ -186,7 +186,7 @@ abstract class P2PBaseService with ChangeNotifier {
 
   /// Start message cleanup timer
   void _startMessageCleanup() {
-    _messageCleanupTimer = Timer.periodic(Duration(hours: 1), (_) {
+    _messageCleanupTimer = Timer.periodic(Duration(minutes: 30), (_) {
       _cleanupOldMessages();
     });
   }
@@ -301,7 +301,6 @@ abstract class P2PBaseService with ChangeNotifier {
   }
 
   /// Abstract methods to be implemented by subclasses
-  Future<bool> createEmergencyHotspot({String? deviceId});
   Future<void> discoverDevices({bool force = false});
   Future<void> sendMessage({
     required String message,
@@ -349,7 +348,11 @@ abstract class P2PBaseService with ChangeNotifier {
 enum P2PRole { none, host, client }
 
 /// P2P Connection Mode enumeration
-enum P2PConnectionMode { none, hotspot, client, wifiDirect }
+enum P2PConnectionMode {
+  none,
+  client,
+  wifiDirect
+}
 
 /// Emergency template enumeration
 enum EmergencyTemplate { sos, trapped, medical, safe, evacuating }

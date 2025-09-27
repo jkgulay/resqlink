@@ -128,7 +128,6 @@ class EmergencyRecoveryService {
       // Try multiple strategies simultaneously
       await Future.wait([
         _tryWiFiDirectRecovery(),
-        _tryHotspotRecovery(),
         _tryKnownDeviceRecovery(),
       ], eagerError: false);
     } catch (e) {
@@ -168,42 +167,7 @@ class EmergencyRecoveryService {
     }
   }
 
-  Future<void> _tryHotspotRecovery() async {
-    try {
-      debugPrint("📶 Trying hotspot recovery...");
-
-      // Enable hotspot fallback if not already enabled
-      if (!_p2pService!.hotspotFallbackEnabled) {
-        _p2pService!.setHotspotFallbackEnabled(true);
-      }
-
-      // Scan for ResQLink hotspots - FIXED
-      final hotspots = _p2pService!.getAvailableHotspots();
-
-      if (hotspots.isNotEmpty) {
-        // Try to connect to strongest hotspot
-        hotspots.sort((a, b) {
-          final aSignal = a['signalLevel'] as int? ?? -100;
-          final bSignal = b['signalLevel'] as int? ?? -100;
-          return bSignal.compareTo(aSignal);
-        });
-
-        await _p2pService!.connectToDevice({
-          'deviceName': hotspots.first['ssid'],
-          'deviceAddress': hotspots.first['ssid'],
-          'connectionType': 'hotspot',
-        });
-
-        debugPrint("✅ Hotspot recovery successful");
-      } else {
-        // Create our own hotspot if none available
-        await _p2pService!.createEmergencyHotspot();
-        debugPrint("✅ Emergency hotspot created");
-      }
-    } catch (e) {
-      debugPrint("❌ Hotspot recovery failed: $e");
-    }
-  }
+ 
 
   Future<void> _tryKnownDeviceRecovery() async {
     try {
@@ -278,14 +242,10 @@ class EmergencyRecoveryService {
       // Emergency protocol: try everything simultaneously
       await Future.wait([
         _emergencyWiFiDirectScan(),
-        _emergencyHotspotScan(),
         _emergencyBroadcast(),
       ], eagerError: false);
 
-      // If still no connection, become a strong emergency beacon
-      if (!_p2pService!.isConnected) {
-        await _becomeEmergencyBeacon();
-      }
+   
     } catch (e) {
       debugPrint("❌ Emergency protocol failed: $e");
     }
@@ -299,54 +259,9 @@ class EmergencyRecoveryService {
     }
   }
 
-  Future<void> _emergencyHotspotScan() async {
-    // Aggressive hotspot scanning and creation
-    _p2pService!.setHotspotFallbackEnabled(true);
 
-    // Try multiple times to create emergency group
-    for (int i = 0; i < 3; i++) {
-      try {
-        await _p2pService!.createEmergencyHotspot();
-        break;
-      } catch (e) {
-        await Future.delayed(Duration(seconds: 5));
-      }
-    }
-  }
 
-  Future<void> createEmergencyHotspot({String? deviceId}) async {
-    try {
-      debugPrint("🚨 Creating emergency hotspot via P2P service...");
 
-      // Use the P2P service's existing method
-      final success = await _p2pService!.createEmergencyHotspot(
-        deviceId: deviceId,
-      );
-
-      if (success) {
-        debugPrint("✅ Emergency hotspot created successfully");
-      } else {
-        throw Exception("Failed to create emergency hotspot");
-      }
-    } catch (e) {
-      debugPrint('❌ Error creating emergency hotspot: $e');
-      rethrow;
-    }
-  }
-
-  Future<void> forceHostRole() async {
-    try {
-      debugPrint("🔄 Forcing host role via P2P service...");
-
-      // Use the P2P service to create emergency hotspot (which makes it host)
-      await _p2pService!.createEmergencyHotspot();
-
-      debugPrint("✅ Host role forced successfully");
-    } catch (e) {
-      debugPrint("❌ Failed to force host role: $e");
-      rethrow;
-    }
-  }
 
   Future<void> _emergencyBroadcast() async {
     try {
@@ -374,21 +289,6 @@ class EmergencyRecoveryService {
     }
   }
 
-  Future<void> _becomeEmergencyBeacon() async {
-    try {
-      debugPrint("🚨 Becoming emergency beacon - creating persistent hotspot");
-
-      // Create emergency hotspot (which makes us host)
-      await _p2pService!.createEmergencyHotspot();
-
-      // Enable all fallback mechanisms
-      _p2pService!.setHotspotFallbackEnabled(true);
-
-      debugPrint("✅ Emergency beacon active");
-    } catch (e) {
-      debugPrint("❌ Failed to become emergency beacon: $e");
-    }
-  }
 
   // Get recovery status for UI
   Map<String, dynamic> getRecoveryStatus() {

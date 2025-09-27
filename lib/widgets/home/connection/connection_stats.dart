@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/controllers/home_controller.dart';
-import 'package:resqlink/utils/responsive_helper.dart';
+import 'package:resqlink/utils/resqlink_theme.dart';
+import 'package:resqlink/utils/responsive_utils.dart';
+import 'package:resqlink/services/p2p/wifi_direct_service.dart';
 
 class ConnectionStats extends StatelessWidget {
   final HomeController controller;
@@ -9,16 +11,22 @@ class ConnectionStats extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final padding = ResponsiveHelper.getItemPadding(context);
-    final dividerHeight = ResponsiveHelper.isDesktop(context) ? 40.0 : 
-                         ResponsiveHelper.isTablet(context) ? 35.0 : 30.0;
-
     return Container(
-      padding: EdgeInsets.all(padding),
+      padding: ResponsiveSpacing.padding(context, all: 16),
       decoration: BoxDecoration(
-        color: Colors.blue.withValues(alpha: 0.12),
+        color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.blue.withValues(alpha: 0.35)),
+        border: Border.all(
+          color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.4),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -28,23 +36,23 @@ class ConnectionStats extends StatelessWidget {
               context,
               'Discovered',
               '${controller.discoveredDevices.length}',
-              Icons.radar,
-              Colors.blue,
+              Icons.radar_outlined,
+              ResQLinkTheme.primaryBlue,
             ),
           ),
-          _buildStatDivider(context, dividerHeight),
+          _buildStatDivider(context),
           Expanded(
             child: _buildNetworkStat(
               context,
               'Connected',
               '${controller.p2pService.connectedDevices.length}',
-              Icons.link,
-              Colors.green,
+              Icons.link_outlined,
+              ResQLinkTheme.safeGreen,
             ),
           ),
-          _buildStatDivider(context, dividerHeight),
+          _buildStatDivider(context),
           Expanded(
-            child: _buildHotspotStat(context),
+            child: _buildWiFiDirectStat(context),
           ),
         ],
       ),
@@ -58,33 +66,24 @@ class ConnectionStats extends StatelessWidget {
     IconData icon,
     Color color,
   ) {
-    final iconSize = ResponsiveHelper.isDesktop(context) ? 28.0 : 
-                    ResponsiveHelper.isTablet(context) ? 24.0 : 20.0;
-    final valueSize = ResponsiveHelper.isDesktop(context) ? 20.0 : 
-                     ResponsiveHelper.isTablet(context) ? 18.0 : 16.0;
-    final labelSize = ResponsiveHelper.isDesktop(context) ? 14.0 : 
-                     ResponsiveHelper.isTablet(context) ? 12.0 : 11.0;
-    final spacing = ResponsiveHelper.isDesktop(context) ? 8.0 : 
-                   ResponsiveHelper.isTablet(context) ? 6.0 : 4.0;
+    final iconSize = ResponsiveUtils.isMobile(context) ? 20.0 : 24.0;
 
     return Column(
       children: [
         Icon(icon, color: color, size: iconSize),
-        SizedBox(height: spacing),
-        Text(
+        SizedBox(height: ResponsiveSpacing.xs(context)),
+        ResponsiveTextWidget(
           value,
-          style: TextStyle(
+          styleBuilder: (context) => ResponsiveText.heading3(context).copyWith(
             color: color,
             fontWeight: FontWeight.bold,
-            fontSize: valueSize,
           ),
         ),
-        SizedBox(height: 2),
-        Text(
+        SizedBox(height: ResponsiveSpacing.xs(context) / 2),
+        ResponsiveTextWidget(
           label,
-          style: TextStyle(
+          styleBuilder: (context) => ResponsiveText.caption(context).copyWith(
             color: color.withValues(alpha: 0.8),
-            fontSize: labelSize,
           ),
           textAlign: TextAlign.center,
         ),
@@ -92,31 +91,36 @@ class ConnectionStats extends StatelessWidget {
     );
   }
 
-  Widget _buildStatDivider(BuildContext context, double height) {
+  Widget _buildStatDivider(BuildContext context) {
+    final height = ResponsiveUtils.isMobile(context) ? 30.0 : 40.0;
+
     return Container(
-      width: 1,
+      width: 1.5,
       height: height,
-      color: Colors.blue.withValues(alpha: 0.3),
+      decoration: BoxDecoration(
+        color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(1),
+      ),
       margin: EdgeInsets.symmetric(
-        horizontal: ResponsiveHelper.isDesktop(context) ? 20 :
-                   ResponsiveHelper.isTablet(context) ? 16 : 12,
+        horizontal: ResponsiveSpacing.sm(context),
       ),
     );
   }
 
-  Widget _buildHotspotStat(BuildContext context) {
-    final hotspotService = controller.p2pService.hotspotService;
-    final isHotspotEnabled = hotspotService.isEnabled;
-    final clientCount = hotspotService.connectedClients.length;
+  Widget _buildWiFiDirectStat(BuildContext context) {
+    final isWiFiDirectActive = controller.p2pService.wifiDirectService?.connectionState ==
+        WiFiDirectConnectionState.connected;
 
-    final color = isHotspotEnabled ? Colors.orange : Colors.grey;
-    final status = isHotspotEnabled ? '$clientCount' : 'Off';
+    final color = isWiFiDirectActive
+        ? ResQLinkTheme.emergencyOrange
+        : ResQLinkTheme.offlineGray;
+    final status = isWiFiDirectActive ? 'Active' : 'Ready';
 
     return _buildNetworkStat(
       context,
-      'Hotspot',
+      'WiFi Direct',
       status,
-      isHotspotEnabled ? Icons.wifi_tethering : Icons.wifi_tethering_off,
+      isWiFiDirectActive ? Icons.wifi_outlined : Icons.wifi_off_outlined,
       color,
     );
   }

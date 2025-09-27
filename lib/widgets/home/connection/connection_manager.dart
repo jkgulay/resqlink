@@ -4,11 +4,8 @@ import 'package:resqlink/controllers/home_controller.dart';
 import 'package:resqlink/models/message_model.dart';
 import 'package:resqlink/helpers/chat_navigation_helper.dart';
 
-/// Manages device connections and chat navigation
-/// This class handles all connection-related operations and navigation to chat
-class ConnectionManager {
 
-  /// Connect to a device with proper error handling
+class ConnectionManager {
   Future<bool> connectToDevice(
     Map<String, dynamic> device,
     BuildContext context,
@@ -28,9 +25,7 @@ class ConnectionManager {
       switch (connectionType) {
         case 'wifi_direct':
           success = await _connectViaWifiDirect(device, controller);
-        case 'hotspot':
-        case 'hotspot_enhanced':
-          success = await _connectViaHotspot(device, controller);
+
         default:
           await controller.connectToDevice(device);
           success = true;
@@ -136,7 +131,9 @@ class ConnectionManager {
     try {
       final controller = context.read<HomeController>();
 
-      debugPrint('🧭 ConnectionManager: Navigating to chat for ${device['deviceName']}');
+      debugPrint(
+        '🧭 ConnectionManager: Navigating to chat for ${device['deviceName']}',
+      );
 
       // Use the new ChatNavigationHelper for robust navigation
       await ChatNavigationHelper.navigateToDeviceChat(
@@ -145,7 +142,6 @@ class ConnectionManager {
         p2pService: controller.p2pService,
         fallbackCallback: onDeviceChatTap,
       );
-
     } catch (e) {
       debugPrint('❌ ConnectionManager: Error navigating to chat: $e');
       if (context.mounted) {
@@ -211,13 +207,16 @@ class ConnectionManager {
   ) async {
     if (!context.mounted) return false;
 
-    debugPrint('🚀 ConnectionManager: Quick connect and chat for ${device['deviceName']}');
+    debugPrint(
+      '🚀 ConnectionManager: Quick connect and chat for ${device['deviceName']}',
+    );
 
     return await ChatNavigationHelper.quickConnectAndNavigateToChat(
       context: context,
       device: device,
       p2pService: controller.p2pService,
-      connectFunction: (device, context, ctrl) => connectToDevice(device, context, ctrl as HomeController),
+      connectFunction: (device, context, ctrl) =>
+          connectToDevice(device, context, ctrl as HomeController),
       controller: controller,
     );
   }
@@ -323,9 +322,9 @@ class ConnectionManager {
 
       final success =
           await controller.p2pService.wifiDirectService?.connectToPeer(
-                deviceAddress,
-              ) ??
-              false;
+            deviceAddress,
+          ) ??
+          false;
 
       if (success) {
         debugPrint('✅ WiFi Direct connection initiated');
@@ -364,16 +363,6 @@ class ConnectionManager {
       debugPrint('❌ WiFi Direct connection failed: $e');
       return false;
     }
-  }
-
-  Future<bool> _connectViaHotspot(
-    Map<String, dynamic> device,
-    HomeController controller,
-  ) async {
-    final ssid = device['deviceName'] as String?;
-    if (ssid == null) return false;
-
-    return await controller.p2pService.connectToResQLinkNetwork(ssid);
   }
 
   Widget _buildDetailRow(String label, String value) {

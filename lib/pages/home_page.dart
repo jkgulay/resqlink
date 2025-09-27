@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:resqlink/controllers/gps_controller.dart';
 import 'package:resqlink/services/settings_service.dart';
 import '../utils/responsive_utils.dart';
+import '../utils/resqlink_theme.dart';
 import 'message_page.dart';
 import 'gps_page.dart';
 import 'settings_page.dart';
@@ -115,7 +116,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               builder: (context, constraints) {
                 return SingleChildScrollView(
                   physics: AlwaysScrollableScrollPhysics(),
-                  padding: ResponsiveUtils.getResponsivePadding(context),
+                  padding: ResponsiveSpacing.padding(
+                    context,
+                    horizontal: ResponsiveUtils.isMobile(context) ? 16 : 24,
+                    vertical: ResponsiveUtils.isMobile(context) ? 16 : 20,
+                  ),
                   child: ConstrainedBox(
                     constraints: ResponsiveUtils.isDesktop(context)
                         ? BoxConstraints(maxWidth: 1200)
@@ -127,15 +132,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           p2pService: _p2pService,
                           onToggle: controller.toggleEmergencyMode,
                         ),
-                        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+                        SizedBox(height: ResponsiveSpacing.lg(context)),
 
                         // Use responsive layout for tablet/desktop
                         if (ResponsiveUtils.isDesktop(context))
-                          _buildDesktopLayout(controller, locationState, gpsController)
+                          _buildDesktopLayout(
+                            controller,
+                            locationState,
+                            gpsController,
+                          )
                         else if (ResponsiveUtils.isTablet(context))
-                          _buildTabletLayout(controller, locationState, gpsController)
+                          _buildTabletLayout(
+                            controller,
+                            locationState,
+                            gpsController,
+                          )
                         else
-                          _buildMobileLayout(controller, locationState, gpsController),
+                          _buildMobileLayout(
+                            controller,
+                            locationState,
+                            gpsController,
+                          ),
                       ],
                     ),
                   ),
@@ -149,7 +166,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   // Responsive layout builders
-  Widget _buildMobileLayout(HomeController controller, LocationStateService locationState, GpsController gpsController) {
+  Widget _buildMobileLayout(
+    HomeController controller,
+    LocationStateService locationState,
+    GpsController gpsController,
+  ) {
     return Column(
       children: [
         // Connection & Discovery Card
@@ -157,7 +178,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           controller: controller,
           onDeviceChatTap: _onDeviceChatTap,
         ),
-        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+        SizedBox(height: ResponsiveSpacing.lg(context)),
 
         // Emergency Actions (only when connected)
         if (controller.isConnected) ...[
@@ -165,7 +186,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             p2pService: _p2pService,
             onEmergencyMessage: _sendEmergencyMessage,
           ),
-          SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+          SizedBox(height: ResponsiveSpacing.lg(context)),
         ],
 
         // Location Status Card
@@ -179,7 +200,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           },
           onShare: locationState.shareLocation,
         ),
-        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+        SizedBox(height: ResponsiveSpacing.lg(context)),
 
         // Instructions Card
         InstructionsCard(),
@@ -187,7 +208,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildTabletLayout(HomeController controller, LocationStateService locationState, GpsController gpsController) {
+  Widget _buildTabletLayout(
+    HomeController controller,
+    LocationStateService locationState,
+    GpsController gpsController,
+  ) {
     return Column(
       children: [
         Row(
@@ -199,7 +224,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 onDeviceChatTap: _onDeviceChatTap,
               ),
             ),
-            SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+            SizedBox(width: ResponsiveSpacing.lg(context)),
             Expanded(
               child: LocationStatusCard(
                 location: locationState.currentLocation,
@@ -214,7 +239,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
           ],
         ),
-        SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+        SizedBox(height: ResponsiveSpacing.lg(context)),
 
         // Emergency Actions (only when connected)
         if (controller.isConnected) ...[
@@ -222,7 +247,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             p2pService: _p2pService,
             onEmergencyMessage: _sendEmergencyMessage,
           ),
-          SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+          SizedBox(height: ResponsiveSpacing.lg(context)),
         ],
 
         // Instructions Card
@@ -231,7 +256,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildDesktopLayout(HomeController controller, LocationStateService locationState, GpsController gpsController) {
+  Widget _buildDesktopLayout(
+    HomeController controller,
+    LocationStateService locationState,
+    GpsController gpsController,
+  ) {
     return Column(
       children: [
         Row(
@@ -246,7 +275,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     onDeviceChatTap: _onDeviceChatTap,
                   ),
                   if (controller.isConnected) ...[
-                    SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+                    SizedBox(height: ResponsiveSpacing.lg(context)),
                     EmergencyActionsCard(
                       p2pService: _p2pService,
                       onEmergencyMessage: _sendEmergencyMessage,
@@ -270,7 +299,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     },
                     onShare: locationState.shareLocation,
                   ),
-                  SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+                  SizedBox(height: ResponsiveSpacing.lg(context)),
                   InstructionsCard(),
                 ],
               ),
@@ -334,24 +363,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return null;
   }
 
-Future<void> _onAppResumed() async {
-  debugPrint('App resumed - restoring state');
-  
-  if (_isP2PInitialized) {
-    try {
-      debugPrint('🔍 Checking for existing connections...');
-      
-      await _p2pService.checkForExistingConnections();
-      await _p2pService.checkForSystemConnections();
-      
-      debugPrint('✅ Connection check completed');
-    } catch (e) {
-      debugPrint('❌ Error checking connections on app resume: $e');
+  Future<void> _onAppResumed() async {
+    debugPrint('App resumed - restoring state');
+
+    if (_isP2PInitialized) {
+      try {
+        debugPrint('🔍 Checking for existing connections...');
+
+        await _p2pService.checkForExistingConnections();
+        await _p2pService.checkForSystemConnections();
+
+        debugPrint('✅ Connection check completed');
+      } catch (e) {
+        debugPrint('❌ Error checking connections on app resume: $e');
+      }
+    } else {
+      debugPrint('⚠️ P2P service not initialized, skipping connection check');
     }
-  } else {
-    debugPrint('⚠️ P2P service not initialized, skipping connection check');
   }
-}
 
   Future<void> _onAppPaused() async {
     debugPrint('App paused - saving state');
@@ -403,9 +432,12 @@ Future<void> _onAppResumed() async {
 
       // Clean up any duplicate chat sessions that might exist
       try {
-        final duplicatesRemoved = await ChatRepository.cleanupDuplicateSessions();
+        final duplicatesRemoved =
+            await ChatRepository.cleanupDuplicateSessions();
         if (duplicatesRemoved > 0) {
-          debugPrint('🧹 Cleaned up $duplicatesRemoved duplicate chat sessions on startup');
+          debugPrint(
+            '🧹 Cleaned up $duplicatesRemoved duplicate chat sessions on startup',
+          );
         }
       } catch (e) {
         debugPrint('❌ Error cleaning up duplicate sessions: $e');
@@ -432,8 +464,11 @@ Future<void> _onAppResumed() async {
     if (_recentlyConnectedDevices.containsKey(deviceId)) {
       final lastConnection = _recentlyConnectedDevices[deviceId]!;
       final timeSinceLastConnection = DateTime.now().difference(lastConnection);
-      if (timeSinceLastConnection.inSeconds < 30) { // Increased from 10s to 30s
-        debugPrint("⚠️ Ignoring duplicate connection for $userName ($deviceId) - connected ${timeSinceLastConnection.inSeconds}s ago");
+      if (timeSinceLastConnection.inSeconds < 30) {
+        // Increased from 10s to 30s
+        debugPrint(
+          "⚠️ Ignoring duplicate connection for $userName ($deviceId) - connected ${timeSinceLastConnection.inSeconds}s ago",
+        );
         return;
       }
     }
@@ -487,16 +522,7 @@ Future<void> _onAppResumed() async {
 
     final settings = _settingsService!;
     if (_isP2PInitialized) {
-      final connectionMode = settings.connectionMode;
-      switch (connectionMode) {
-        case 'wifi_direct':
-          _p2pService.setHotspotFallbackEnabled(false);
-        case 'hotspot_fallback':
-          _p2pService.setHotspotFallbackEnabled(true);
-        case 'hybrid':
-        default:
-          _p2pService.setHotspotFallbackEnabled(true);
-      }
+      // WiFi Direct only mode - no fallback configuration needed
 
       if (settings.offlineMode) {
         _p2pService.emergencyMode = true;
@@ -505,11 +531,8 @@ Future<void> _onAppResumed() async {
     setState(() {});
   }
 
- 
-
   void _onLocationShare(LocationModel location) {
-    // Handle location sharing
-  }
+    }
 
   void _onDeviceChatTap(Map<String, dynamic> device) {
     debugPrint('🎯 HomePage: Device chat tap for ${device['deviceName']}');
@@ -736,70 +759,6 @@ Future<void> _onAppResumed() async {
       ),
     );
 
-    // Hotspot Status Indicator
-    if (_p2pService.hotspotService.isEnabled) {
-      actions.add(
-        Container(
-          margin: EdgeInsets.only(right: isNarrowScreen ? 4 : 8),
-          padding: EdgeInsets.symmetric(
-            horizontal: isNarrowScreen ? 8 : 12,
-            vertical: isNarrowScreen ? 4 : 6,
-          ),
-          decoration: BoxDecoration(
-            color: Colors.orange,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.orange.withValues(alpha: 0.3),
-                blurRadius: 4,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.wifi_tethering,
-                size: isNarrowScreen ? 10 : 12,
-                color: Colors.white,
-              ),
-              if (!isNarrowScreen ||
-                  MediaQuery.of(context).size.width > 400) ...[
-                SizedBox(width: 3),
-                Text(
-                  isNarrowScreen ? 'AP' : 'HOTSPOT',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: isNarrowScreen ? 10 : 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-              if (_p2pService.hotspotService.connectedClients.isNotEmpty) ...[
-                SizedBox(width: 4),
-                Container(
-                  padding: EdgeInsets.all(isNarrowScreen ? 2 : 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Text(
-                    '${_p2pService.hotspotService.connectedClients.length}',
-                    style: TextStyle(
-                      color: Colors.orange,
-                      fontSize: isNarrowScreen ? 8 : 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-
     // Online/Offline Status
     actions.add(
       Padding(
@@ -840,7 +799,8 @@ Future<void> _onAppResumed() async {
 
     return Scaffold(
       appBar: _buildResponsiveAppBar(context),
-      resizeToAvoidBottomInset: false, // Prevent bottom navigation from moving up with keyboard
+      resizeToAvoidBottomInset:
+          false, // Prevent bottom navigation from moving up with keyboard
       body: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth < 450) {
@@ -948,7 +908,10 @@ Future<void> _onAppResumed() async {
   bool get isInBackground => _isInBackground;
 
   /// Show connection snackbar with display name
-  void _showDisplayNameConnectedSnackBar(String userName, Map<String, dynamic> device) {
+  void _showDisplayNameConnectedSnackBar(
+    String userName,
+    Map<String, dynamic> device,
+  ) {
     ChatNavigationHelper.showConnectionSuccess(
       context: context,
       deviceName: userName,
@@ -957,17 +920,24 @@ Future<void> _onAppResumed() async {
   }
 
   /// Create persistent conversation for connected device with deduplication
-  Future<void> _createPersistentConversationForDevice(String deviceId, String deviceName) async {
+  Future<void> _createPersistentConversationForDevice(
+    String deviceId,
+    String deviceName,
+  ) async {
     try {
       // Check if session already exists to avoid duplicate creation
-      final existingSession = await ChatRepository.getSessionByDeviceId(deviceId);
+      final existingSession = await ChatRepository.getSessionByDeviceId(
+        deviceId,
+      );
 
       if (existingSession != null) {
         debugPrint('📋 Session already exists for $deviceName ($deviceId)');
 
         // Update device name if it's different (prioritize connection display name)
         if (existingSession.deviceName != deviceName) {
-          debugPrint('🔄 Updating device name from "${existingSession.deviceName}" to "$deviceName"');
+          debugPrint(
+            '🔄 Updating device name from "${existingSession.deviceName}" to "$deviceName"',
+          );
           await ChatRepository.createOrUpdate(
             deviceId: deviceId,
             deviceName: deviceName, // Use the display name from the connection
@@ -980,7 +950,9 @@ Future<void> _onAppResumed() async {
         return;
       }
 
-      debugPrint('📱 Creating NEW persistent conversation for: $deviceName ($deviceId)');
+      debugPrint(
+        '📱 Creating NEW persistent conversation for: $deviceName ($deviceId)',
+      );
 
       final sessionId = await ChatRepository.createOrUpdate(
         deviceId: deviceId,

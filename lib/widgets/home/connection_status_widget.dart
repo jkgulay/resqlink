@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/models/device_model.dart';
 import '../../services/p2p/p2p_main_service.dart';
-import '../../utils/resqlink_theme.dart';
 
 class EnhancedConnectionWidget extends StatelessWidget {
   @override
@@ -59,32 +58,7 @@ class EnhancedConnectionWidget extends StatelessWidget {
             ),
           ],
         ),
-        if (service.connectedHotspotSSID != null) ...[
-          SizedBox(height: 4),
-          Row(
-            children: [
-              Icon(Icons.wifi, color: Colors.blue),
-              SizedBox(width: 8),
-              Text(
-                'SSID: ${service.connectedHotspotSSID}',
-                style: TextStyle(fontFamily: 'Inter', fontSize: 12),
-              ),
-            ],
-          ),
-        ],
-        if (service.isHotspotEnabled) ...[
-          SizedBox(height: 4),
-          Row(
-            children: [
-              Icon(Icons.wifi_tethering, color: Colors.orange),
-              SizedBox(width: 8),
-              Text(
-                'Hotspot Active (${service.currentRole.name})',
-                style: TextStyle(fontFamily: 'Inter'),
-              ),
-            ],
-          ),
-        ],
+        
         if (service.emergencyMode) ...[
           SizedBox(height: 4),
           Row(
@@ -126,16 +100,6 @@ class EnhancedConnectionWidget extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            ElevatedButton.icon(
-              onPressed: service.isHotspotEnabled
-                  ? null
-                  : () => service.createEmergencyHotspot(),
-              icon: Icon(Icons.wifi_tethering),
-              label: Text('Create Hotspot'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: ResQLinkTheme.primaryColor,
-              ),
-            ),
             ElevatedButton.icon(
               onPressed: service.isDiscovering
                   ? null
@@ -242,9 +206,7 @@ class EnhancedConnectionWidget extends StatelessWidget {
                     ],
                   ),
                   trailing: ElevatedButton(
-                    onPressed: service.isConnecting
-                        ? null
-                        : () => service.connectToResQLinkNetwork(network['ssid'] as String? ?? ''),
+                    onPressed: null, // Hotspot connection removed
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                     ),

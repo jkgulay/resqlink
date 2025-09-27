@@ -312,16 +312,32 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         final endpointId = session.deviceId;
         final deviceName = session.deviceName;
 
-        conversationMap[endpointId] = MessageSummary(
-          endpointId: endpointId,
-          deviceName: deviceName,
-          lastMessage: null,
-          messageCount: 0,
-          unreadCount: 0,
-          isConnected: connectedDevices.containsKey(endpointId),
-        );
-
-        debugPrint('🗄️ Loaded persistent session: $deviceName ($endpointId)');
+        // Only check for better names if we already have a session, otherwise just add it
+        if (conversationMap.containsKey(endpointId)) {
+          final existing = conversationMap[endpointId]!;
+          // Simple check: only replace if new name is clearly better (avoid heavy scoring)
+          if (_isSimpleNameBetter(deviceName, existing.deviceName)) {
+            conversationMap[endpointId] = MessageSummary(
+              endpointId: endpointId,
+              deviceName: deviceName,
+              lastMessage: null,
+              messageCount: 0,
+              unreadCount: 0,
+              isConnected: connectedDevices.containsKey(endpointId),
+            );
+            debugPrint('🔄 Updated session name: $deviceName (was: ${existing.deviceName})');
+          }
+        } else {
+          conversationMap[endpointId] = MessageSummary(
+            endpointId: endpointId,
+            deviceName: deviceName,
+            lastMessage: null,
+            messageCount: 0,
+            unreadCount: 0,
+            isConnected: connectedDevices.containsKey(endpointId),
+          );
+          debugPrint('🗄️ Loaded persistent session: $deviceName ($endpointId)');
+        }
       }
 
       // Then, populate with actual message data
@@ -362,15 +378,26 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           final endpointMessages = messages.where((m) => m.endpointId == endpointId).toList();
           final unreadCount = endpointMessages.where((m) => !m.synced && !m.isMe).length;
 
-          if (message.dateTime.isAfter(currentSummary.lastMessage?.dateTime ?? DateTime(0))) {
+          // Check if we should update the conversation based on message time or better device name
+          final shouldUpdateTime = message.dateTime.isAfter(currentSummary.lastMessage?.dateTime ?? DateTime(0));
+          final shouldUpdateName = _isDisplayNameBetter(deviceName, currentSummary.deviceName);
+
+          if (shouldUpdateTime || shouldUpdateName) {
+            // Use the better device name if updating due to name priority
+            final bestDeviceName = shouldUpdateName ? deviceName : currentSummary.deviceName;
+
             conversationMap[endpointId] = MessageSummary(
               endpointId: endpointId,
-              deviceName: deviceName,
-              lastMessage: message,
+              deviceName: bestDeviceName,
+              lastMessage: shouldUpdateTime ? message : currentSummary.lastMessage,
               messageCount: endpointMessages.length,
               unreadCount: unreadCount,
               isConnected: connectedDevices.containsKey(endpointId),
             );
+
+            if (shouldUpdateName) {
+              debugPrint('🔄 Updated conversation name: $bestDeviceName (was: ${currentSummary.deviceName})');
+            }
           }
         }
       }
@@ -456,6 +483,47 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
 
 
+
+  /// Get the quality score of a display name (higher is better)
+  /// Priority: Real names > Device names > Generic device IDs > Empty
+  int _getNameScore(String name) {
+    if (name.isEmpty) return 0;
+
+    // Generic device IDs (like device_xxxxx, User_xxxxx)
+    if (name.startsWith('device_') || name.startsWith('User_')) {
+      return 1;
+    }
+
+    // Device model names (often contain brand/model info)
+    if (name.contains('HONOR') || name.contains('Samsung') ||
+        name.toLowerCase().contains('phone') || name.toLowerCase().contains('tablet')) {
+      return 2;
+    }
+
+    // Real human names (assume names without special chars/numbers are real names)
+    if (RegExp(r'^[a-zA-Z\s]+$').hasMatch(name) && name.length <= 30) {
+      return 3;
+    }
+
+    // Default score for other names
+    return 2;
+  }
+
+  /// Determine if a display name is better than another
+  bool _isDisplayNameBetter(String newName, String currentName) {
+    final newScore = _getNameScore(newName);
+    final currentScore = _getNameScore(currentName);
+    return newScore > currentScore;
+  }
+
+  /// Simple name comparison for performance (avoids heavy scoring during session loading)
+  bool _isSimpleNameBetter(String newName, String currentName) {
+    // Quick checks for obvious improvements
+    if (currentName.startsWith('device_') || currentName.startsWith('User_')) {
+      return !newName.startsWith('device_') && !newName.startsWith('User_');
+    }
+    return false; // Don't replace if not obviously better
+  }
 
   String _generateMessageId() {
     return 'msg_${DateTime.now().millisecondsSinceEpoch}_${_currentUserId.hashCode}';
@@ -808,17 +876,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             _showErrorMessage('Failed to start scan');
           }
         }
-      case 'create_group':
-        try {
-          await widget.p2pService.createEmergencyHotspot();
-          if (mounted) {
-            _showSuccessMessage('Emergency group created');
-          }
-        } catch (e) {
-          if (mounted) {
-            _showErrorMessage('Failed to create group');
-          }
-        }
+
       case 'clear_chat':
         if (_selectedEndpointId != null && mounted) {
           final confirm = await showDialog<bool>(

@@ -181,16 +181,7 @@ class MessageDebugService {
         );
       }
 
-      // Test 3: Test hotspot creation
-      final hotspotCreated = await p2pService.createEmergencyHotspot();
-      if (!hotspotCreated) {
-        return TestResult(
-          testId: testId,
-          success: false,
-          error: 'Failed to create emergency hotspot',
-          duration: DateTime.now().difference(startTime),
-        );
-      }
+
 
       // Test 4: Test device discovery
       await p2pService.discoverDevices(force: true);

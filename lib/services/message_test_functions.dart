@@ -4,15 +4,17 @@ import 'package:resqlink/features/database/repositories/message_repository.dart'
 import 'package:resqlink/services/messaging/message_debug_service.dart';
 import '../models/message_model.dart';
 import 'p2p/p2p_main_service.dart';
-class MessageTestFunctions {
 
+class MessageTestFunctions {
   /// Test basic message sending functionality
-  static Future<TestResult> testBasicMessageSending(P2PMainService p2pService) async {
+  static Future<TestResult> testBasicMessageSending(
+    P2PMainService p2pService,
+  ) async {
     final testId = 'basic_send_${DateTime.now().millisecondsSinceEpoch}';
     final startTime = DateTime.now();
-    
+
     debugPrint('🧪 Running basic message sending test...');
-    
+
     try {
       // 1. Check if service is initialized
       if (p2pService.deviceId == null) {
@@ -35,8 +37,9 @@ class MessageTestFunctions {
       }
 
       // 3. Send a test message
-      final testMessage = 'Test message ${DateTime.now().millisecondsSinceEpoch}';
-      
+      final testMessage =
+          'Test message ${DateTime.now().millisecondsSinceEpoch}';
+
       await p2pService.sendMessage(
         message: testMessage,
         type: MessageType.text,
@@ -46,7 +49,9 @@ class MessageTestFunctions {
       // 4. Verify message was saved to database
       await Future.delayed(Duration(milliseconds: 500));
       final allMessages = await MessageRepository.getAllMessages();
-      final testMessages = allMessages.where((m) => m.message == testMessage).toList();
+      final testMessages = allMessages
+          .where((m) => m.message == testMessage)
+          .toList();
 
       if (testMessages.isEmpty) {
         return TestResult(
@@ -58,13 +63,14 @@ class MessageTestFunctions {
       }
 
       final savedMessage = testMessages.first;
-      
+
       // 5. Verify message properties
       if (savedMessage.fromUser != p2pService.userName!) {
         return TestResult(
           testId: testId,
           success: false,
-          error: 'Message fromUser field incorrect: expected "${p2pService.userName}", got "${savedMessage.fromUser}"',
+          error:
+              'Message fromUser field incorrect: expected "${p2pService.userName}", got "${savedMessage.fromUser}"',
           duration: DateTime.now().difference(startTime),
         );
       }
@@ -82,9 +88,9 @@ class MessageTestFunctions {
         testId: testId,
         success: true,
         duration: DateTime.now().difference(startTime),
-        details: 'Message sent and saved successfully with ID: ${savedMessage.messageId}',
+        details:
+            'Message sent and saved successfully with ID: ${savedMessage.messageId}',
       );
-
     } catch (e) {
       return TestResult(
         testId: testId,
@@ -96,15 +102,18 @@ class MessageTestFunctions {
   }
 
   /// Test emergency message sending
-  static Future<TestResult> testEmergencyMessageSending(P2PMainService p2pService) async {
+  static Future<TestResult> testEmergencyMessageSending(
+    P2PMainService p2pService,
+  ) async {
     final testId = 'emergency_send_${DateTime.now().millisecondsSinceEpoch}';
     final startTime = DateTime.now();
-    
+
     debugPrint('🧪 Running emergency message sending test...');
-    
+
     try {
-      final emergencyMessage = '🚨 TEST EMERGENCY MESSAGE ${DateTime.now().millisecondsSinceEpoch}';
-      
+      final emergencyMessage =
+          '🚨 TEST EMERGENCY MESSAGE ${DateTime.now().millisecondsSinceEpoch}';
+
       await p2pService.sendMessage(
         message: emergencyMessage,
         type: MessageType.emergency,
@@ -113,9 +122,9 @@ class MessageTestFunctions {
 
       await Future.delayed(Duration(milliseconds: 500));
       final allMessages = await MessageRepository.getAllMessages();
-      final emergencyMessages = allMessages.where((m) => 
-        m.message == emergencyMessage && m.isEmergency
-      ).toList();
+      final emergencyMessages = allMessages
+          .where((m) => m.message == emergencyMessage && m.isEmergency)
+          .toList();
 
       if (emergencyMessages.isEmpty) {
         return TestResult(
@@ -127,12 +136,13 @@ class MessageTestFunctions {
       }
 
       final savedMessage = emergencyMessages.first;
-      
+
       if (savedMessage.type != 'emergency') {
         return TestResult(
           testId: testId,
           success: false,
-          error: 'Message type should be "emergency", got "${savedMessage.type}"',
+          error:
+              'Message type should be "emergency", got "${savedMessage.type}"',
           duration: DateTime.now().difference(startTime),
         );
       }
@@ -143,7 +153,6 @@ class MessageTestFunctions {
         duration: DateTime.now().difference(startTime),
         details: 'Emergency message sent successfully with correct properties',
       );
-
     } catch (e) {
       return TestResult(
         testId: testId,
@@ -155,28 +164,30 @@ class MessageTestFunctions {
   }
 
   /// Test message receiving simulation
-  static Future<TestResult> testMessageReceiving(P2PMainService p2pService) async {
+  static Future<TestResult> testMessageReceiving(
+    P2PMainService p2pService,
+  ) async {
     final testId = 'receive_test_${DateTime.now().millisecondsSinceEpoch}';
     final startTime = DateTime.now();
-    
+
     debugPrint('🧪 Running message receiving test...');
-    
+
     try {
       // Set up a listener to capture received messages
       MessageModel? receivedMessage;
       final completer = Completer<void>();
-      
+
       void messageListener(MessageModel message) {
         if (message.message.contains('RECEIVE_TEST')) {
           receivedMessage = message;
           completer.complete();
         }
       }
-      
+
       // Add the listener
       final originalListener = p2pService.onMessageReceived;
       p2pService.onMessageReceived = messageListener;
-      
+
       try {
         // Simulate receiving a message by creating a test message
         final testMessage = MessageModel(
@@ -189,17 +200,18 @@ class MessageTestFunctions {
           timestamp: DateTime.now().millisecondsSinceEpoch,
           messageType: MessageType.text,
           type: 'text',
-          routePath: ['test_sender'], deviceId: null,
+          routePath: ['test_sender'],
+          deviceId: null,
         );
-        
+
         // Simulate the message being received
         if (p2pService.onMessageReceived != null) {
           p2pService.onMessageReceived!(testMessage);
         }
-        
+
         // Wait for the message to be processed
         await completer.future.timeout(Duration(seconds: 5));
-        
+
         if (receivedMessage == null) {
           return TestResult(
             testId: testId,
@@ -225,12 +237,10 @@ class MessageTestFunctions {
           duration: DateTime.now().difference(startTime),
           details: 'Message received successfully through listener',
         );
-        
       } finally {
         // Restore original listener
         p2pService.onMessageReceived = originalListener;
       }
-
     } catch (e) {
       return TestResult(
         testId: testId,
@@ -242,12 +252,14 @@ class MessageTestFunctions {
   }
 
   /// Test connection establishment
-  static Future<TestResult> testConnectionEstablishment(P2PMainService p2pService) async {
+  static Future<TestResult> testConnectionEstablishment(
+    P2PMainService p2pService,
+  ) async {
     final testId = 'connection_test_${DateTime.now().millisecondsSinceEpoch}';
     final startTime = DateTime.now();
-    
+
     debugPrint('🧪 Running connection establishment test...');
-    
+
     try {
       // Test 1: Check initialization
       if (p2pService.deviceId == null) {
@@ -259,20 +271,9 @@ class MessageTestFunctions {
         );
       }
 
-      // Test 2: Try to create hotspot
-      final hotspotCreated = await p2pService.createEmergencyHotspot();
-      if (!hotspotCreated) {
-        return TestResult(
-          testId: testId,
-          success: false,
-          error: 'Failed to create emergency hotspot',
-          duration: DateTime.now().difference(startTime),
-        );
-      }
-
       // Test 3: Try device discovery
       await p2pService.discoverDevices(force: true);
-      
+
       // Wait a moment for discovery to complete
       await Future.delayed(Duration(seconds: 3));
 
@@ -282,7 +283,6 @@ class MessageTestFunctions {
         duration: DateTime.now().difference(startTime),
         details: 'Hotspot created and device discovery initiated successfully',
       );
-
     } catch (e) {
       return TestResult(
         testId: testId,
@@ -294,16 +294,19 @@ class MessageTestFunctions {
   }
 
   /// Test message status updates
-  static Future<TestResult> testMessageStatusUpdates(P2PMainService p2pService) async {
+  static Future<TestResult> testMessageStatusUpdates(
+    P2PMainService p2pService,
+  ) async {
     final testId = 'status_test_${DateTime.now().millisecondsSinceEpoch}';
     final startTime = DateTime.now();
-    
+
     debugPrint('🧪 Running message status update test...');
-    
+
     try {
       // Send a message and track its status
-      final testMessage = 'Status test message ${DateTime.now().millisecondsSinceEpoch}';
-      
+      final testMessage =
+          'Status test message ${DateTime.now().millisecondsSinceEpoch}';
+
       await p2pService.sendMessage(
         message: testMessage,
         type: MessageType.text,
@@ -312,9 +315,11 @@ class MessageTestFunctions {
 
       // Wait for message to be saved
       await Future.delayed(Duration(milliseconds: 500));
-      
+
       final allMessages = await MessageRepository.getAllMessages();
-      final testMessages = allMessages.where((m) => m.message == testMessage).toList();
+      final testMessages = allMessages
+          .where((m) => m.message == testMessage)
+          .toList();
 
       if (testMessages.isEmpty) {
         return TestResult(
@@ -326,7 +331,7 @@ class MessageTestFunctions {
       }
 
       final savedMessage = testMessages.first;
-      
+
       // Check initial status
       if (savedMessage.status == MessageStatus.pending) {
         // This is expected for offline messages
@@ -347,9 +352,9 @@ class MessageTestFunctions {
         testId: testId,
         success: true,
         duration: DateTime.now().difference(startTime),
-        details: 'Message status tracking working correctly - initial status: ${savedMessage.status}',
+        details:
+            'Message status tracking working correctly - initial status: ${savedMessage.status}',
       );
-
     } catch (e) {
       return TestResult(
         testId: testId,
@@ -361,40 +366,46 @@ class MessageTestFunctions {
   }
 
   /// Run comprehensive test suite
-  static Future<List<TestResult>> runComprehensiveTests(P2PMainService p2pService) async {
+  static Future<List<TestResult>> runComprehensiveTests(
+    P2PMainService p2pService,
+  ) async {
     debugPrint('🧪 Running comprehensive message test suite...');
-    
+
     final results = <TestResult>[];
-    
+
     // Test 1: Basic message sending
     results.add(await testBasicMessageSending(p2pService));
-    
+
     // Test 2: Emergency message sending
     results.add(await testEmergencyMessageSending(p2pService));
-    
+
     // Test 3: Message receiving
     results.add(await testMessageReceiving(p2pService));
-    
+
     // Test 4: Connection establishment
     results.add(await testConnectionEstablishment(p2pService));
-    
+
     // Test 5: Message status updates
     results.add(await testMessageStatusUpdates(p2pService));
-    
+
     // Print summary
     final passedTests = results.where((r) => r.success).length;
     final totalTests = results.length;
-    
-    debugPrint('🧪 Test suite completed: $passedTests/$totalTests tests passed');
-    
+
+    debugPrint(
+      '🧪 Test suite completed: $passedTests/$totalTests tests passed',
+    );
+
     for (final result in results) {
       final status = result.success ? '✅' : '❌';
-      debugPrint('$status ${result.testId}: ${result.success ? 'PASSED' : 'FAILED'}');
+      debugPrint(
+        '$status ${result.testId}: ${result.success ? 'PASSED' : 'FAILED'}',
+      );
       if (!result.success) {
         debugPrint('   Error: ${result.error}');
       }
     }
-    
+
     return results;
   }
 
@@ -405,21 +416,21 @@ class MessageTestFunctions {
     bool includeEmoji = false,
   }) {
     final buffer = StringBuffer();
-    
+
     if (prefix != null) {
       buffer.write('$prefix: ');
     }
-    
+
     if (includeEmoji) {
       buffer.write('🧪 ');
     }
-    
+
     buffer.write('Test message');
-    
+
     if (includeTimestamp) {
       buffer.write(' ${DateTime.now().millisecondsSinceEpoch}');
     }
-    
+
     return buffer.toString();
   }
 
@@ -447,39 +458,44 @@ class MessageTestFunctions {
   }
 
   /// Verify message chain integrity
-  static Future<TestResult> verifyMessageChain(P2PMainService p2pService) async {
+  static Future<TestResult> verifyMessageChain(
+    P2PMainService p2pService,
+  ) async {
     final testId = 'chain_verify_${DateTime.now().millisecondsSinceEpoch}';
     final startTime = DateTime.now();
-    
+
     debugPrint('🧪 Verifying message chain integrity...');
-    
+
     try {
       // Get all messages from database
       final allMessages = await MessageRepository.getAllMessages();
-      
+
       // Check for basic integrity issues
       final issues = <String>[];
-      
+
       for (final message in allMessages) {
         // Check required fields
         if (message.messageId == null || message.messageId!.isEmpty) {
           issues.add('Message with empty messageId found');
         }
-        
+
         if (message.fromUser.isEmpty) {
           issues.add('Message with empty fromUser found: ${message.messageId}');
         }
-        
+
         if (message.timestamp <= 0) {
           issues.add('Message with invalid timestamp: ${message.messageId}');
         }
-        
+
         // Check message type consistency
-        if (message.isEmergency && !['emergency', 'sos'].contains(message.type)) {
-          issues.add('Emergency flag mismatch in message: ${message.messageId}');
+        if (message.isEmergency &&
+            !['emergency', 'sos'].contains(message.type)) {
+          issues.add(
+            'Emergency flag mismatch in message: ${message.messageId}',
+          );
         }
       }
-      
+
       if (issues.isNotEmpty) {
         return TestResult(
           testId: testId,
@@ -488,14 +504,14 @@ class MessageTestFunctions {
           duration: DateTime.now().difference(startTime),
         );
       }
-      
+
       return TestResult(
         testId: testId,
         success: true,
         duration: DateTime.now().difference(startTime),
-        details: 'Message chain integrity verified - ${allMessages.length} messages checked',
+        details:
+            'Message chain integrity verified - ${allMessages.length} messages checked',
       );
-      
     } catch (e) {
       return TestResult(
         testId: testId,

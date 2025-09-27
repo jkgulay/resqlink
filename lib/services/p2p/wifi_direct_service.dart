@@ -232,7 +232,11 @@ class WiFiDirectService {
       if (result != null && result['peers'] != null) {
         final peerList = result['peers'] as List;
         final peers = peerList
-            .map((peer) => WiFiDirectPeer.fromMap(Map<String, dynamic>.from(peer as Map? ?? {})))
+            .map(
+              (peer) => WiFiDirectPeer.fromMap(
+                Map<String, dynamic>.from(peer as Map? ?? {}),
+              ),
+            )
             .toList();
 
         if (!_peersEqual(_discoveredPeers, peers)) {
@@ -287,8 +291,12 @@ class WiFiDirectService {
           debugPrint('🔄 WiFi Direct connecting...');
         case WiFiDirectConnectionState.disconnected:
           debugPrint('❌ WiFi Direct disconnected');
+        case WiFiDirectConnectionState.discovering:
+          debugPrint('🔍 WiFi Direct discovering peers...');
         case WiFiDirectConnectionState.error:
           debugPrint('💥 WiFi Direct connection error');
+        case WiFiDirectConnectionState.failed:
+          debugPrint('❌ WiFi Direct connection failed');
       }
     }
   }
@@ -459,18 +467,61 @@ class WiFiDirectService {
   }
 
   Future<bool> sendMessage(String message) async {
-    try {
-      debugPrint('📤 Sending message via WiFi Direct: $message');
+    const int maxRetries = 2;
+    const Duration retryDelay = Duration(milliseconds: 300);
 
-      final result = await _channel.invokeMethod('sendMessage', {
-        'message': message,
-      });
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        debugPrint('📤 Sending message via WiFi Direct (attempt $attempt/$maxRetries): ${message.length > 100 ? '${message.substring(0, 100)}...' : message}');
 
-      return result == true;
-    } catch (e) {
-      debugPrint('❌ Error sending message: $e');
-      return false;
+        final result = await _channel.invokeMethod('sendMessage', {
+          'message': message,
+        }).timeout(Duration(seconds: 4));
+
+        if (result == true) {
+          debugPrint('✅ Message sent successfully on attempt $attempt');
+          return true;
+        } else {
+          debugPrint('⚠️ Message send returned false on attempt $attempt');
+        }
+      } on PlatformException catch (e) {
+        debugPrint('❌ Platform error sending message (attempt $attempt/$maxRetries): ${e.code} - ${e.message}');
+
+        if (e.code == 'NOT_CONNECTED') {
+          debugPrint('📡 Not connected, will retry...');
+        } else if (e.code == 'SEND_TIMEOUT') {
+          debugPrint('⏰ Send timeout from platform, will retry...');
+        } else if (e.code == 'CONNECTION_LOST') {
+          debugPrint('📡 Connection lost, stopping retries');
+          return false;
+        }
+
+        if (attempt == maxRetries) {
+          debugPrint('❌ All retry attempts failed for message sending');
+          return false;
+        }
+
+        await Future.delayed(retryDelay);
+      } catch (e) {
+        debugPrint('❌ General error sending message (attempt $attempt/$maxRetries): $e');
+
+        if (e.toString().contains('TimeoutException')) {
+          debugPrint('⏰ Dart timeout detected, will retry...');
+        } else if (e.toString().contains('CONNECTION_LOST')) {
+          debugPrint('📡 Connection lost, stopping retries');
+          return false;
+        }
+
+        if (attempt == maxRetries) {
+          debugPrint('❌ All retry attempts failed for message sending');
+          return false;
+        }
+
+        await Future.delayed(retryDelay);
+      }
     }
+
+    return false;
   }
 
   Future<void> _handleMethodCall(MethodCall call) async {
@@ -492,7 +543,9 @@ class WiFiDirectService {
           final peerList = args['peers'] as List;
           final peers = peerList
               .map(
-                (peer) => WiFiDirectPeer.fromMap(Map<String, dynamic>.from(peer as Map? ?? {})),
+                (peer) => WiFiDirectPeer.fromMap(
+                  Map<String, dynamic>.from(peer as Map? ?? {}),
+                ),
               )
               .toList();
           _discoveredPeers = peers;
@@ -507,7 +560,9 @@ class WiFiDirectService {
         await _handleConnectionChanged(args);
 
       case 'onSystemConnectionDetected':
-        await _handleSystemConnection(Map<String, dynamic>.from(call.arguments as Map? ?? {}));
+        await _handleSystemConnection(
+          Map<String, dynamic>.from(call.arguments as Map? ?? {}),
+        );
 
       case 'onSocketEstablished':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
@@ -548,7 +603,7 @@ class WiFiDirectService {
           });
         }
 
-        // Removed duplicate state stream message sending to prevent double processing
+      // Removed duplicate state stream message sending to prevent double processing
 
       case 'onPeersUpdated':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
@@ -556,7 +611,9 @@ class WiFiDirectService {
           final peerList = args['peers'] as List;
           final peers = peerList
               .map(
-                (peer) => WiFiDirectPeer.fromMap(Map<String, dynamic>.from(peer as Map? ?? {})),
+                (peer) => WiFiDirectPeer.fromMap(
+                  Map<String, dynamic>.from(peer as Map? ?? {}),
+                ),
               )
               .toList();
           _discoveredPeers = peers;
@@ -575,10 +632,7 @@ class WiFiDirectService {
       case 'onServerSocketReady':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         debugPrint('🔌 Server socket ready on port ${args['port']}');
-        _stateController.add({
-          'serverSocketReady': true,
-          'socketInfo': args,
-        });
+        _stateController.add({'serverSocketReady': true, 'socketInfo': args});
 
       case 'onConnectionError':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
@@ -688,8 +742,9 @@ class WiFiDirectService {
   Future<void> _handleSystemConnection(Map<String, dynamic> data) async {
     debugPrint('🔗 System WiFi Direct connection detected!');
 
-    final connectionInfo = data['connectionInfo'] != null ?
-      Map<String, dynamic>.from(data['connectionInfo'] as Map? ?? {}) : null;
+    final connectionInfo = data['connectionInfo'] != null
+        ? Map<String, dynamic>.from(data['connectionInfo'] as Map? ?? {})
+        : null;
     final peers = data['peers'] as List?;
 
     if (connectionInfo != null) {
@@ -707,7 +762,9 @@ class WiFiDirectService {
         if (peers != null) {
           final systemPeers = peers
               .map(
-                (peer) => WiFiDirectPeer.fromMap(Map<String, dynamic>.from(peer as Map? ?? {})),
+                (peer) => WiFiDirectPeer.fromMap(
+                  Map<String, dynamic>.from(peer as Map? ?? {}),
+                ),
               )
               .toList();
           _discoveredPeers = systemPeers;
@@ -912,7 +969,14 @@ class WiFiDirectPeer {
   }
 }
 
-enum WiFiDirectConnectionState { disconnected, connecting, connected, error }
+enum WiFiDirectConnectionState {
+  disconnected,
+  connecting,
+  connected,
+  error,
+  failed,
+  discovering,
+}
 
 enum WiFiDirectPeerStatus {
   connected,

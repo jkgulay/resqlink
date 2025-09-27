@@ -395,8 +395,6 @@ class ChatService extends ChangeNotifier {
     switch (connectionType.toLowerCase()) {
       case 'wifi_direct':
         return ConnectionType.wifiDirect;
-      case 'hotspot':
-        return ConnectionType.hotspot;
       default:
         return ConnectionType.unknown;
     }

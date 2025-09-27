@@ -12,35 +12,34 @@ import 'p2p_network_service.dart';
 class P2PDiscoveryService {
   final P2PBaseService _baseService;
   final P2PNetworkService _networkService;
-  
+
   // Discovery state
   bool _discoveryInProgress = false;
   Timer? _discoveryRetryTimer;
   Timer? _discoveryTimeoutTimer;
-  
+
   // Discovery methods
   bool _wifiDirectAvailable = false;
   bool _mdnsAvailable = false;
-  
+
   // Discovered devices tracking
   final Map<String, DateTime> _lastSeenDevices = {};
   final Map<String, int> _deviceConnectionAttempts = {};
-  
+
   P2PDiscoveryService(this._baseService, this._networkService);
 
   /// Initialize discovery service
   Future<void> initialize() async {
     try {
       debugPrint('🔍 Initializing P2P Discovery Service...');
-      
+
       // Check WiFi Direct availability
       await _checkWifiDirectAvailability();
-      
+
       // Start periodic discovery
       _startPeriodicDiscovery();
-      
+
       debugPrint('✅ P2P Discovery Service initialized');
-      
     } catch (e) {
       debugPrint('❌ Discovery service initialization failed: $e');
     }
@@ -64,32 +63,46 @@ class P2PDiscoveryService {
       debugPrint('⏳ Discovery already in progress');
       return;
     }
-    
+
     if (_baseService.isDisposed) {
       debugPrint('⚠️ Service disposed, skipping discovery');
       return;
     }
-    
+
     _discoveryInProgress = true;
     debugPrint('🔍 Starting enhanced device discovery...');
-    
+
     try {
       // Set discovery timeout
       _discoveryTimeoutTimer = Timer(Duration(seconds: 30), () {
         debugPrint('⏰ Discovery timeout reached');
         _discoveryInProgress = false;
       });
-      
-      // Run multiple discovery methods in parallel
-      await Future.wait([
-        _discoverWifiDirectDevices(),
-        _discoverResQLinkNetworks(),
-        _discoverMDNSDevices(),
-        _discoverBroadcastDevices(),
-      ], eagerError: false);
-      
+
+      // Check network connectivity to determine discovery strategy
+      final interfaces = await NetworkInterface.list();
+      final hasNetworkInterfaces = interfaces.isNotEmpty &&
+          interfaces.any((interface) => interface.addresses.isNotEmpty);
+
+      if (hasNetworkInterfaces) {
+        debugPrint('📡 Network interfaces available - running full discovery');
+        // Run all discovery methods in parallel
+        await Future.wait([
+          _discoverWifiDirectDevices(),
+          _discoverResQLinkNetworks(),
+          _discoverMDNSDevices(),
+          _discoverBroadcastDevices(),
+        ], eagerError: false);
+      } else {
+        debugPrint('📱 No network interfaces - focusing on WiFi Direct discovery');
+        // Only run WiFi Direct discovery when offline
+        await Future.wait([
+          _discoverWifiDirectDevices(),
+          _discoverResQLinkNetworks(),
+        ], eagerError: false);
+      }
+
       debugPrint('✅ Enhanced discovery completed');
-      
     } catch (e) {
       debugPrint('❌ Discovery error: $e');
     } finally {
@@ -101,33 +114,31 @@ class P2PDiscoveryService {
   /// Discover devices via WiFi Direct
   Future<void> _discoverWifiDirectDevices() async {
     if (!_wifiDirectAvailable) return;
-    
+
     try {
       debugPrint('🔍 Starting WiFi Direct discovery...');
-      
+
       // Start WiFi Direct discovery
       await WifiDirectPlugin.startDiscovery();
-      
+
       // Listen for peers
       //       WifiDirectPlugin.onPeersChanged.listen((peers) {
       //         debugPrint('📱 WiFi Direct peers found: ${peers.length}');
-      //         
+      //
       //         for (final peer in peers) {
       //           _handleDiscoveredWifiDirectDevice(peer);
       //         }
       //       });
-      
+
       // Wait for discovery to complete
       await Future.delayed(Duration(seconds: 10));
-      
+
       debugPrint('✅ WiFi Direct discovery completed');
-      
     } catch (e) {
       debugPrint('❌ WiFi Direct discovery failed: $e');
     }
   }
 
-  /// Discover devices via ResQLink networks
   Future<void> _discoverResQLinkNetworks() async {
     try {
       debugPrint('🔍 Starting ResQLink network discovery...');
@@ -136,31 +147,32 @@ class P2PDiscoveryService {
 
       for (final network in networks) {
         if (network.ssid!.startsWith(P2PBaseService.resqlinkPrefix)) {
-          final deviceId = network.ssid!.replaceFirst(P2PBaseService.resqlinkPrefix, '');
+          final deviceId = network.ssid!.replaceFirst(
+            P2PBaseService.resqlinkPrefix,
+            '',
+          );
 
           final device = DeviceModel(
             id: deviceId,
             deviceId: deviceId,
-            userName: "Device_$deviceId", // Use a more user-friendly placeholder name
+            userName: "Device_$deviceId",
             isHost: false,
             isOnline: false,
             lastSeen: DateTime.now(),
             createdAt: DateTime.now(),
-            discoveryMethod: 'hotspot',
+            discoveryMethod: 'network',
           );
 
           _addDiscoveredDevice(device);
-          debugPrint('📡 ResQLink network found: ${network.ssid} (Signal: ${network.level} dBm)');
-
-          // Optionally try to connect
-          if (_shouldAttemptConnection(deviceId)) {
-            await _attemptNetworkConnection(network);
-          }
+          debugPrint(
+            '📡 ResQLink network found: ${network.ssid} (Signal: ${network.level} dBm)',
+          );
         }
       }
 
-      debugPrint('✅ ResQLink network discovery completed - found ${networks.length} total networks');
-
+      debugPrint(
+        '✅ ResQLink network discovery completed - found ${networks.length} total networks',
+      );
     } catch (e) {
       debugPrint('❌ Network discovery failed: $e');
     }
@@ -170,48 +182,64 @@ class P2PDiscoveryService {
   Future<void> _discoverMDNSDevices() async {
     try {
       debugPrint('🔍 Starting mDNS discovery...');
-      
+
+      // Check network connectivity first
+      final interfaces = await NetworkInterface.list();
+      if (interfaces.isEmpty ||
+          !interfaces.any((interface) => interface.addresses.isNotEmpty)) {
+        debugPrint(
+          '⚠️ No network interfaces available, skipping mDNS discovery',
+        );
+        return;
+      }
+
       final client = MDnsClient();
       await client.start();
-      
+
       // Look for ResQLink services
-      await for (final ptr in client
-          .lookup<PtrResourceRecord>(
-            ResourceRecordQuery.serverPointer('_resqlink._tcp.local'),
-          )
-          .timeout(Duration(seconds: 10))) {
-        
+      await for (final ptr
+          in client
+              .lookup<PtrResourceRecord>(
+                ResourceRecordQuery.serverPointer('_resqlink._tcp.local'),
+              )
+              .timeout(Duration(seconds: 10))) {
         debugPrint('📡 mDNS service found: ${ptr.domainName}');
-        
+
         // Try to resolve service details
         await _resolveMDNSService(client, ptr.domainName);
       }
-      
+
       client.stop();
-      
     } catch (e) {
       debugPrint('❌ mDNS discovery failed: $e');
     }
   }
 
   /// Resolve mDNS service details
-  Future<void> _resolveMDNSService(MDnsClient client, String serviceName) async {
+  Future<void> _resolveMDNSService(
+    MDnsClient client,
+    String serviceName,
+  ) async {
     try {
       // Look for SRV records to get port and target
-      await for (final srv in client
-          .lookup<SrvResourceRecord>(ResourceRecordQuery.service(serviceName))
-          .timeout(Duration(seconds: 5))) {
-        
+      await for (final srv
+          in client
+              .lookup<SrvResourceRecord>(
+                ResourceRecordQuery.service(serviceName),
+              )
+              .timeout(Duration(seconds: 5))) {
         debugPrint('📡 mDNS SRV record: ${srv.target}:${srv.port}');
-        
+
         // Look for TXT records to get device info
-        await for (final txt in client
-            .lookup<TxtResourceRecord>(ResourceRecordQuery.text(serviceName))
-            .timeout(Duration(seconds: 3))) {
-          
+        await for (final txt
+            in client
+                .lookup<TxtResourceRecord>(
+                  ResourceRecordQuery.text(serviceName),
+                )
+                .timeout(Duration(seconds: 3))) {
           final deviceInfo = _parseMDNSTxtRecord(txt.text as List<int>);
-          if (deviceInfo.containsKey('deviceId') && deviceInfo.containsKey('userName')) {
-            
+          if (deviceInfo.containsKey('deviceId') &&
+              deviceInfo.containsKey('userName')) {
             final device = DeviceModel(
               id: deviceInfo["deviceId"]!,
               deviceId: deviceInfo["deviceId"]!,
@@ -235,11 +263,11 @@ class P2PDiscoveryService {
   /// Parse mDNS TXT record
   Map<String, String> _parseMDNSTxtRecord(List<int> txtData) {
     final result = <String, String>{};
-    
+
     try {
       final txtString = String.fromCharCodes(txtData);
       final pairs = txtString.split(',');
-      
+
       for (final pair in pairs) {
         final parts = pair.split('=');
         if (parts.length == 2) {
@@ -249,7 +277,7 @@ class P2PDiscoveryService {
     } catch (e) {
       debugPrint('❌ Error parsing TXT record: $e');
     }
-    
+
     return result;
   }
 
@@ -260,8 +288,11 @@ class P2PDiscoveryService {
 
       // Check network connectivity first
       final interfaces = await NetworkInterface.list();
-      if (interfaces.isEmpty || !interfaces.any((interface) => interface.addresses.isNotEmpty)) {
-        debugPrint('⚠️ No network interfaces available, skipping broadcast discovery');
+      if (interfaces.isEmpty ||
+          !interfaces.any((interface) => interface.addresses.isNotEmpty)) {
+        debugPrint(
+          '⚠️ No network interfaces available, skipping broadcast discovery',
+        );
         return;
       }
 
@@ -300,7 +331,11 @@ class P2PDiscoveryService {
       bool sentSuccessfully = false;
       for (final broadcastAddr in broadcastAddresses) {
         try {
-          socket.send(data, InternetAddress(broadcastAddr), P2PBaseService.defaultPort);
+          socket.send(
+            data,
+            InternetAddress(broadcastAddr),
+            P2PBaseService.defaultPort,
+          );
           sentSuccessfully = true;
           debugPrint('📡 Discovery broadcast sent to $broadcastAddr');
         } catch (e) {
@@ -313,9 +348,9 @@ class P2PDiscoveryService {
         socket.close();
         return;
       }
-      
+
       debugPrint('📡 Discovery broadcast sent');
-      
+
       // Listen for responses
       socket.listen((event) {
         if (event == RawSocketEvent.read) {
@@ -324,7 +359,7 @@ class P2PDiscoveryService {
             try {
               final response = utf8.decode(packet.data);
               final data = jsonDecode(response);
-              
+
               if (data['type'] == 'discovery_response') {
                 _handleBroadcastResponse(data, packet.address.address);
               }
@@ -334,11 +369,10 @@ class P2PDiscoveryService {
           }
         }
       });
-      
+
       // Wait for responses
       await Future.delayed(Duration(seconds: 5));
       socket.close();
-      
     } catch (e) {
       debugPrint('❌ Broadcast discovery failed: $e');
     }
@@ -349,8 +383,10 @@ class P2PDiscoveryService {
     try {
       final deviceId = data['deviceId'] as String?;
       final userName = data['userName'] as String?;
-      
-      if (deviceId != null && userName != null && deviceId != _baseService.deviceId) {
+
+      if (deviceId != null &&
+          userName != null &&
+          deviceId != _baseService.deviceId) {
         final device = DeviceModel(
           id: deviceId,
           deviceId: deviceId,
@@ -361,7 +397,7 @@ class P2PDiscoveryService {
           createdAt: DateTime.now(),
           discoveryMethod: 'broadcast',
         );
-        
+
         _addDiscoveredDevice(device);
         debugPrint('📡 Broadcast ResQLink device found: $userName');
       }
@@ -376,8 +412,9 @@ class P2PDiscoveryService {
     _lastSeenDevices[device.deviceId] = DateTime.now();
 
     // Add to discovered devices if not already there
-    final existingIndex = _baseService.discoveredResQLinkDevices
-        .indexWhere((d) => d.deviceId == device.deviceId);
+    final existingIndex = _baseService.discoveredResQLinkDevices.indexWhere(
+      (d) => d.deviceId == device.deviceId,
+    );
 
     if (existingIndex >= 0) {
       // Update existing device
@@ -393,17 +430,21 @@ class P2PDiscoveryService {
 
   /// Trigger the devices discovered callback with current device list
   void _triggerDevicesDiscoveredCallback() {
-    final deviceList = _baseService.discoveredResQLinkDevices.map((device) => {
-      "deviceId": device.deviceId,
-      "deviceName": device.userName,
-      "deviceAddress": device.deviceAddress ?? device.deviceId,
-      "connectionType": device.discoveryMethod ?? 'unknown',
-      "isAvailable": !device.isConnected,
-      "signalLevel": _calculateDeviceSignal(device),
-      "lastSeen": device.lastSeen.millisecondsSinceEpoch,
-      "isConnected": device.isConnected,
-      "isEmergency": device.userName.toLowerCase().contains('emergency'),
-    }).toList();
+    final deviceList = _baseService.discoveredResQLinkDevices
+        .map(
+          (device) => {
+            "deviceId": device.deviceId,
+            "deviceName": device.userName,
+            "deviceAddress": device.deviceAddress ?? device.deviceId,
+            "connectionType": device.discoveryMethod ?? 'unknown',
+            "isAvailable": !device.isConnected,
+            "signalLevel": _calculateDeviceSignal(device),
+            "lastSeen": device.lastSeen.millisecondsSinceEpoch,
+            "isConnected": device.isConnected,
+            "isEmergency": device.userName.toLowerCase().contains('emergency'),
+          },
+        )
+        .toList();
 
     _baseService.onDevicesDiscovered?.call(deviceList);
   }
@@ -418,56 +459,10 @@ class P2PDiscoveryService {
         return -45 - (timeDiff * 2); // Strong for local network
       case 'broadcast':
         return -55 - (timeDiff * 3); // Medium for broadcast
-      case 'hotspot':
-      case 'hotspot_enhanced':
-        return -60 - (timeDiff * 2); // Medium for hotspot
+      case 'network':
+        return -60 - (timeDiff * 2); // Medium for network
       default:
         return -70 - (timeDiff * 5); // Weak for unknown
-    }
-  }
-  /// Check if we should attempt connection to this device
-  bool _shouldAttemptConnection(String deviceId) {
-    final attempts = _deviceConnectionAttempts[deviceId] ?? 0;
-    final maxAttempts = 3;
-    
-    if (attempts >= maxAttempts) {
-      return false;
-    }
-    
-    // Don't attempt too frequently
-    final lastSeen = _lastSeenDevices[deviceId];
-    if (lastSeen != null) {
-      final timeSinceLastSeen = DateTime.now().difference(lastSeen);
-      if (timeSinceLastSeen.inMinutes < 5) {
-        return false;
-      }
-    }
-    
-    return true;
-  }
-
-  /// Attempt to connect to network
-  Future<void> _attemptNetworkConnection(dynamic network) async {
-    try {
-      final deviceId = network.ssid?.replaceFirst(P2PBaseService.resqlinkPrefix, '') ?? '';
-      
-      // Increment attempt counter
-      _deviceConnectionAttempts[deviceId] = (_deviceConnectionAttempts[deviceId] ?? 0) + 1;
-      
-      debugPrint('🔗 Attempting connection to: ${network.ssid} (attempt ${_deviceConnectionAttempts[deviceId]})');
-      
-      final connected = await _networkService.connectToResQLinkNetwork(network.ssid ?? "");
-      
-      if (connected) {
-        debugPrint('✅ Successfully connected to: ${network.ssid}');
-        // Reset attempt counter on success
-        _deviceConnectionAttempts.remove(deviceId);
-      } else {
-        debugPrint('❌ Failed to connect to: ${network.ssid}');
-      }
-      
-    } catch (e) {
-      debugPrint('❌ Network connection attempt failed: $e');
     }
   }
 
@@ -502,26 +497,26 @@ class P2PDiscoveryService {
   /// Cleanup old discovered devices
   void cleanupOldDevices() {
     final cutoff = DateTime.now().subtract(Duration(minutes: 30));
-    
+
     _baseService.discoveredResQLinkDevices.removeWhere((device) {
       final lastSeen = device.lastSeen;
       return lastSeen.isBefore(cutoff);
     });
-    
+
     // Clean up tracking maps
     _lastSeenDevices.removeWhere((_, lastSeen) => lastSeen.isBefore(cutoff));
-    
+
     debugPrint('🧹 Cleaned up old discovered devices');
   }
 
   /// Dispose discovery resources
   void dispose() {
     debugPrint('🗑️ P2P Discovery Service disposing...');
-    
+
     _discoveryInProgress = false;
     _stopPeriodicDiscovery();
     _discoveryTimeoutTimer?.cancel();
-    
+
     _lastSeenDevices.clear();
     _deviceConnectionAttempts.clear();
   }

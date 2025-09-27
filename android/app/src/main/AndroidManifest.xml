@@ -22,13 +22,6 @@
         android:usesPermissionFlags="neverForLocation" 
         tools:targetApi="33" />
     
-    <!-- Hotspot and tethering permissions -->
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    
-    <!-- For legacy hotspot methods -->
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
-        tools:ignore="ProtectedPermissions" />
     
     <!-- Storage permissions for offline data -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />

@@ -425,79 +425,8 @@ class P2PNetworkService {
     }
   }
 
-  /// Connect to ResQLink network
-  Future<bool> connectToResQLinkNetwork(String ssid) async {
-    try {
-      if (ssid.isEmpty) return false;
+  
 
-      debugPrint('🔗 Connecting to ResQLink network: $ssid');
-
-      final connected = await WiFiForIoTPlugin.connect(
-        ssid,
-        password: P2PBaseService.emergencyPassword,
-        joinOnce: true,
-      );
-
-      if (connected) {
-        debugPrint('✅ Connected to: $ssid');
-
-        // Get gateway IP (usually the hotspot host)
-        final gatewayIp = await getGatewayIP();
-
-        if (gatewayIp != null) {
-          // Connect socket to hotspot server
-          await _connectToHotspotServer(gatewayIp);
-        }
-
-        // Try to establish P2P connection
-        await _establishP2PConnection();
-        return true;
-      } else {
-        debugPrint('❌ Failed to connect to: $ssid');
-        return false;
-      }
-    } catch (e) {
-      debugPrint('❌ Network connection error: $e');
-      return false;
-    }
-  }
-
-  /// Establish P2P connection after joining network
-  Future<void> _establishP2PConnection() async {
-    try {
-      // Try to connect to the hotspot host (usually at gateway IP)
-      final gatewayIPs = ['192.168.43.1', '192.168.4.1', '10.0.0.1'];
-
-      for (final ip in gatewayIPs) {
-        try {
-          final socket = await Socket.connect(
-            ip,
-            P2PBaseService.tcpPort,
-          ).timeout(Duration(seconds: 5));
-
-          // Send handshake
-          final handshake = jsonEncode({
-            'type': 'handshake',
-            'deviceId': _baseService.deviceId,
-            'userName': _baseService.userName,
-            'timestamp': DateTime.now().millisecondsSinceEpoch,
-          });
-
-          socket.write(handshake);
-          _handleTcpConnection(socket, ip);
-
-          debugPrint('✅ P2P connection established with: $ip');
-          return;
-        } catch (e) {
-          debugPrint('❌ Failed to connect to $ip: $e');
-        }
-      }
-
-      debugPrint('❌ Could not establish P2P connection to any gateway');
-    } catch (e) {
-      debugPrint('❌ P2P connection establishment failed: $e');
-    }
-  }
 
   /// Start periodic network scanning
   void startPeriodicScanning() {
@@ -540,48 +469,7 @@ class P2PNetworkService {
     }
   }
 
-  Future<void> _connectToHotspotServer(String serverIp) async {
-    try {
-      final socket = await Socket.connect(
-        serverIp,
-        P2PBaseService.tcpPort, // Use the default port
-        timeout: Duration(seconds: 5),
-      );
 
-      _deviceSockets[serverIp] = socket;
-
-      // Handle incoming messages
-      socket.listen(
-        (data) => _handleSocketMessage(utf8.decode(data), serverIp),
-        onError: (e) => debugPrint('Socket error: $e'),
-        onDone: () => _deviceSockets.remove(serverIp),
-      );
-
-      debugPrint('✅ Connected to hotspot server at $serverIp');
-    } catch (e) {
-      debugPrint('❌ Failed to connect to hotspot server: $e');
-    }
-  }
-
-  /// Handle incoming messages from sockets
-  void _handleSocketMessage(String message, String fromDevice) {
-    try {
-      debugPrint('📨 Received message from $fromDevice: $message');
-
-      // Parse and forward to base service
-      final messageData = jsonDecode(message);
-      if (messageData['type'] == 'message') {
-        // Create message model and save
-        final messageModel = MessageModel.fromJson(messageData);
-        _baseService.saveMessageToHistory(messageModel);
-
-        // Notify listeners
-        _baseService.onMessageReceived?.call(messageModel);
-      }
-    } catch (e) {
-      debugPrint('❌ Error processing incoming message: $e');
-    }
-  }
 
   /// Get network status
   Map<String, dynamic> getNetworkStatus() {
