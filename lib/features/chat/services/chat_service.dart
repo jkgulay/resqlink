@@ -117,6 +117,8 @@ class ChatService extends ChangeNotifier {
     required String deviceName,
     String? deviceAddress,
     String? currentUserId,
+    String? currentUserName,
+    String? peerUserName,
   }) async {
     try {
       final sessionId = await ChatRepository.createOrUpdate(
@@ -124,6 +126,8 @@ class ChatService extends ChangeNotifier {
         deviceName: deviceName,
         deviceAddress: deviceAddress,
         currentUserId: currentUserId,
+        currentUserName: currentUserName,
+        peerUserName: peerUserName,
       );
 
       if (sessionId.isNotEmpty) {
@@ -315,11 +319,13 @@ class ChatService extends ChangeNotifier {
   void _handleDeviceConnected(DeviceConnectionEvent event) async {
     debugPrint('📱 Device connected: ${event.deviceId}');
 
-    // Create or update session
+    // Create or update session using display names
     final sessionId = await createOrGetSession(
       deviceId: event.deviceId,
       deviceName: event.deviceName,
       currentUserId: 'local', // This should come from user service
+      currentUserName: event.currentUserName, // From landing page
+      peerUserName: event.deviceName, // Peer's display name
     );
 
     if (sessionId != null) {
@@ -395,8 +401,6 @@ class ChatService extends ChangeNotifier {
     switch (connectionType.toLowerCase()) {
       case 'wifi_direct':
         return ConnectionType.wifiDirect;
-      case 'hotspot':
-        return ConnectionType.hotspot;
       default:
         return ConnectionType.unknown;
     }

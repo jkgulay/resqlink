@@ -4,7 +4,7 @@ import 'connection/connection_header.dart';
 import 'connection/connection_stats.dart';
 import 'connection/device_list.dart';
 import 'connection/connected_devices.dart';
-import '../../utils/responsive_helper.dart';
+import '../../utils/resqlink_theme.dart';
 
 class ConnectionDiscoveryCard extends StatelessWidget {
   final HomeController controller;
@@ -18,58 +18,94 @@ class ConnectionDiscoveryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Card(
-          elevation: 8,
-          margin: ResponsiveHelper.getCardMargins(context),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          child: Container(
-            constraints: ResponsiveHelper.getCardConstraints(context),
-            decoration: _buildCardDecoration(),
-            child: Padding(
-              padding: ResponsiveHelper.getCardPadding(context),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ConnectionHeader(controller: controller),
-                  SizedBox(height: ResponsiveHelper.getContentSpacing(context)),
-                  ConnectionStats(controller: controller),
-                  if (controller.discoveredDevices.isNotEmpty) ...[
-                    SizedBox(height: ResponsiveHelper.getSectionSpacing(context)),
-                    DeviceList(
-                      controller: controller,
-                      onDeviceChatTap: onDeviceChatTap,
-                    ),
-                  ],
-                  if (controller.isConnected) ...[
-                    SizedBox(height: ResponsiveHelper.getContentSpacing(context)),
-                    ConnectedDevices(controller: controller),
-                  ],
-                ],
-              ),
-            ),
+    return ResponsiveWidget(
+      mobile: _buildMobileLayout(context),
+      tablet: _buildTabletLayout(context),
+      desktop: _buildDesktopLayout(context),
+    );
+  }
+
+  Widget _buildMobileLayout(BuildContext context) {
+    return _buildCard(context, isCompact: true);
+  }
+
+  Widget _buildTabletLayout(BuildContext context) {
+    return _buildCard(context, isCompact: false);
+  }
+
+  Widget _buildDesktopLayout(BuildContext context) {
+    return _buildCard(context, isCompact: false);
+  }
+
+  Widget _buildCard(BuildContext context, {required bool isCompact}) {
+    return Card(
+      elevation: 12,
+      margin: ResponsiveSpacing.padding(
+        context,
+        horizontal: isCompact ? 16 : 24,
+        vertical: isCompact ? 8 : 12,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Container(
+        decoration: _buildCardDecoration(),
+        child: Padding(
+          padding: ResponsiveSpacing.padding(
+            context,
+            all: isCompact ? 20 : 24,
           ),
-        );
-      },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ConnectionHeader(controller: controller),
+              SizedBox(height: ResponsiveSpacing.lg(context)),
+              ConnectionStats(controller: controller),
+              if (controller.discoveredDevices.isNotEmpty) ...[
+                SizedBox(height: ResponsiveSpacing.xl(context)),
+                DeviceList(
+                  controller: controller,
+                  onDeviceChatTap: onDeviceChatTap,
+                ),
+              ],
+              if (controller.isConnected) ...[
+                SizedBox(height: ResponsiveSpacing.lg(context)),
+                ConnectedDevices(controller: controller),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   BoxDecoration _buildCardDecoration() {
     return BoxDecoration(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(24),
       gradient: LinearGradient(
         colors: [
-          Color(0xFF0B192C).withValues(alpha: 0.08),
-          Color(0xFF1E3A5F).withValues(alpha: 0.05),
+          ResQLinkTheme.surfaceDark.withValues(alpha: 0.8),
+          ResQLinkTheme.cardDark.withValues(alpha: 0.9),
         ],
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
       ),
       border: Border.all(
-        color: Color(0xFF1E3A5F).withValues(alpha: 0.15),
-        width: 1,
+        color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.3),
+        width: 1.5,
       ),
+      boxShadow: [
+        BoxShadow(
+          color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.1),
+          blurRadius: 20,
+          offset: Offset(0, 8),
+        ),
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.1),
+          blurRadius: 10,
+          offset: Offset(0, 4),
+        ),
+      ],
     );
   }
 }

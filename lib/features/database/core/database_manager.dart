@@ -98,7 +98,7 @@ class DatabaseManager {
     // Critical database configuration for preventing deadlocks
     try {
       await db.execute('PRAGMA foreign_keys = ON');
-      await db.execute('PRAGMA journal_mode = MEMORY'); // Use memory journaling to prevent locks
+      await db.execute('PRAGMA journal_mode = WAL'); // Use WAL mode for better concurrency
       await db.execute('PRAGMA synchronous = OFF'); // Fastest, less safe but prevents locks
       await db.execute('PRAGMA locking_mode = EXCLUSIVE'); // Exclusive locking mode
       await db.execute('PRAGMA cache_size = 10000');

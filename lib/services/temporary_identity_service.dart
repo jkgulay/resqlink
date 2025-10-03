@@ -39,7 +39,7 @@ class TemporaryIdentityService {
       // Create or update user in local database
       final tempUser = await UserRepository.createUser(
         email: tempEmail,
-        password: tempId, // Use temp ID as password
+        password: tempId, 
         name: displayName,
         phoneNumber: null,
         isOnlineUser: false,

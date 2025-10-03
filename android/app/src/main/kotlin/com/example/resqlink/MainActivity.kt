@@ -30,11 +30,12 @@ import java.util.Timer
 import java.util.TimerTask
 import android.os.Handler
 import android.os.Looper
+import java.util.concurrent.CopyOnWriteArrayList
 
 class MainActivity : FlutterActivity() {
     companion object {
         const val WIFI_CHANNEL = "resqlink/wifi"
-        const val HOTSPOT_CHANNEL = "resqlink/hotspot"
+        // Hotspot functionality removed - pure WiFi Direct only
         const val PERMISSION_CHANNEL = "resqlink/permissions"
         const val LOCATION_CHANNEL = "resqlink/location"
         const val VIBRATION_CHANNEL = "resqlink/vibration"
@@ -46,19 +47,19 @@ class MainActivity : FlutterActivity() {
 
     private var serverSocket: ServerSocket? = null
     private var clientSocket: Socket? = null
-    private var connectedClients = mutableListOf<Socket>()
+    private var connectedClients = CopyOnWriteArrayList<Socket>()
     private var isSocketEstablished = false
     private var isGroupOwner = false
     private lateinit var wifiMethodChannel: MethodChannel
-    private lateinit var hotspotMethodChannel: MethodChannel
+    // Hotspot functionality removed - pure WiFi Direct only
     private lateinit var permissionMethodChannel: MethodChannel
     private lateinit var locationMethodChannel: MethodChannel
     private lateinit var vibrationMethodChannel: MethodChannel
-    private val messageQueue = mutableListOf<PendingMessage>()
+    private val messageQueue = CopyOnWriteArrayList<PendingMessage>()
     private var messageHandler: Handler? = null
     private lateinit var wifiManager: WifiManager
     private lateinit var wifiP2pManager: WifiP2pManager
-    private lateinit var hotspotManager: HotspotManager
+    // Hotspot functionality removed - pure WiFi Direct only
     private lateinit var permissionHelper: PermissionHelper
     private lateinit var wifiDirectDiagnostic: WiFiDirectDiagnostic
 
@@ -79,7 +80,7 @@ class MainActivity : FlutterActivity() {
         wifiP2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = wifiP2pManager.initialize(this, mainLooper, null)
 
-        hotspotManager = HotspotManager(this)
+        // Hotspot functionality removed - pure WiFi Direct only
         permissionHelper = PermissionHelper(this)
         wifiDirectDiagnostic = WiFiDirectDiagnostic(this)
 
@@ -148,30 +149,7 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // Hotspot
-        hotspotMethodChannel =
-            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HOTSPOT_CHANNEL)
-        hotspotMethodChannel.setMethodCallHandler { call, result ->
-            when (call.method) {
-                "checkHotspotCapabilities" -> result.success(hotspotManager.checkHotspotCapabilities())
-                "createLocalOnlyHotspot" -> {
-                    val ssid = call.argument<String>("ssid") ?: "ResQLink_${System.currentTimeMillis()}"
-                    val password = call.argument<String>("password") ?: "resqlink911"
-                    hotspotManager.createLocalOnlyHotspot(ssid, password, result)
-                }
-
-                "createLegacyHotspot" -> {
-                    val ssid = call.argument<String>("ssid") ?: "ResQLink_${System.currentTimeMillis()}"
-                    val password = call.argument<String>("password") ?: "resqlink911"
-                    hotspotManager.createLegacyHotspot(ssid, password, result)
-                }
-
-                "stopHotspot" -> hotspotManager.stopHotspot(result)
-                "getConnectedClients" -> hotspotManager.getConnectedClients(result)
-                "getHotspotInfo" -> hotspotManager.getHotspotInfo(result)
-                else -> result.notImplemented()
-            }
-        }
+        // Hotspot functionality removed - pure WiFi Direct only
 
         // Permissions
         permissionMethodChannel =
@@ -429,9 +407,7 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
                                 it.keepAlive = true
                                 it.soTimeout = 10000 // 10 second read timeout
 
-                                synchronized(connectedClients) {
-                                    connectedClients.add(it)
-                                }
+                                connectedClients.add(it)
                                 android.util.Log.d("WiFiDirect", "Client connected: ${it.remoteSocketAddress}")
                                 handleClientConnection(it)
                             }
@@ -460,12 +436,10 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
         try {
             serverSocket?.close()
             serverSocket = null
-            synchronized(connectedClients) {
-                connectedClients.forEach { client ->
-                    try { client.close() } catch (_: Exception) {}
-                }
-                connectedClients.clear()
+            connectedClients.forEach { client ->
+                try { client.close() } catch (_: Exception) {}
             }
+            connectedClients.clear()
         } catch (e: Exception) {
             android.util.Log.e("WiFiDirect", "Error cleaning up server socket", e)
         }
@@ -676,9 +650,7 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
             try {
                 input?.close()
                 output?.close()
-                synchronized(connectedClients) {
-                    connectedClients.remove(socket)
-                }
+                connectedClients.remove(socket)
                 socket.close()
                 android.util.Log.d("WiFiDirect", "Client connection cleaned up: $remoteAddress")
             } catch (e: Exception) {
@@ -697,7 +669,10 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
                 var messageSent = false
                 
                 // Check socket connectivity first
-                if (!isSocketEstablished) {
+                val hasActiveSocket = (clientSocket?.let { !it.isClosed && it.isConnected } == true) ||
+                                    (serverSocket?.let { !it.isClosed } == true && connectedClients.isNotEmpty())
+
+                if (!isSocketEstablished && !hasActiveSocket) {
                     // Queue message for retry
                     messageQueue.add(PendingMessage(message, System.currentTimeMillis()))
                     runOnUiThread {
@@ -706,15 +681,14 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
                     return@Thread
                 }
                 
-                // Try sending with timeout
-                val sendTimeout = 5000L // 5 seconds
+                // Try sending with shorter timeout to match Dart timeout
+                val sendTimeout = 2000L // 2 seconds
                 val startTime = System.currentTimeMillis()
-                
-                while (!messageSent && (System.currentTimeMillis() - startTime) < sendTimeout) {
-                    messageSent = attemptSendMessage(message)
-                    if (!messageSent) {
-                        Thread.sleep(500) // Wait before retry
-                    }
+
+                messageSent = attemptSendMessage(message)
+                if (!messageSent && (System.currentTimeMillis() - startTime) < sendTimeout) {
+                    Thread.sleep(200) // Shorter wait
+                    messageSent = attemptSendMessage(message) // One retry only
                 }
                 
                 runOnUiThread {
@@ -736,7 +710,7 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
 
     private fun attemptSendMessage(message: String): Boolean {
         var messageSent = false
-        
+
         // If we're a client, send to server
         clientSocket?.let { socket ->
             if (socket.isConnected && !socket.isClosed) {
@@ -751,46 +725,46 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
                 }
             }
         }
-        
+
         // If we're a server, send to all connected clients
         if (!messageSent && serverSocket != null && !serverSocket!!.isClosed) {
-            synchronized(connectedClients) {
-                val iterator = connectedClients.iterator()
-                while (iterator.hasNext()) {
-                    val client = iterator.next()
-                    try {
-                        if (client.isConnected && !client.isClosed) {
-                            val output = PrintWriter(client.getOutputStream(), true)
-                            output.println(message)
-                            output.flush()
-                            messageSent = true
-                            android.util.Log.d("WiFiDirect", "Message sent to client ${client.remoteSocketAddress}")
-                        } else {
-                            iterator.remove()
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.e("WiFiDirect", "Failed to send to client", e)
-                        iterator.remove()
+            val clientsToRemove = mutableListOf<Socket>()
+            for (client in connectedClients) {
+                try {
+                    if (client.isConnected && !client.isClosed) {
+                        val output = PrintWriter(client.getOutputStream(), true)
+                        output.println(message)
+                        output.flush()
+                        messageSent = true
+                        android.util.Log.d("WiFiDirect", "Message sent to client ${client.remoteSocketAddress}")
+                    } else {
+                        clientsToRemove.add(client)
                     }
+                } catch (e: Exception) {
+                    android.util.Log.e("WiFiDirect", "Failed to send to client", e)
+                    clientsToRemove.add(client)
                 }
             }
+            // Remove failed clients after iteration
+            connectedClients.removeAll(clientsToRemove)
         }
-        
+
         return messageSent
     }
     
     private fun processQueuedMessages() {
         if (messageQueue.isEmpty()) return
-        
+
         Thread {
-            val iterator = messageQueue.iterator()
-            while (iterator.hasNext()) {
-                val pendingMsg = iterator.next()
+            val messagesToRemove = mutableListOf<PendingMessage>()
+            for (pendingMsg in messageQueue) {
                 if (attemptSendMessage(pendingMsg.message)) {
-                    iterator.remove()
+                    messagesToRemove.add(pendingMsg)
                     android.util.Log.d("WiFiDirect", "Queued message sent successfully")
                 }
             }
+            // Remove sent messages after iteration
+            messageQueue.removeAll(messagesToRemove)
         }.start()
     }
 
@@ -1134,12 +1108,10 @@ override fun onDestroy() {
                                     pingSent = true
                                 }
 
-                                synchronized(connectedClients) {
-                                    connectedClients.forEach { client ->
-                                        if (client.isConnected) {
-                                            PrintWriter(client.getOutputStream(), true).println(pingMessage)
-                                            pingSent = true
-                                        }
+                                connectedClients.forEach { client ->
+                                    if (client.isConnected) {
+                                        PrintWriter(client.getOutputStream(), true).println(pingMessage)
+                                        pingSent = true
                                     }
                                 }
 
@@ -1211,109 +1183,18 @@ override fun onDestroy() {
                                     android.util.Log.d("WiFiDirect", "  Clients: ${groupClients.size}")
                                 }
 
-                                // Check for hotspot information
-                                hotspotManager.getHotspotInfo(object : MethodChannel.Result {
-                                    override fun success(hotspotResult: Any?) {
-                                        if (hotspotResult is Map<*, *>) {
-                                            networkData["hotspotInfo"] = hotspotResult
-                                            if (hotspotResult["isActive"] == true) {
-                                                // Get connected hotspot clients
-                                                hotspotManager.getConnectedClients(object : MethodChannel.Result {
-                                                    override fun success(clientsResult: Any?) {
-                                                        if (clientsResult is List<*>) {
-                                                            networkData["hotspotClients"] = clientsResult
-                                                            android.util.Log.d("WiFiDirect", "Manual hotspot detected with ${(clientsResult as List<*>).size} clients")
-                                                        }
-
-                                                        runOnUiThread {
-                                                            result.success(networkData)
-                                                        }
-                                                    }
-                                                    override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
-                                                        runOnUiThread {
-                                                            result.success(networkData)
-                                                        }
-                                                    }
-                                                    override fun notImplemented() {
-                                                        runOnUiThread {
-                                                            result.success(networkData)
-                                                        }
-                                                    }
-                                                })
-                                            } else {
-                                                runOnUiThread {
-                                                    result.success(networkData)
-                                                }
-                                            }
-                                        } else {
-                                            runOnUiThread {
-                                                result.success(networkData)
-                                            }
-                                        }
-                                    }
-                                    override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
-                                        runOnUiThread {
-                                            result.success(networkData)
-                                        }
-                                    }
-                                    override fun notImplemented() {
-                                        runOnUiThread {
-                                            result.success(networkData)
-                                        }
-                                    }
-                                })
+                                // Hotspot functionality removed - pure WiFi Direct only
+                                runOnUiThread {
+                                    result.success(networkData)
+                                }
                             }
                         } else {
                             networkData["wifiDirectActive"] = false
 
-                            // Still check for hotspot even if no WiFi Direct
-                            hotspotManager.getHotspotInfo(object : MethodChannel.Result {
-                                override fun success(hotspotResult: Any?) {
-                                    if (hotspotResult is Map<*, *>) {
-                                        networkData["hotspotInfo"] = hotspotResult
-                                        if (hotspotResult["isActive"] == true) {
-                                            hotspotManager.getConnectedClients(object : MethodChannel.Result {
-                                                override fun success(clientsResult: Any?) {
-                                                    if (clientsResult is List<*>) {
-                                                        networkData["hotspotClients"] = clientsResult
-                                                    }
-                                                    runOnUiThread {
-                                                        result.success(networkData)
-                                                    }
-                                                }
-                                                override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
-                                                    runOnUiThread {
-                                                        result.success(networkData)
-                                                    }
-                                                }
-                                                override fun notImplemented() {
-                                                    runOnUiThread {
-                                                        result.success(networkData)
-                                                    }
-                                                }
-                                            })
-                                        } else {
-                                            runOnUiThread {
-                                                result.success(networkData)
-                                            }
-                                        }
-                                    } else {
-                                        runOnUiThread {
-                                            result.success(networkData)
-                                        }
-                                    }
-                                }
-                                override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
-                                    runOnUiThread {
-                                        result.success(networkData)
-                                    }
-                                }
-                                override fun notImplemented() {
-                                    runOnUiThread {
-                                        result.success(networkData)
-                                    }
-                                }
-                            })
+                            // Hotspot functionality removed - pure WiFi Direct only
+                            runOnUiThread {
+                                result.success(networkData)
+                            }
                         }
                     }
                 } ?: run {
@@ -1333,16 +1214,14 @@ override fun onDestroy() {
     private fun cleanupSockets() {
         try {
             // Close all client connections
-            synchronized(connectedClients) {
-                connectedClients.forEach { client ->
-                    try {
-                        client.close()
-                    } catch (e: Exception) {
-                        android.util.Log.e("WiFiDirect", "Error closing client socket", e)
-                    }
+            connectedClients.forEach { client ->
+                try {
+                    client.close()
+                } catch (e: Exception) {
+                    android.util.Log.e("WiFiDirect", "Error closing client socket", e)
                 }
-                connectedClients.clear()
             }
+            connectedClients.clear()
 
             // Close server socket
             serverSocket?.close()
@@ -1374,7 +1253,7 @@ override fun onDestroy() {
         runOnUiThread {
             when (channel) {
                 "wifi" -> wifiMethodChannel.invokeMethod(method, data)
-                "hotspot" -> hotspotMethodChannel.invokeMethod(method, data)
+                // Hotspot functionality removed - pure WiFi Direct only
                 "permission" -> permissionMethodChannel.invokeMethod(method, data)
                 "location" -> locationMethodChannel.invokeMethod(method, data)
                 "wifi_direct" -> wifiMethodChannel.invokeMethod(method, data)

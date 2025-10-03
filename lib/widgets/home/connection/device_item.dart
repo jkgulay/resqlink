@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/controllers/home_controller.dart';
-import 'package:resqlink/utils/responsive_helper.dart';
+import 'package:resqlink/utils/resqlink_theme.dart';
 import 'device_actions.dart';
 import 'device_info.dart';
 import 'connection_manager.dart';
@@ -31,21 +31,28 @@ class _DeviceItemState extends State<DeviceItem> {
     final isGenerallyConnected = widget.device['isConnected'] as bool? ?? false;
     final isConnected = isWiFiDirectConnected || isGenerallyConnected;
 
-    final itemPadding = ResponsiveHelper.getItemPadding(context, narrow: 16.0);
-
     return Container(
-      padding: EdgeInsets.all(itemPadding),
+      padding: ResponsiveSpacing.padding(context, all: 16),
       decoration: BoxDecoration(
         color: isConnected
-            ? Colors.green.withValues(alpha: 0.08)
-            : Colors.grey.withValues(alpha: 0.08),
+            ? ResQLinkTheme.safeGreen.withValues(alpha: 0.1)
+            : ResQLinkTheme.offlineGray.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isConnected
-              ? Colors.green.withValues(alpha: 0.35)
-              : Colors.grey.withValues(alpha: 0.25),
+              ? ResQLinkTheme.safeGreen.withValues(alpha: 0.4)
+              : ResQLinkTheme.offlineGray.withValues(alpha: 0.3),
           width: 1.5,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: (isConnected
+                ? ResQLinkTheme.safeGreen
+                : ResQLinkTheme.offlineGray).withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -59,7 +66,7 @@ class _DeviceItemState extends State<DeviceItem> {
               widget.onDeviceChatTap,
             ),
           ),
-          SizedBox(height: ResponsiveHelper.getContentSpacing(context) * 0.75),
+          SizedBox(height: ResponsiveSpacing.sm(context)),
           DeviceActions(
             device: widget.device,
             controller: widget.controller,

@@ -8,70 +8,172 @@ import '../core/database_manager.dart';
 class ChatRepository {
   static const String _tableName = 'chat_sessions';
 
-  /// Create or update a chat session
+  /// Create or update a chat session with enhanced deduplication
+  /// CRITICAL: Uses deviceAddress (MAC address) as the stable identifier
   static Future<String> createOrUpdate({
     required String deviceId,
     required String deviceName,
     String? deviceAddress,
     String? currentUserId,
+    String? currentUserName,
+    String? peerUserName,
   }) async {
     try {
       final db = await DatabaseManager.database;
-      final sessionId = ChatSession.generateSessionId(
-        currentUserId ?? 'local',
-        deviceId,
-      );
+
+      // CRITICAL FIX: Use deviceAddress (MAC address) as the primary stable identifier
+      // This ensures ONE session per device, regardless of display name changes
+      final stableDeviceId = deviceAddress ?? deviceId;
+
+      // Session ID is now based on the stable device identifier (MAC address)
+      final sessionId = 'chat_${stableDeviceId.replaceAll(':', '_')}';
 
       final now = DateTime.now();
+
+      // First, merge ALL duplicate sessions with the same deviceAddress
+      await _mergeAllDuplicateSessionsByDeviceAddress(stableDeviceId, sessionId);
+
+      // Check for existing session using ONLY deviceAddress (MAC address)
       final existingSession = await db.query(
         _tableName,
-        where: 'id = ?',
-        whereArgs: [sessionId],
+        where: 'device_address = ? OR device_id = ? OR id = ?',
+        whereArgs: [stableDeviceId, stableDeviceId, sessionId],
         limit: 1,
       );
 
       if (existingSession.isNotEmpty) {
-        // Update existing session
-        await db.update(
-          _tableName,
-          {
-            'device_name': deviceName,
-            'device_address': deviceAddress,
-            'last_connection_at': now.millisecondsSinceEpoch,
-          },
-          where: 'id = ?',
-          whereArgs: [sessionId],
-        );
+        final existing = existingSession.first;
+        final existingId = existing['id'] as String;
+        final existingDeviceName = existing['device_name'] as String?;
+
+        // Prepare update data
+        final updateData = <String, dynamic>{
+          'last_connection_at': now.millisecondsSinceEpoch,
+          'device_address': stableDeviceId, // Ensure address is stored
+        };
+
+        // ALWAYS update device name to reflect current displayName
+        if (existingDeviceName != deviceName) {
+          updateData['device_name'] = deviceName;
+          debugPrint('🔄 Updating device name from "$existingDeviceName" to "$deviceName" for session $existingId');
+        }
+
+        // If the session ID doesn't match our stable ID, update it
+        if (existingId != sessionId) {
+          debugPrint('🔄 Migrating session ID from "$existingId" to "$sessionId"');
+
+          // Update the session ID to use stable identifier
+          await db.update(
+            _tableName,
+            {
+              'id': sessionId,
+              ...updateData,
+            },
+            where: 'id = ?',
+            whereArgs: [existingId],
+          );
+
+          // Update any messages that reference the old session ID
+          await db.update(
+            'messages',
+            {'chatSessionId': sessionId},
+            where: 'chatSessionId = ?',
+            whereArgs: [existingId],
+          );
+
+          debugPrint('✅ Session ID migrated and updated: $existingId -> $sessionId');
+        } else {
+          // Just update the existing session
+          await db.update(
+            _tableName,
+            updateData,
+            where: 'id = ?',
+            whereArgs: [sessionId],
+          );
+          debugPrint('✅ Chat session updated: $sessionId');
+        }
+
+        return sessionId;
       } else {
-        // Create new session
+        // Create new session with stable identifier
         final session = ChatSession(
           id: sessionId,
-          deviceId: deviceId,
+          deviceId: stableDeviceId,
           deviceName: deviceName,
-          deviceAddress: deviceAddress,
+          deviceAddress: stableDeviceId,
           createdAt: now,
           lastMessageAt: now,
           lastConnectionAt: now,
         );
 
         await db.insert(_tableName, session.toMap());
+        debugPrint('✅ NEW chat session created with stable ID: $sessionId for device: $deviceName');
+        return sessionId;
       }
-
-      debugPrint('✅ Chat session created/updated: $sessionId');
-      return sessionId;
     } catch (e) {
       debugPrint('❌ Error creating/updating chat session: $e');
       return '';
     }
   }
 
+  /// Merge all duplicate sessions that have the same deviceAddress
+  static Future<void> _mergeAllDuplicateSessionsByDeviceAddress(
+    String deviceAddress,
+    String targetSessionId,
+  ) async {
+    try {
+      final db = await DatabaseManager.database;
+
+      // Find all sessions with this device address
+      final duplicates = await db.query(
+        _tableName,
+        where: 'device_address = ? OR device_id = ?',
+        whereArgs: [deviceAddress, deviceAddress],
+      );
+
+      if (duplicates.length <= 1) return; // No duplicates
+
+      debugPrint('🔍 Found ${duplicates.length} sessions for device $deviceAddress - merging...');
+
+      for (final dup in duplicates) {
+        final dupId = dup['id'] as String;
+        if (dupId == targetSessionId) continue; // Skip target
+
+        // Migrate messages from this duplicate session to target
+        await db.update(
+          'messages',
+          {'chatSessionId': targetSessionId},
+          where: 'chatSessionId = ?',
+          whereArgs: [dupId],
+        );
+
+        // Delete the duplicate session
+        await db.delete(
+          _tableName,
+          where: 'id = ?',
+          whereArgs: [dupId],
+        );
+
+        debugPrint('🧹 Merged and deleted duplicate session: $dupId');
+      }
+
+      debugPrint('✅ Merged ${duplicates.length - 1} duplicate sessions into $targetSessionId');
+    } catch (e) {
+      debugPrint('❌ Error merging duplicate sessions: $e');
+    }
+  }
+
+  /// Get session by device ID (which should be the MAC address)
+  /// Also checks device_address for backward compatibility
   static Future<ChatSession?> getSessionByDeviceId(String deviceId) async {
   try {
     final db = await DatabaseManager.database;
+
+    // Check both device_id and device_address to find the session
     final results = await db.query(
       _tableName,
-      where: 'device_id = ?',
-      whereArgs: [deviceId],
+      where: 'device_id = ? OR device_address = ?',
+      whereArgs: [deviceId, deviceId],
       orderBy: 'last_message_at DESC',
       limit: 1,
     );
@@ -92,6 +194,8 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
   String? deviceName,
   String? deviceAddress,
   String? currentUserId,
+  String? currentUserName,
+  String? peerUserName,
 }) async {
   try {
     // First try to get existing session
@@ -113,6 +217,8 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
       deviceName: deviceName ?? 'Unknown Device',
       deviceAddress: deviceAddress,
       currentUserId: currentUserId,
+      currentUserName: currentUserName,
+      peerUserName: peerUserName,
     );
 
     // Get the newly created session
@@ -462,37 +568,121 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
     }
   }
 
-  /// Clean up duplicate sessions for the same device
+  /// Clean up duplicate sessions for the same device (enhanced)
+  /// This method merges all duplicate sessions based on deviceAddress
   static Future<int> cleanupDuplicateSessions() async {
     try {
       final db = await DatabaseManager.database;
-      int deletedCount = 0;
+      int mergedCount = 0;
 
-      // Find all sessions grouped by device_id
-      final sessions = await db.rawQuery('''
-        SELECT device_id, COUNT(*) as count, MIN(created_at) as oldest_created
-        FROM $_tableName
-        GROUP BY device_id
-        HAVING count > 1
-      ''');
+      debugPrint('🧹 Starting comprehensive duplicate session cleanup...');
 
-      for (final group in sessions) {
-        final deviceId = group['device_id'] as String;
-        final oldestCreated = group['oldest_created'] as int;
+      // Find all unique device addresses/IDs
+      final allSessions = await db.query(_tableName);
+      final Map<String, List<Map<String, dynamic>>> sessionsByDevice = {};
 
-        // Delete all sessions for this device except the oldest one
-        final deleted = await db.delete(
-          _tableName,
-          where: 'device_id = ? AND created_at > ?',
-          whereArgs: [deviceId, oldestCreated],
-        );
+      // Group sessions by device address (or device ID if address is missing)
+      for (final session in allSessions) {
+        final deviceAddress = session['device_address'] as String?;
+        final deviceId = session['device_id'] as String?;
+        final key = deviceAddress ?? deviceId ?? 'unknown';
 
-        deletedCount += deleted;
-        debugPrint('🧹 Cleaned up $deleted duplicate sessions for device: $deviceId');
+        if (!sessionsByDevice.containsKey(key)) {
+          sessionsByDevice[key] = [];
+        }
+        sessionsByDevice[key]!.add(session);
       }
 
-      debugPrint('✅ Total duplicate sessions cleaned up: $deletedCount');
-      return deletedCount;
+      // Process each device's sessions
+      for (final entry in sessionsByDevice.entries) {
+        final deviceKey = entry.key;
+        final sessions = entry.value;
+
+        if (sessions.length <= 1) continue; // No duplicates for this device
+
+        debugPrint('🔍 Found ${sessions.length} sessions for device: $deviceKey');
+
+        // Generate the stable session ID for this device
+        final stableSessionId = 'chat_${deviceKey.replaceAll(':', '_')}';
+
+        // Find the best session to keep (most recent connection, highest message count)
+        sessions.sort((a, b) {
+          final aConnection = a['last_connection_at'] as int? ?? 0;
+          final bConnection = b['last_connection_at'] as int? ?? 0;
+          if (aConnection != bConnection) return bConnection.compareTo(aConnection);
+
+          final aMessages = a['message_count'] as int? ?? 0;
+          final bMessages = b['message_count'] as int? ?? 0;
+          if (aMessages != bMessages) return bMessages.compareTo(aMessages);
+
+          final aCreated = a['created_at'] as int? ?? 0;
+          final bCreated = b['created_at'] as int? ?? 0;
+          return aCreated.compareTo(bCreated); // Older is better for created
+        });
+
+        final keepSession = sessions.first;
+        final latestDeviceName = keepSession['device_name'] as String;
+
+        // Check if we need to migrate to stable ID
+        final existingId = keepSession['id'] as String;
+        bool needsIdMigration = existingId != stableSessionId;
+
+        if (needsIdMigration) {
+          debugPrint('🔄 Migrating session ID from "$existingId" to stable "$stableSessionId"');
+
+          // Update the kept session to use stable ID
+          await db.update(
+            _tableName,
+            {
+              'id': stableSessionId,
+              'device_address': deviceKey,
+            },
+            where: 'id = ?',
+            whereArgs: [existingId],
+          );
+
+          // Migrate messages from old ID to stable ID
+          await db.update(
+            'messages',
+            {'chatSessionId': stableSessionId},
+            where: 'chatSessionId = ?',
+            whereArgs: [existingId],
+          );
+        }
+
+        // Merge all other duplicate sessions
+        for (int i = 1; i < sessions.length; i++) {
+          final duplicateSession = sessions[i];
+          final duplicateId = duplicateSession['id'] as String;
+
+          // Migrate messages from duplicate to stable session
+          await db.update(
+            'messages',
+            {'chatSessionId': stableSessionId},
+            where: 'chatSessionId = ?',
+            whereArgs: [duplicateId],
+          );
+
+          // Delete the duplicate session
+          await db.delete(
+            _tableName,
+            where: 'id = ?',
+            whereArgs: [duplicateId],
+          );
+
+          mergedCount++;
+          debugPrint('🧹 Merged and deleted duplicate session: $duplicateId');
+        }
+
+        debugPrint('✅ Consolidated ${sessions.length} sessions into: $stableSessionId ($latestDeviceName)');
+      }
+
+      if (mergedCount > 0) {
+        debugPrint('✅ Total duplicate sessions merged and cleaned: $mergedCount');
+      } else {
+        debugPrint('ℹ️ No duplicate sessions found to clean up');
+      }
+      return mergedCount;
     } catch (e) {
       debugPrint('❌ Error cleaning up duplicate sessions: $e');
       return 0;

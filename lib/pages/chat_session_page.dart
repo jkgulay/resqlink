@@ -190,13 +190,13 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     _updateQueuedMessageCount();
   }
 
-  /// Update queued message count for this device
+  /// Update queued message count for this device - DISABLED
   void _updateQueuedMessageCount() {
     if (_deviceId != null) {
-      final queuedMessages = widget.p2pService.messageQueueService.getQueueForDevice(_deviceId!);
+      // Message queue functionality removed
       if (mounted) {
         setState(() {
-          _queuedMessageCount = queuedMessages.length;
+          _queuedMessageCount = 0; // Always 0 since queue is disabled
         });
       }
     }
@@ -211,6 +211,10 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       );
       final timestamp = DateTime.now();
 
+      // CRITICAL: Use the stable session ID from the widget (MAC address-based)
+      // DO NOT regenerate from display names - that causes duplicate sessions!
+      String chatSessionId = widget.sessionId;
+
       // Create message with chat session ID
       final message = MessageModel(
         messageId: messageId,
@@ -223,7 +227,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         messageType: type,
         type: type.name,
         status: MessageStatus.pending,
-        chatSessionId: widget.sessionId,
+        chatSessionId: chatSessionId,
         connectionType: widget.p2pService.connectionType, deviceId: null,
       );
 
@@ -608,13 +612,12 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     );
   }
 
-  /// Retry queued messages manually
+  /// Retry queued messages manually - DISABLED
   Future<void> _retryQueuedMessages() async {
     if (_deviceId != null) {
-      // Force process queue for this device
-      await widget.p2pService.messageQueueService.processQueueForDevice(_deviceId!);
+      // Message queue functionality removed - no retry needed
       _updateQueuedMessageCount();
-      _showSnackBar('Retrying queued messages...', isError: false);
+      _showSnackBar('Message queue disabled - no messages to retry', isError: false);
     }
   }
 

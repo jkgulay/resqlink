@@ -58,6 +58,17 @@ app.*.map.json
 /android/android/
 /android/build/reports/
 
+# Kotlin compiler generated files
+/android/app/src/main/kotlin/com/example/resqlink/generated/
+*.kt.class
+*.kt.tmp
+
+# Additional Kotlin/Android build artifacts
+/android/app/build/
+/android/app/src/main/gen/
+/android/app/src/debug/gen/
+/android/app/src/release/gen/
+
 # gradle wrapper
 /android/gradle/wrapper/
 

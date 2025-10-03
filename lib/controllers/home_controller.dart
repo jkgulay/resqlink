@@ -175,7 +175,6 @@ class HomeController extends ChangeNotifier {
             debugPrint("📭 No devices found during scan");
             debugPrint("🔍 Available WiFi Direct peers: ${p2pService.wifiDirectService?.discoveredPeers.length ?? 0}");
             debugPrint("🔍 ResQLink devices: ${p2pService.discoveredResQLinkDevices.length}");
-            debugPrint("🔍 Available hotspots: ${p2pService.getAvailableHotspots().length}");
           } else {
             debugPrint(
               "✅ Scan completed - found ${_discoveredDevices.length} devices",

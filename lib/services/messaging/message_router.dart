@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../../models/message_model.dart';
 import '../../features/database/repositories/message_repository.dart';
 
+import '../chat/session_deduplication_service.dart';
+import '../../utils/session_consistency_checker.dart';
+
 class MessageRouter {
   static final MessageRouter _instance = MessageRouter._internal();
   factory MessageRouter() => _instance;
@@ -193,6 +196,15 @@ class MessageRouter {
                             data['endpointId'] ?? 
                             'broadcast';
 
+      // CRITICAL: Generate session ID from MAC address (deviceId), NOT display names
+      // This ensures messages always go to the correct stable session
+      String? chatSessionId = data['chatSessionId'];
+      if (chatSessionId == null || chatSessionId.isEmpty) {
+        // Use MAC address-based session ID
+        chatSessionId = 'chat_${senderDeviceId.replaceAll(':', '_')}';
+        debugPrint('📍 Generated MAC-based session ID: $chatSessionId for device: $senderDeviceId');
+      }
+
       // Create message model with proper sender/target mapping
       final messageModel = MessageModel(
         messageId: data['messageId'] ?? MessageModel.generateMessageId(senderDeviceId),
@@ -214,6 +226,7 @@ class MessageRouter {
         status: MessageStatus.received,
         latitude: data['latitude']?.toDouble(),
         longitude: data['longitude']?.toDouble(),
+        chatSessionId: chatSessionId,
       );
 
       debugPrint('📨 Created message model:');
@@ -262,6 +275,53 @@ class MessageRouter {
     debugPrint('  Active Listeners: ${_deviceListeners.keys.toList()}');
     debugPrint('  Device Connections: $_deviceConnections');
     debugPrint('  Queued Messages: ${_messageQueue.keys.map((k) => '$k: ${_messageQueue[k]?.length}')}');
+  }
+
+  /// Trigger session deduplication (can be called from UI)
+  static Future<void> runSessionDeduplication() async {
+    try {
+      debugPrint('🔧 Starting session deduplication from MessageRouter...');
+      final mergedCount = await SessionDeduplicationService.deduplicateAllSessions();
+      debugPrint('✅ Session deduplication completed. Merged $mergedCount sessions.');
+    } catch (e) {
+      debugPrint('❌ Error during session deduplication: $e');
+    }
+  }
+
+  /// Check session consistency (can be called from UI for debugging)
+  static Future<void> checkSessionConsistency() async {
+    try {
+      debugPrint('🔍 Running session consistency check...');
+      final results = await SessionConsistencyChecker.runConsistencyCheck();
+      SessionConsistencyChecker.printReport(results);
+
+      final healthScore = results['healthScore'] as Map<String, dynamic>?;
+      final totalIssues = healthScore?['totalIssues'] as int? ?? 0;
+
+      if (totalIssues > 0) {
+        debugPrint('⚠️ Found $totalIssues consistency issues. Consider running fixSessionInconsistencies()');
+      } else {
+        debugPrint('✅ All sessions are consistent!');
+      }
+    } catch (e) {
+      debugPrint('❌ Error during consistency check: $e');
+    }
+  }
+
+  /// Fix session inconsistencies (can be called from UI)
+  static Future<void> fixSessionInconsistencies() async {
+    try {
+      debugPrint('🔧 Fixing session inconsistencies...');
+      final success = await SessionConsistencyChecker.fixInconsistencies();
+
+      if (success) {
+        debugPrint('✅ All session inconsistencies fixed!');
+      } else {
+        debugPrint('❌ Some issues could not be fixed automatically');
+      }
+    } catch (e) {
+      debugPrint('❌ Error fixing inconsistencies: $e');
+    }
   }
 }
 

@@ -220,16 +220,13 @@ class PhilippinesMapService {
           debugPrint('  Tiles: ${stats.length}');
           debugPrint('  Size: ${(size / (1024 * 1024)).toStringAsFixed(2)} MB');
 
-          // Check specific tile existence - fix the toList() error
+          // Display cache statistics
           if (stats.length > 0) {
-            debugPrint('  Sample tiles:');
-            // Convert stats to a list properly
-            final statsIterable = stats as Iterable;
-            final tilesList = List.from(statsIterable);
-            for (int i = 0; i < math.min(5, tilesList.length); i++) {
-              final tile = tilesList[i];
-              debugPrint('    Z${tile.z}/X${tile.x}/Y${tile.y}');
-            }
+            debugPrint('  Cache Stats:');
+            debugPrint('    Hits: ${stats.hits}');
+            debugPrint('    Misses: ${stats.misses}');
+            debugPrint('    Length: ${stats.length}');
+            debugPrint('    Size: ${stats.size.toStringAsFixed(2)} bytes');
           }
         } else {
           debugPrint('Store $storeName not ready');

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../features/database/repositories/chat_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
+import '../services/temporary_identity_service.dart';
 import '../pages/chat_session_page.dart';
 import '../pages/message_page.dart';
 import '../models/chat_session_model.dart';
@@ -402,19 +403,14 @@ class ChatNavigationHelper {
     required P2PMainService p2pService,
   }) async {
     try {
-      // Generate session ID for the device pair
-      final sessionId = ChatSession.generateSessionId(
-        p2pService.deviceId ?? 'local',
-        deviceId,
-      );
-
-      // Check if session exists
-      final existingSession = await ChatRepository.getSession(sessionId);
+      // CRITICAL: Get session by MAC address (deviceId), not display names
+      // This ensures we find the existing session regardless of name changes
+      final existingSession = await ChatRepository.getSessionByDeviceId(deviceId);
 
       if (existingSession != null) {
         // Update connection time
         await ChatRepository.updateSessionConnection(
-          sessionId: sessionId,
+          sessionId: existingSession.id,
           connectionType: ConnectionType.wifiDirect,
           connectionTime: DateTime.now(),
         );
@@ -428,7 +424,7 @@ class ChatNavigationHelper {
         if (context.mounted) {
           await _navigateToChat(
             context: context,
-            sessionId: sessionId,
+            sessionId: existingSession.id,
             deviceName: deviceName,
             deviceId: deviceId,
             p2pService: p2pService,
@@ -481,10 +477,17 @@ class ChatNavigationHelper {
     String? currentUserId,
   }) async {
     try {
+      // Get current user's display name
+      final currentUserName = await TemporaryIdentityService.getTemporaryDisplayName();
+
+      // CRITICAL: deviceId should be the MAC address from WiFi Direct
       return await ChatRepository.createOrUpdate(
         deviceId: deviceId,
         deviceName: deviceName,
+        deviceAddress: deviceId, // CRITICAL: Pass MAC address for stable session ID
         currentUserId: currentUserId ?? 'local',
+        currentUserName: currentUserName,
+        peerUserName: deviceName,
       );
     } catch (e) {
       debugPrint('❌ Error creating/updating session: $e');

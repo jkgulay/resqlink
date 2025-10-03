@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/message_model.dart';
 import '../../models/device_model.dart';
+import '../temporary_identity_service.dart';
 
 /// Base P2P service with core functionality
 abstract class P2PBaseService with ChangeNotifier {
@@ -186,7 +187,7 @@ abstract class P2PBaseService with ChangeNotifier {
 
   /// Start message cleanup timer
   void _startMessageCleanup() {
-    _messageCleanupTimer = Timer.periodic(Duration(hours: 1), (_) {
+    _messageCleanupTimer = Timer.periodic(Duration(minutes: 30), (_) {
       _cleanupOldMessages();
     });
   }
@@ -229,9 +230,20 @@ abstract class P2PBaseService with ChangeNotifier {
     return _processedMessageIds.contains(messageId);
   }
 
-  /// Add connected device
+  /// Add connected device with deduplication
   void addConnectedDevice(String deviceId, String userName) {
     final now = DateTime.now();
+
+    // Check if device is already connected to prevent duplicate processing
+    final existingDevice = _connectedDevices[deviceId];
+    bool isNewConnection = existingDevice == null;
+    bool nameChanged = existingDevice?.userName != userName;
+
+    if (!isNewConnection && !nameChanged) {
+      debugPrint('ℹ️ Device already connected with same name: $userName ($deviceId)');
+      return;
+    }
+
     final device = DeviceModel(
       id: deviceId,
       deviceId: deviceId,
@@ -239,9 +251,9 @@ abstract class P2PBaseService with ChangeNotifier {
       isHost: false,
       isOnline: true,
       lastSeen: now,
-      createdAt: now,
+      createdAt: existingDevice?.createdAt ?? now, // Preserve original creation time
     );
-    
+
     _connectedDevices[deviceId] = device;
 
     // Also update the discovered device with the correct name if it exists
@@ -259,10 +271,15 @@ abstract class P2PBaseService with ChangeNotifier {
       debugPrint('📝 Updated discovered device name: $userName ($deviceId)');
     }
 
-    onDeviceConnected?.call(deviceId, userName);
-    notifyListeners();
+    // Only call the connection callback for new connections
+    if (isNewConnection) {
+      onDeviceConnected?.call(deviceId, userName);
+      debugPrint('✅ NEW device connected: $userName ($deviceId)');
+    } else if (nameChanged) {
+      debugPrint('🔄 Device name updated: $userName ($deviceId)');
+    }
 
-    debugPrint('✅ Device connected: $userName ($deviceId)');
+    notifyListeners();
   }
 
   /// Remove connected device
@@ -284,8 +301,24 @@ abstract class P2PBaseService with ChangeNotifier {
     }
   }
 
+  /// Get current user's display name from temporary identity service
+  Future<String?> getCurrentDisplayName() async {
+    try {
+      // First try to get from temporary identity service
+      final tempName = await TemporaryIdentityService.getTemporaryDisplayName();
+      if (tempName != null && tempName.isNotEmpty) {
+        return tempName;
+      }
+
+      // Fallback to stored username
+      return _userName;
+    } catch (e) {
+      debugPrint('❌ Error getting current display name: $e');
+      return _userName;
+    }
+  }
+
   /// Abstract methods to be implemented by subclasses
-  Future<bool> createEmergencyHotspot({String? deviceId});
   Future<void> discoverDevices({bool force = false});
   Future<void> sendMessage({
     required String message,
@@ -333,7 +366,11 @@ abstract class P2PBaseService with ChangeNotifier {
 enum P2PRole { none, host, client }
 
 /// P2P Connection Mode enumeration
-enum P2PConnectionMode { none, hotspot, client, wifiDirect }
+enum P2PConnectionMode {
+  none,
+  client,
+  wifiDirect
+}
 
 /// Emergency template enumeration
 enum EmergencyTemplate { sos, trapped, medical, safe, evacuating }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/controllers/home_controller.dart';
 import 'package:resqlink/utils/responsive_helper.dart';
+import 'package:resqlink/utils/resqlink_theme.dart';
+import 'package:resqlink/utils/responsive_utils.dart';
 import 'device_item.dart';
 
 class DeviceList extends StatelessWidget {
@@ -15,52 +17,63 @@ class DeviceList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final listPadding = ResponsiveHelper.getItemPadding(context);
-    final iconPadding = ResponsiveHelper.isDesktop(context) ? 12.0 : 
-                      ResponsiveHelper.isTablet(context) ? 11.0 : 10.0;
-
     return Container(
-      padding: EdgeInsets.all(listPadding),
+      padding: ResponsiveSpacing.padding(context, all: 16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
+        color: ResQLinkTheme.surfaceDark.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Color(0xFF1E3A5F).withValues(alpha: 0.2)),
+        border: Border.all(
+          color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.3),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.05),
+            blurRadius: 6,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHeader(context, iconPadding),
-          SizedBox(height: ResponsiveHelper.getContentSpacing(context)),
+          _buildHeader(context),
+          SizedBox(height: ResponsiveSpacing.md(context)),
           _buildDevicesList(context),
         ],
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context, double iconPadding) {
-    final iconSize = ResponsiveHelper.getIconSize(context, narrow: 18.0);
-    final titleSize = ResponsiveHelper.getTitleSize(context, narrow: 15.0);
-    final spacing = ResponsiveHelper.getContentSpacing(context);
+  Widget _buildHeader(BuildContext context) {
+    final iconSize = ResponsiveUtils.isMobile(context) ? 18.0 : 22.0;
+    final iconPadding = ResponsiveSpacing.sm(context);
 
     return Row(
       children: [
         Container(
           padding: EdgeInsets.all(iconPadding),
           decoration: BoxDecoration(
-            color: Colors.green.withValues(alpha: 0.15),
+            color: ResQLinkTheme.safeGreen.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+            border: Border.all(
+              color: ResQLinkTheme.safeGreen.withValues(alpha: 0.5),
+              width: 1.5,
+            ),
           ),
-          child: Icon(Icons.devices, color: Colors.green, size: iconSize),
+          child: Icon(
+            Icons.devices_outlined,
+            color: ResQLinkTheme.safeGreen,
+            size: iconSize,
+          ),
         ),
-        SizedBox(width: spacing),
+        SizedBox(width: ResponsiveSpacing.sm(context)),
         Expanded(
-          child: Text(
+          child: ResponsiveTextWidget(
             'Found ${controller.discoveredDevices.length} device${controller.discoveredDevices.length == 1 ? '' : 's'}',
-            style: TextStyle(
-              color: Colors.green,
+            styleBuilder: (context) => ResponsiveText.bodyLarge(context).copyWith(
+              color: ResQLinkTheme.safeGreen,
               fontWeight: FontWeight.w600,
-              fontSize: titleSize,
             ),
           ),
         ),
@@ -69,17 +82,15 @@ class DeviceList extends StatelessWidget {
   }
 
   Widget _buildDevicesList(BuildContext context) {
-    if (ResponsiveHelper.isDesktop(context) && controller.discoveredDevices.length > 2) {
+    if (ResponsiveUtils.isDesktop(context) && controller.discoveredDevices.length > 2) {
       return _buildDevicesGrid(context);
     }
-
-    final itemSpacing = ResponsiveHelper.getContentSpacing(context) * 0.5;
 
     return ListView.separated(
       shrinkWrap: true,
       physics: NeverScrollableScrollPhysics(),
       itemCount: controller.discoveredDevices.length,
-      separatorBuilder: (context, index) => SizedBox(height: itemSpacing),
+      separatorBuilder: (context, index) => SizedBox(height: ResponsiveSpacing.sm(context)),
       itemBuilder: (context, index) {
         final device = controller.discoveredDevices[index];
         return DeviceItem(
@@ -92,8 +103,8 @@ class DeviceList extends StatelessWidget {
   }
 
   Widget _buildDevicesGrid(BuildContext context) {
-    final crossAxisCount = ResponsiveHelper.isDesktop(context) ? 2 : 1;
-    final spacing = ResponsiveHelper.getContentSpacing(context) * 0.75;
+    final crossAxisCount = ResponsiveUtils.isDesktop(context) ? 2 : 1;
+    final spacing = ResponsiveSpacing.md(context);
 
     return GridView.builder(
       shrinkWrap: true,

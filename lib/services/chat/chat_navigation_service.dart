@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:resqlink/models/message_model.dart';
 import '../../models/chat_session_model.dart';
 import '../../features/database/repositories/chat_repository.dart';
+import '../../services/temporary_identity_service.dart';
 import '../p2p/p2p_main_service.dart';
 import '../../pages/chat_session_page.dart';
 import '../../pages/chat_list_page.dart';
@@ -135,10 +136,14 @@ class ChatNavigationService {
       _isNavigating = true;
 
       // Create or update chat session
+      final currentUserName = await TemporaryIdentityService.getTemporaryDisplayName();
       final sessionId = await ChatRepository.createOrUpdate(
         deviceId: deviceId,
         deviceName: deviceName,
+        deviceAddress: deviceId, // CRITICAL: Pass MAC address for stable session ID
         currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
+        currentUserName: currentUserName,
+        peerUserName: deviceName,
       );
 
       if (sessionId.isNotEmpty && _context != null) {
@@ -310,10 +315,14 @@ class ChatNavigationService {
     P2PMainService p2pService,
   ) async {
     try {
+      final currentUserName = await TemporaryIdentityService.getTemporaryDisplayName();
       final sessionId = await ChatRepository.createOrUpdate(
         deviceId: deviceId,
         deviceName: deviceName,
+        deviceAddress: deviceId, // CRITICAL: Pass MAC address for stable session ID
         currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
+        currentUserName: currentUserName,
+        peerUserName: deviceName,
       );
 
       if (sessionId.isNotEmpty && context.mounted) {
@@ -346,19 +355,13 @@ class ChatNavigationService {
     P2PMainService p2pService,
   ) async {
     try {
-      // Generate session ID for the device pair
-      final sessionId = ChatSession.generateSessionId(
-        p2pService.deviceId ?? 'local',
-        deviceId,
-      );
-
-      // Check if session exists
-      final existingSession = await ChatRepository.getSession(sessionId);
+      // CRITICAL: Get session by MAC address (deviceId), not display names
+      final existingSession = await ChatRepository.getSessionByDeviceId(deviceId);
 
       if (existingSession != null) {
         // Update connection time
         await ChatRepository.updateSessionConnection(
-          sessionId: sessionId,
+          sessionId: existingSession.id,
           connectionType: ConnectionType.wifiDirect, // or determine actual type
           connectionTime: DateTime.now(),
         );
@@ -382,7 +385,7 @@ class ChatNavigationService {
                   if (context.mounted) {
                     navigateToChat(
                       context,
-                      sessionId,
+                      existingSession.id,
                       deviceName,
                       p2pService,
                       deviceId: deviceId,
@@ -399,7 +402,7 @@ class ChatNavigationService {
         if (context.mounted) {
           await navigateToChat(
             context,
-            sessionId,
+            existingSession.id,
             deviceName,
             p2pService,
             deviceId: deviceId,
@@ -458,10 +461,14 @@ class ChatNavigationService {
             onPressed: () async {
               Navigator.pop(context);
               // Quick emergency message
+              final currentUserName = await TemporaryIdentityService.getTemporaryDisplayName();
               final sessionId = await ChatRepository.createOrUpdate(
                 deviceId: deviceId,
                 deviceName: deviceName,
+                deviceAddress: deviceId, // CRITICAL: Pass MAC address for stable session ID
                 currentUserId: 'local', // Use consistent user ID to prevent duplicate sessions
+                currentUserName: currentUserName,
+                peerUserName: deviceName,
               );
 
               if (sessionId.isNotEmpty) {
