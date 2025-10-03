@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:resqlink/features/database/repositories/chat_repository.dart';
 import 'package:resqlink/pages/landing_page.dart';
 import 'package:resqlink/services/auth_service.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
@@ -115,6 +116,39 @@ class SettingsPageState extends State<SettingsPage> {
           : 'Multi-hop message relaying disabled',
       isSuccess: true,
     );
+  }
+
+  Future<void> _mergeDuplicateSessions() async {
+    final confirm = await _showConfirmationDialog(
+      title: 'Merge Duplicate Sessions',
+      content:
+          'This will find and merge all duplicate chat sessions for the same device. Messages will be preserved.',
+      confirmText: 'Merge Sessions',
+      isDangerous: false,
+    );
+
+    if (confirm == true) {
+      try {
+        _showMessage('Merging duplicate sessions...', isSuccess: false);
+
+        final duplicatesMerged = await ChatRepository.cleanupDuplicateSessions();
+
+        await _loadStatistics();
+        if (!mounted) return;
+
+        if (duplicatesMerged > 0) {
+          _showMessage(
+            'Successfully merged $duplicatesMerged duplicate session${duplicatesMerged == 1 ? '' : 's'}',
+            isSuccess: true,
+          );
+        } else {
+          _showMessage('No duplicate sessions found', isSuccess: true);
+        }
+      } catch (e) {
+        if (!mounted) return;
+        _showMessage('Failed to merge sessions: $e', isDanger: true);
+      }
+    }
   }
 
   Future<void> _clearChatHistory() async {
@@ -1084,6 +1118,20 @@ class SettingsPageState extends State<SettingsPage> {
                   : Colors.grey,
             ),
             activeColor: ResQLinkTheme.orange,
+          ),
+          Divider(color: Colors.white24, height: 1),
+          ListTile(
+            title: Text(
+              'Merge Duplicate Sessions',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              'Clean up and merge duplicate chat sessions',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            leading: Icon(Icons.merge, color: ResQLinkTheme.orange),
+            trailing: Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: _mergeDuplicateSessions,
           ),
           Divider(color: Colors.white24, height: 1),
           ListTile(

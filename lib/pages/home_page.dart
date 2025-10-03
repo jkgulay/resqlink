@@ -430,13 +430,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       // Message queue service initialization removed
       debugPrint('✅ P2P Service initialized without message queue');
 
-      // Clean up any duplicate chat sessions that might exist
+      // Clean up and merge any duplicate chat sessions based on deviceAddress
+      // This runs on every startup to consolidate sessions from display name changes
       try {
         final duplicatesRemoved =
             await ChatRepository.cleanupDuplicateSessions();
         if (duplicatesRemoved > 0) {
           debugPrint(
-            '🧹 Cleaned up $duplicatesRemoved duplicate chat sessions on startup',
+            '🧹 Merged and cleaned $duplicatesRemoved duplicate chat sessions on startup',
           );
         }
       } catch (e) {
@@ -920,50 +921,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   /// Create persistent conversation for connected device with deduplication
+  /// CRITICAL: deviceId MUST be the MAC address from WiFi Direct
   Future<void> _createPersistentConversationForDevice(
     String deviceId,
     String deviceName,
   ) async {
     try {
-      // Check if session already exists to avoid duplicate creation
-      final existingSession = await ChatRepository.getSessionByDeviceId(
-        deviceId,
-      );
-
-      if (existingSession != null) {
-        debugPrint('📋 Session already exists for $deviceName ($deviceId)');
-
-        // Update device name if it's different (prioritize connection display name)
-        if (existingSession.deviceName != deviceName) {
-          debugPrint(
-            '🔄 Updating device name from "${existingSession.deviceName}" to "$deviceName"',
-          );
-          await ChatRepository.createOrUpdate(
-            deviceId: deviceId,
-            deviceName: deviceName, // Use the display name from the connection
-            currentUserId: 'local',
-          );
-          debugPrint('✅ Device name updated to: $deviceName');
-        } else {
-          debugPrint('ℹ️ Device name already correct: $deviceName');
-        }
-        return;
-      }
-
       debugPrint(
-        '📱 Creating NEW persistent conversation for: $deviceName ($deviceId)',
+        '📱 Creating/updating chat session for: $deviceName (MAC: $deviceId)',
       );
 
+      final currentUserName = await TemporaryIdentityService.getTemporaryDisplayName();
+
+      // CRITICAL: Pass deviceAddress as the stable MAC address identifier
+      // This ensures ONE session per device regardless of display name changes
       final sessionId = await ChatRepository.createOrUpdate(
-        deviceId: deviceId,
-        deviceName: deviceName,
-        currentUserId: 'local', // Use a consistent local user ID
+        deviceId: deviceId, // MAC address
+        deviceName: deviceName, // Current display name (can change)
+        deviceAddress: deviceId, // CRITICAL: MAC address for stable identification
+        currentUserId: 'local',
+        currentUserName: currentUserName,
+        peerUserName: deviceName,
       );
 
       if (sessionId.isNotEmpty) {
-        debugPrint('✅ NEW chat session created: $sessionId');
+        debugPrint('✅ Chat session ready: $sessionId for $deviceName');
       } else {
-        debugPrint('❌ Failed to create chat session');
+        debugPrint('❌ Failed to create/update chat session');
       }
     } catch (e) {
       debugPrint('❌ Error creating persistent conversation: $e');

@@ -211,6 +211,10 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       );
       final timestamp = DateTime.now();
 
+      // CRITICAL: Use the stable session ID from the widget (MAC address-based)
+      // DO NOT regenerate from display names - that causes duplicate sessions!
+      String chatSessionId = widget.sessionId;
+
       // Create message with chat session ID
       final message = MessageModel(
         messageId: messageId,
@@ -223,7 +227,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         messageType: type,
         type: type.name,
         status: MessageStatus.pending,
-        chatSessionId: widget.sessionId,
+        chatSessionId: chatSessionId,
         connectionType: widget.p2pService.connectionType, deviceId: null,
       );
 

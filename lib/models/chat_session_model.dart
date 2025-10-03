@@ -33,9 +33,20 @@ class ChatSession {
     this.metadata,
   });
 
-  static String generateSessionId(String deviceId1, String deviceId2) {
-    final sortedIds = [deviceId1, deviceId2]..sort();
+  static String generateSessionId(String userId1, String userId2) {
+    final sortedIds = [userId1, userId2]..sort();
     return 'chat_${sortedIds[0]}_${sortedIds[1]}';
+  }
+
+  /// Generate session ID using display names instead of device IDs
+  static String generateSessionIdFromNames(String userName1, String userName2) {
+    final sortedNames = [userName1.toLowerCase().trim(), userName2.toLowerCase().trim()]..sort();
+    return 'chat_${sortedNames[0]}_${sortedNames[1]}';
+  }
+
+  /// Generate session ID for a peer using current user's name
+  static String generateSessionIdForPeer(String currentUserName, String peerUserName) {
+    return generateSessionIdFromNames(currentUserName, peerUserName);
   }
 
   bool get isOnline =>

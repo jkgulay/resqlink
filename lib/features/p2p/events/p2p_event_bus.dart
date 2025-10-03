@@ -14,12 +14,16 @@ class DeviceConnectionEvent extends P2PEvent {
   final String deviceName;
   final String connectionType;
   final Map<String, dynamic>? deviceInfo;
+  final String? currentUserName; // Added for session ID generation
+  final String? peerUserName;    // Added for session ID generation
 
   DeviceConnectionEvent({
     required this.deviceId,
     required this.deviceName,
     required this.connectionType,
     this.deviceInfo,
+    this.currentUserName,
+    this.peerUserName,
   });
 
   @override
@@ -44,10 +48,14 @@ class DeviceDisconnectionEvent extends P2PEvent {
 class MessageReceivedEvent extends P2PEvent {
   final MessageModel message;
   final String fromDeviceId;
+  final String? currentUserName; // Added for session ID generation
+  final String? fromUserName;    // Added for session ID generation
 
   MessageReceivedEvent({
     required this.message,
     required this.fromDeviceId,
+    this.currentUserName,
+    this.fromUserName,
   });
 
   @override

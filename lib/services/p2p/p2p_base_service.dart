@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/message_model.dart';
 import '../../models/device_model.dart';
+import '../temporary_identity_service.dart';
 
 /// Base P2P service with core functionality
 abstract class P2PBaseService with ChangeNotifier {
@@ -297,6 +298,23 @@ abstract class P2PBaseService with ChangeNotifier {
       _isConnected = connected;
       notifyListeners();
       debugPrint('🔗 Connection status changed: $connected');
+    }
+  }
+
+  /// Get current user's display name from temporary identity service
+  Future<String?> getCurrentDisplayName() async {
+    try {
+      // First try to get from temporary identity service
+      final tempName = await TemporaryIdentityService.getTemporaryDisplayName();
+      if (tempName != null && tempName.isNotEmpty) {
+        return tempName;
+      }
+
+      // Fallback to stored username
+      return _userName;
+    } catch (e) {
+      debugPrint('❌ Error getting current display name: $e');
+      return _userName;
     }
   }
 
