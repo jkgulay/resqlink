@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class WiFiDirectService {
   static const String channelName = 'resqlink/wifi';
@@ -625,9 +626,21 @@ class WiFiDirectService {
 
       case 'onDeviceChanged':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
+        final deviceAddress = args['deviceAddress'] as String?;
         debugPrint(
           '📱 Device info: ${args['deviceName']} (${args['deviceAddress']})',
         );
+
+        // CRITICAL: Store this device's MAC address for use as stable device ID
+        if (deviceAddress != null && deviceAddress.isNotEmpty) {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('wifi_direct_mac_address', deviceAddress);
+            debugPrint('✅ Stored WiFi Direct MAC address: $deviceAddress');
+          } catch (e) {
+            debugPrint('❌ Failed to store MAC address: $e');
+          }
+        }
 
       case 'onServerSocketReady':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
