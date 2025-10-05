@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import '../../../models/message_model.dart';
-import '../../../models/chat_session_model.dart';
 import '../core/database_manager.dart';
 import 'chat_repository.dart';
 
@@ -36,18 +35,13 @@ class MessageRepository {
       return -1;
     }
 
-    // Mark as processing
     _processingMessageIds.add(messageId);
 
     try {
       return await DatabaseManager.transaction((txn) async {
-        // Generate or use existing chat session ID
         String? chatSessionId = message.chatSessionId;
         if (chatSessionId == null && message.endpointId != 'broadcast') {
-          chatSessionId = ChatSession.generateSessionId(
-            currentUserId ?? 'local',
-            message.endpointId,
-          );
+          chatSessionId = 'chat_${message.endpointId.replaceAll(':', '_')}';
         }
 
         final messageMap = {

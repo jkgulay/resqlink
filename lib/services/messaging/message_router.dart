@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../models/message_model.dart';
+import '../../models/chat_session_model.dart';
 import '../../features/database/repositories/message_repository.dart';
+import '../../features/database/repositories/chat_repository.dart';
 
 import '../chat/session_deduplication_service.dart';
 import '../../utils/session_consistency_checker.dart';
@@ -76,6 +78,20 @@ class MessageRouter {
       debugPrint('  Message: ${message.message}');
 
       await MessageRepository.insertMessage(message);
+
+      // CRITICAL FIX: Update lastConnectionAt to keep session showing as "online"
+      // This prevents the "disconnected" status when messages are actively being exchanged
+      if (message.chatSessionId != null) {
+        try {
+          await ChatRepository.updateConnection(
+            sessionId: message.chatSessionId!,
+            connectionType: ConnectionType.wifiDirect,
+            connectionTime: DateTime.now(),
+          );
+        } catch (e) {
+          debugPrint('⚠️ Failed to update connection time: $e');
+        }
+      }
 
       _globalListener?.call(message);
 

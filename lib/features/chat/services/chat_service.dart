@@ -348,7 +348,7 @@ class ChatService extends ChangeNotifier {
 
     // Ensure message has chat session ID
     if (message.chatSessionId == null) {
-      final sessionId = ChatSession.generateSessionId('local', event.fromDeviceId);
+      final sessionId = 'chat_${event.fromDeviceId.replaceAll(':', '_')}';
       final updatedMessage = message.copyWith(chatSessionId: sessionId);
       await MessageRepository.insert(updatedMessage);
 

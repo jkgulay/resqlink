@@ -103,11 +103,23 @@ abstract class P2PBaseService with ChangeNotifier {
   }
 
   /// Generate or retrieve device ID
+  /// CRITICAL: This should return the WiFi Direct MAC address when available,
+  /// otherwise fall back to stored/generated ID
   Future<String> _getOrCreateDeviceId() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+
+      // First, try to get the WiFi Direct MAC address (this will be set by WiFiDirectService)
+      String? macAddress = prefs.getString('wifi_direct_mac_address');
+
+      if (macAddress != null && macAddress.isNotEmpty) {
+        debugPrint('📱 Using WiFi Direct MAC address as device ID: $macAddress');
+        return macAddress;
+      }
+
+      // Fallback to stored device ID
       String? deviceId = prefs.getString('p2p_device_id');
-      
+
       if (deviceId == null) {
         deviceId = 'device_${DateTime.now().millisecondsSinceEpoch}';
         await prefs.setString('p2p_device_id', deviceId);
@@ -115,7 +127,7 @@ abstract class P2PBaseService with ChangeNotifier {
       } else {
         debugPrint('📱 Using existing device ID: $deviceId');
       }
-      
+
       return deviceId;
     } catch (e) {
       debugPrint('❌ Error with device ID: $e');
