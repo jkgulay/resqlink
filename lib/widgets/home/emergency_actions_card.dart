@@ -124,6 +124,8 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
                   fontWeight: FontWeight.bold,
                   fontFamily: 'Rajdhani',
                 ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
               Text(
                 'Quick emergency message broadcast',
@@ -131,6 +133,8 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
                   color: Colors.white70,
                   fontSize: ResponsiveHelper.getSubtitleSize(context),
                 ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ],
           ),
@@ -244,6 +248,9 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
                         fontSize: ResponsiveHelper.isTablet(context) ? 14 : 12,
                         fontWeight: FontWeight.bold,
                       ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
                     ),
                   ],
                 ),
@@ -290,6 +297,8 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
             ),
           ),
         ],
@@ -428,7 +437,13 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
           children: [
             Icon(Icons.check_circle, color: Colors.white, size: 20),
             SizedBox(width: 8),
-            Text(message),
+            Expanded(
+              child: Text(
+                message,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+              ),
+            ),
           ],
         ),
         backgroundColor: ResQLinkTheme.safeGreen,
@@ -445,7 +460,13 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
           children: [
             Icon(Icons.error, color: Colors.white, size: 20),
             SizedBox(width: 8),
-            Text(message),
+            Expanded(
+              child: Text(
+                message,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+              ),
+            ),
           ],
         ),
         backgroundColor: ResQLinkTheme.primaryRed,

@@ -10,11 +10,13 @@ import android.os.Vibrator
 import android.provider.Settings
 import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pManager
-import android.net.wifi.p2p.WifiP2pDevice 
-import android.net.wifi.p2p.WifiP2pConfig  
+import android.net.wifi.p2p.WifiP2pDevice
+import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pDeviceList
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -145,6 +147,18 @@ class MainActivity : FlutterActivity() {
                     wifiDirectDiagnostic.logDetailedStatus()
                     result.success(diagnostic)
                 }
+                "getDeviceInfo" -> getDeviceInfo(result)
+                "setDeviceName" -> {
+                    val deviceName = call.argument<String>("deviceName")
+                    if (deviceName != null) {
+                        setDeviceName(deviceName, result)
+                    } else {
+                        result.error("INVALID_ARGUMENT", "Device name is required", null)
+                    }
+                }
+                "startCustomServiceDiscovery" -> startCustomServiceDiscovery(result)
+                "startServiceDiscoveryListener" -> startServiceDiscoveryListener(result)
+                "discoverServices" -> discoverServices(result)
                 else -> result.notImplemented()
             }
         }
@@ -514,15 +528,27 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
             output = PrintWriter(socket.getOutputStream(), true)
 
             // Send handshake with connection info
+            // CRITICAL: Use custom device name and WiFi Direct MAC address for consistency
+            val prefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+            val customDeviceName = prefs.getString("custom_device_name", null)
+            val wifiDirectMac = prefs.getString("wifi_direct_mac_address", null)
+
+            // Fallback to ANDROID_ID if MAC address not available
+            val deviceId = wifiDirectMac ?: android.provider.Settings.Secure.getString(
+                contentResolver,
+                android.provider.Settings.Secure.ANDROID_ID
+            )
+
+            // Use custom device name or fallback to User_ format
+            val userName = customDeviceName ?: "User_${System.currentTimeMillis().toString().substring(8)}"
+
+            android.util.Log.d("WiFiDirect", "Handshake - deviceId: $deviceId, userName: $userName")
+
             val handshake = JSONObject().apply {
                 put("type", "handshake")
-                put("deviceId", android.provider.Settings.Secure.getString(
-                    contentResolver,
-                    android.provider.Settings.Secure.ANDROID_ID
-                ))
-                // CRITICAL FIX: Use a proper user name instead of device model
-                put("userName", "User_${System.currentTimeMillis().toString().substring(8)}")
-                put("deviceName", Build.MODEL) // Keep device model for reference
+                put("deviceId", deviceId)
+                put("userName", userName)
+                put("deviceName", Build.MODEL) 
                 put("timestamp", System.currentTimeMillis())
                 put("protocol_version", "1.0")
             }
@@ -929,6 +955,165 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
                         "groupFormed" to false
                     ))
                 }
+            }
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun getDeviceInfo(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            wifiP2pManager.requestGroupInfo(ch) { group ->
+                // Try to get device address from the group owner (this device)
+                val deviceAddress = group?.owner?.deviceAddress ?: ""
+                val deviceName = group?.owner?.deviceName ?: ""
+
+                val deviceInfo = mapOf(
+                    "deviceAddress" to deviceAddress,
+                    "deviceName" to deviceName
+                )
+                result.success(deviceInfo)
+            }
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun setDeviceName(deviceName: String, result: MethodChannel.Result) {
+        channel?.let { ch ->
+            try {
+                // Create a WifiP2pConfig to set device name
+                android.util.Log.d("WiFiDirect", "Attempting to set device name to: $deviceName")
+
+                // Note: WiFi Direct device name is typically set via system settings
+                // Android doesn't provide a direct API to change it programmatically
+                // We can only change it through WifiP2pConfig when connecting
+
+                // For now, we'll store it in SharedPreferences and use it in handshake
+                val prefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+                prefs.edit().putString("custom_device_name", deviceName).apply()
+
+                android.util.Log.d("WiFiDirect", "Stored custom device name: $deviceName")
+                result.success(true)
+            } catch (e: Exception) {
+                android.util.Log.e("WiFiDirect", "Failed to set device name: ${e.message}")
+                result.error("SET_NAME_FAILED", e.message, null)
+            }
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun startCustomServiceDiscovery(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            try {
+                val prefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+                val customName = prefs.getString("custom_device_name", null) ?: "ResQLink User"
+                val macAddress = prefs.getString("wifi_direct_mac_address", null) ?: "unknown"
+
+                android.util.Log.d("WiFiDirect", "📡 Starting service discovery with name: $customName, MAC: $macAddress")
+
+                // Create service info with custom name and MAC address
+                val record: MutableMap<String, String> = HashMap()
+                record["displayName"] = customName
+                record["deviceMAC"] = macAddress
+                record["version"] = "1.0"
+                record["app"] = "ResQLink"
+
+                val serviceInfo = WifiP2pDnsSdServiceInfo.newInstance(
+                    "_resqlink",
+                    "_tcp",
+                    record
+                )
+
+                wifiP2pManager.addLocalService(ch, serviceInfo, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        android.util.Log.d("WiFiDirect", "✅ Service registered successfully with custom name: $customName")
+                        result.success(true)
+                    }
+
+                    override fun onFailure(reason: Int) {
+                        android.util.Log.e("WiFiDirect", "❌ Service registration failed with reason: $reason")
+                        result.success(false)
+                    }
+                })
+            } catch (e: Exception) {
+                android.util.Log.e("WiFiDirect", "Failed to start service discovery: ${e.message}")
+                result.error("SERVICE_DISCOVERY_FAILED", e.message, null)
+            }
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun startServiceDiscoveryListener(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            try {
+                android.util.Log.d("WiFiDirect", "📡 Setting up service discovery listeners")
+
+                val txtListener = WifiP2pManager.DnsSdTxtRecordListener { fullDomain, record, device ->
+                    android.util.Log.d("WiFiDirect", "📡 DNS-SD TXT Record received")
+                    android.util.Log.d("WiFiDirect", "  Domain: $fullDomain")
+                    android.util.Log.d("WiFiDirect", "  System Name: ${device.deviceName}")
+                    android.util.Log.d("WiFiDirect", "  Device Address: ${device.deviceAddress}")
+                    android.util.Log.d("WiFiDirect", "  Record: $record")
+
+                    val customName = record["displayName"]
+                    val deviceMAC = record["deviceMAC"]
+
+                    if (customName != null || deviceMAC != null) {
+                        // Send to Flutter with custom name
+                        Handler(Looper.getMainLooper()).post {
+                            wifiMethodChannel.invokeMethod("onCustomNameDiscovered", mapOf(
+                                "deviceAddress" to (device.deviceAddress ?: ""),
+                                "systemName" to (device.deviceName ?: "Unknown"),
+                                "customName" to (customName ?: device.deviceName),
+                                "deviceMAC" to (deviceMAC ?: device.deviceAddress)
+                            ))
+                        }
+                        android.util.Log.d("WiFiDirect", "✅ Sent custom name to Flutter: $customName")
+                    }
+                }
+
+                val servListener = WifiP2pManager.DnsSdServiceResponseListener { instanceName, registrationType, resourceType ->
+                    android.util.Log.d("WiFiDirect", "📡 DNS-SD Service discovered: $instanceName, type: $registrationType")
+                }
+
+                wifiP2pManager.setDnsSdResponseListeners(ch, servListener, txtListener)
+                android.util.Log.d("WiFiDirect", "✅ Service discovery listeners set successfully")
+                result.success(true)
+            } catch (e: Exception) {
+                android.util.Log.e("WiFiDirect", "Failed to set service listeners: ${e.message}")
+                result.error("LISTENER_FAILED", e.message, null)
+            }
+        } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
+    }
+
+    private fun discoverServices(result: MethodChannel.Result) {
+        channel?.let { ch ->
+            try {
+                android.util.Log.d("WiFiDirect", "🔍 Starting service discovery...")
+
+                val serviceRequest = WifiP2pDnsSdServiceRequest.newInstance()
+
+                wifiP2pManager.addServiceRequest(ch, serviceRequest, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        android.util.Log.d("WiFiDirect", "✅ Service request added successfully")
+
+                        // Now start discovering services
+                        wifiP2pManager.discoverServices(ch, object : WifiP2pManager.ActionListener {
+                            override fun onSuccess() {
+                                android.util.Log.d("WiFiDirect", "✅ Service discovery started successfully")
+                                result.success(true)
+                            }
+
+                            override fun onFailure(reason: Int) {
+                                android.util.Log.e("WiFiDirect", "❌ Service discovery failed with reason: $reason")
+                                result.success(false)
+                            }
+                        })
+                    }
+
+                    override fun onFailure(reason: Int) {
+                        android.util.Log.e("WiFiDirect", "❌ Service request failed with reason: $reason")
+                        result.success(false)
+                    }
+                })
+            } catch (e: Exception) {
+                android.util.Log.e("WiFiDirect", "Failed to discover services: ${e.message}")
+                result.error("DISCOVER_SERVICES_FAILED", e.message, null)
             }
         } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
     }

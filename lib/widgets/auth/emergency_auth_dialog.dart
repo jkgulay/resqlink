@@ -3,6 +3,7 @@ import '../../utils/responsive_utils.dart';
 import '../../services/auth_service.dart';
 import '../../services/temporary_identity_service.dart';
 import '../../services/messaging/message_sync_service.dart';
+import '../../services/p2p/wifi_direct_service.dart';
 import '../../pages/home_page.dart';
 
 class EmergencyAuthDialog extends StatefulWidget {
@@ -79,11 +80,22 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
     try {
       // Create temporary identity for emergency use
       final tempUser = await TemporaryIdentityService.createTemporaryIdentity(displayName);
-      
+
       if (tempUser != null) {
+        // IMPORTANT: Set WiFi Direct device name to match display name
+        // This ensures the device shows the user's chosen name instead of the system name
+        try {
+          final wifiDirectService = WiFiDirectService.instance;
+          await wifiDirectService.setDeviceName(displayName);
+          debugPrint('✅ WiFi Direct device name set to: $displayName');
+        } catch (e) {
+          debugPrint('⚠️ Failed to set WiFi Direct device name: $e');
+          // Non-critical error - continue anyway
+        }
+
         _showSnackBar('Emergency mode activated', Colors.green);
         await Future.delayed(Duration(milliseconds: 500));
-        
+
         if (mounted) {
           Navigator.of(context).pop();
           Navigator.of(context).pushReplacement(

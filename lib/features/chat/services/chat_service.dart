@@ -317,18 +317,24 @@ class ChatService extends ChangeNotifier {
 
   // Handle device connection events
   void _handleDeviceConnected(DeviceConnectionEvent event) async {
-    debugPrint('📱 Device connected: ${event.deviceId}');
+    debugPrint('📱 ========== DEVICE CONNECTED ==========');
+    debugPrint('   Device ID (should be MAC): ${event.deviceId}');
+    debugPrint('   Device Name: ${event.deviceName}');
+    debugPrint('   Connection Type: ${event.connectionType}');
 
-    // Create or update session using display names
+    // CRITICAL FIX: Pass deviceId as deviceAddress for MAC-based session IDs
     final sessionId = await createOrGetSession(
       deviceId: event.deviceId,
       deviceName: event.deviceName,
+      deviceAddress: event.deviceId, // Use deviceId as the stable MAC address
       currentUserId: 'local', // This should come from user service
       currentUserName: event.currentUserName, // From landing page
       peerUserName: event.deviceName, // Peer's display name
     );
 
     if (sessionId != null) {
+      debugPrint('   ✅ Session created/updated: $sessionId');
+
       // Update connection info
       await ChatRepository.updateConnection(
         sessionId: sessionId,
@@ -337,7 +343,10 @@ class ChatService extends ChangeNotifier {
       );
 
       await loadSessions();
+    } else {
+      debugPrint('   ❌ Failed to create session');
     }
+    debugPrint('========================================');
   }
 
   // Handle message received events

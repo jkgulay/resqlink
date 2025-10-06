@@ -933,9 +933,19 @@ class P2PMainService extends P2PBaseService {
     for (final peer in (_wifiDirectService?.discoveredPeers ?? <dynamic>[])) {
       final isConnected = peer.status == WiFiDirectPeerStatus.connected;
 
+      // CRITICAL FIX: Use custom device name with priority:
+      // 1. Handshake name (if connected)
+      // 2. Service discovery name (DNS-SD broadcast - before connection)
+      // 3. System WiFi Direct name (fallback)
+      final connectedDevice = connectedDevices[peer.deviceAddress];
+      final customNameFromDiscovery = _wifiDirectService?.getCustomName(peer.deviceAddress);
+      final displayName = connectedDevice?.userName ??
+                         customNameFromDiscovery ??
+                         peer.deviceName;
+
       deviceMap[peer.deviceAddress] = {
         'deviceId': peer.deviceAddress,
-        'deviceName': peer.deviceName,
+        'deviceName': displayName, // Use custom name from handshake if available
         'deviceAddress': peer.deviceAddress,
         'connectionType': 'wifi_direct',
         'isAvailable':
@@ -945,8 +955,8 @@ class P2PMainService extends P2PBaseService {
         'isConnected': isConnected,
         'status': peer.status.toString(), // Add WiFi Direct status
         'isEmergency':
-            peer.deviceName.toLowerCase().contains('resqlink') ||
-            peer.deviceName.toLowerCase().contains('emergency'),
+            displayName.toLowerCase().contains('resqlink') ||
+            displayName.toLowerCase().contains('emergency'),
       };
     }
 

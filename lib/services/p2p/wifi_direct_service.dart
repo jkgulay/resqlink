@@ -42,8 +42,22 @@ class WiFiDirectService {
   WiFiDirectConnectionState _connectionState =
       WiFiDirectConnectionState.disconnected;
 
+  // Store custom device names from service discovery
+  final Map<String, String> _customDeviceNames = {};
+  final Map<String, String> _deviceMACs = {};
+
   // Getters for discovered peers
   List<WiFiDirectPeer> get discoveredPeers => List.from(_discoveredPeers);
+
+  /// Get custom name for a device by MAC address
+  String? getCustomName(String deviceAddress) {
+    return _customDeviceNames[deviceAddress];
+  }
+
+  /// Get actual MAC address for a device (may differ from deviceAddress in some cases)
+  String? getDeviceMAC(String deviceAddress) {
+    return _deviceMACs[deviceAddress];
+  }
 
   Future<bool> initialize() async {
     if (_isInitialized) return true;
@@ -67,11 +81,57 @@ class WiFiDirectService {
       // WiFi will be enabled manually when user clicks the settings button
       // No automatic WiFi settings opening on app startup
 
+      // CRITICAL: Try to get and store device MAC address immediately
+      await _requestAndStoreDeviceAddress();
+
       _isInitialized = true;
       debugPrint('✅ WiFiDirectService: Initialized successfully');
       return true;
     } catch (e) {
       debugPrint('❌ WiFiDirectService initialization failed: $e');
+      return false;
+    }
+  }
+
+  /// Request and store the device's WiFi Direct MAC address
+  Future<void> _requestAndStoreDeviceAddress() async {
+    try {
+      // Try to get device address from native
+      final result = await _wifiChannel.invokeMethod<Map>('getDeviceInfo');
+      if (result != null) {
+        final deviceAddress = result['deviceAddress'] as String?;
+        if (deviceAddress != null && deviceAddress.isNotEmpty) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('wifi_direct_mac_address', deviceAddress);
+          debugPrint('✅ Stored WiFi Direct MAC address during init: $deviceAddress');
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Could not get device address during init: $e');
+      // This is not critical - will be set when onDeviceChanged fires
+    }
+  }
+
+  /// Set WiFi Direct device name
+  /// This will change the device name shown to other WiFi Direct devices
+  Future<bool> setDeviceName(String newName) async {
+    try {
+      debugPrint('📝 Setting WiFi Direct device name to: $newName');
+
+      final result = await _wifiChannel.invokeMethod<bool>(
+        'setDeviceName',
+        {'deviceName': newName},
+      ) ?? false;
+
+      if (result) {
+        debugPrint('✅ WiFi Direct device name set successfully');
+      } else {
+        debugPrint('❌ Failed to set WiFi Direct device name');
+      }
+
+      return result;
+    } catch (e) {
+      debugPrint('❌ Error setting WiFi Direct device name: $e');
       return false;
     }
   }
@@ -154,6 +214,42 @@ class WiFiDirectService {
     }
   }
 
+  /// Start broadcasting custom device name via DNS-SD service discovery
+  Future<bool> startServiceDiscovery() async {
+    try {
+      debugPrint('📡 Starting custom name service discovery...');
+
+      // Start broadcasting our custom name
+      final broadcastSuccess = await _wifiChannel.invokeMethod<bool>('startCustomServiceDiscovery') ?? false;
+      if (broadcastSuccess) {
+        debugPrint('✅ Broadcasting custom device name');
+      } else {
+        debugPrint('⚠️ Failed to broadcast custom name');
+      }
+
+      // Start listening for other devices' custom names
+      final listenerSuccess = await _wifiChannel.invokeMethod<bool>('startServiceDiscoveryListener') ?? false;
+      if (listenerSuccess) {
+        debugPrint('✅ Listening for custom device names');
+      } else {
+        debugPrint('⚠️ Failed to start custom name listener');
+      }
+
+      // Start service discovery
+      final discoverSuccess = await _wifiChannel.invokeMethod<bool>('discoverServices') ?? false;
+      if (discoverSuccess) {
+        debugPrint('✅ Service discovery started');
+      } else {
+        debugPrint('⚠️ Service discovery failed');
+      }
+
+      return broadcastSuccess && listenerSuccess;
+    } catch (e) {
+      debugPrint('❌ Service discovery error: $e');
+      return false;
+    }
+  }
+
   Future<bool> startDiscovery() async {
     if (!_isInitialized) {
       debugPrint('❌ WiFiDirectService not initialized');
@@ -180,6 +276,9 @@ class WiFiDirectService {
 
       if (_isDiscovering) {
         debugPrint('✅ WiFi Direct discovery started');
+
+        // Start service discovery for custom names
+        await startServiceDiscovery();
 
         // Start getting peer list periodically
         _startPeriodicPeerListRefresh();
@@ -572,6 +671,23 @@ class WiFiDirectService {
           'socketEstablished': true,
           'connectionInfo': args,
         });
+
+      case 'onCustomNameDiscovered':
+        final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
+        final deviceAddress = args['deviceAddress'] as String?;
+        final customName = args['customName'] as String?;
+        final deviceMAC = args['deviceMAC'] as String?;
+
+        if (deviceAddress != null && customName != null) {
+          _customDeviceNames[deviceAddress] = customName;
+          if (deviceMAC != null) {
+            _deviceMACs[deviceAddress] = deviceMAC;
+          }
+          debugPrint('📝 Stored custom name for $deviceAddress: $customName (MAC: $deviceMAC)');
+
+          // Trigger peer list refresh to update UI with custom names
+          await _refreshPeerList();
+        }
 
       case 'onExistingConnectionFound':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});

@@ -59,10 +59,21 @@ class WifiDirectBroadcastReceiver(
         deviceMap["primaryDeviceType"] = device.primaryDeviceType ?: "Unknown Type"
         deviceMap["secondaryDeviceType"] = device.secondaryDeviceType ?: "Unknown Secondary Type"
         deviceMap["status"] = device.status
-        
+
         // Remove deprecated WPS properties - use simpler approach
         deviceMap["supportsWps"] = true // Default assumption for modern devices
-        
+
+        // CRITICAL: Store WiFi Direct MAC address in SharedPreferences for native access
+        device.deviceAddress?.let { macAddress ->
+            try {
+                val prefs = activity.getSharedPreferences("resqlink_prefs", android.content.Context.MODE_PRIVATE)
+                prefs.edit().putString("wifi_direct_mac_address", macAddress).apply()
+                android.util.Log.d("WifiDirectReceiver", "✅ Stored WiFi Direct MAC: $macAddress")
+            } catch (e: Exception) {
+                android.util.Log.e("WifiDirectReceiver", "Failed to store MAC address: ${e.message}")
+            }
+        }
+
         // Ensure we have a non-null map
         activity.sendToFlutter("wifi_direct", "onDeviceChanged", deviceMap)
     }
