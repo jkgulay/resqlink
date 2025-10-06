@@ -608,11 +608,19 @@ class ChatRepository {
         // CRITICAL: For old sessions without device_address, group by device_name
         // This consolidates sessions like "John (device_123)", "John (device_456)", "John (02:00:00:00:00:00)"
         String key;
-        if (deviceAddress != null && deviceAddress.isNotEmpty) {
-          // Use device address as primary key (MAC address format like fa:12:4d:33:db:56)
+
+        // Check if this is a placeholder MAC address
+        final isPlaceholderMac = deviceAddress == '02:00:00:00:00:00' ||
+                                 deviceId == '02:00:00:00:00:00';
+
+        if (isPlaceholderMac && deviceName != null && deviceName.isNotEmpty) {
+          // For placeholder MACs, ALWAYS group by device name
+          key = 'name:$deviceName';
+        } else if (deviceAddress != null && deviceAddress.isNotEmpty && deviceAddress != '02:00:00:00:00:00') {
+          // Use real device address as primary key (MAC address format like fa:12:4d:33:db:56)
           key = deviceAddress;
-        } else if (deviceId != null && deviceId.contains(':')) {
-          // If deviceId looks like a MAC address, use it
+        } else if (deviceId != null && deviceId.contains(':') && deviceId != '02:00:00:00:00:00') {
+          // If deviceId looks like a real MAC address, use it
           key = deviceId;
         } else if (deviceName != null && deviceName.isNotEmpty) {
           // Fallback: group by device name to merge old duplicates
@@ -639,6 +647,15 @@ class ChatRepository {
         );
 
         sessions.sort((a, b) {
+          final aAddress = a['device_address'] as String? ?? '';
+          final bAddress = b['device_address'] as String? ?? '';
+          final aIsPlaceholder = aAddress == '02:00:00:00:00:00' || aAddress.isEmpty;
+          final bIsPlaceholder = bAddress == '02:00:00:00:00:00' || bAddress.isEmpty;
+
+          if (aIsPlaceholder != bIsPlaceholder) {
+            return aIsPlaceholder ? 1 : -1; 
+          }
+
           final aConnection = a['last_connection_at'] as int? ?? 0;
           final bConnection = b['last_connection_at'] as int? ?? 0;
           if (aConnection != bConnection) {
@@ -651,7 +668,7 @@ class ChatRepository {
 
           final aCreated = a['created_at'] as int? ?? 0;
           final bCreated = b['created_at'] as int? ?? 0;
-          return aCreated.compareTo(bCreated); 
+          return aCreated.compareTo(bCreated);
         });
 
         final keepSession = sessions.first;
@@ -662,7 +679,6 @@ class ChatRepository {
         String? finalDeviceAddress;
 
         if (deviceKey.startsWith('name:')) {
-          // Name-based grouping - find best MAC address from sessions
           String? foundSessionId;
           for (final session in sessions) {
             final addr = session['device_address'] as String?;
@@ -677,16 +693,13 @@ class ChatRepository {
               break;
             }
           }
-          // If no MAC found, keep the first session's ID
           stableSessionId = foundSessionId ?? (keepSession['id'] as String);
         } else {
-          // Device address or device ID based grouping
           finalDeviceAddress = deviceKey;
           stableSessionId =
               'chat_${deviceKey.replaceAll(':', '_').replaceAll('name:', '')}';
         }
 
-        // Check if we need to migrate to stable ID
         final existingId = keepSession['id'] as String;
         bool needsIdMigration = existingId != stableSessionId;
 
@@ -695,7 +708,6 @@ class ChatRepository {
             '🔄 Migrating session ID from "$existingId" to stable "$stableSessionId"',
           );
 
-          // Update the kept session to use stable ID and device address
           await db.update(
             _tableName,
             {
