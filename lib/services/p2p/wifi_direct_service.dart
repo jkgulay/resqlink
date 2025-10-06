@@ -46,6 +46,9 @@ class WiFiDirectService {
   final Map<String, String> _customDeviceNames = {};
   final Map<String, String> _deviceMACs = {};
 
+  // Callback for when MAC address is stored
+  Function(String macAddress)? onMacAddressStored;
+
   // Getters for discovered peers
   List<WiFiDirectPeer> get discoveredPeers => List.from(_discoveredPeers);
 
@@ -78,11 +81,17 @@ class WiFiDirectService {
         return false;
       }
 
-      // WiFi will be enabled manually when user clicks the settings button
-      // No automatic WiFi settings opening on app startup
 
-      // CRITICAL: Try to get and store device MAC address immediately
+
       await _requestAndStoreDeviceAddress();
+
+      Future.delayed(Duration(milliseconds: 500), () {
+        _requestAndStoreDeviceAddress();
+      });
+
+      Future.delayed(Duration(seconds: 2), () {
+        _requestAndStoreDeviceAddress();
+      });
 
       _isInitialized = true;
       debugPrint('✅ WiFiDirectService: Initialized successfully');
@@ -96,24 +105,38 @@ class WiFiDirectService {
   /// Request and store the device's WiFi Direct MAC address
   Future<void> _requestAndStoreDeviceAddress() async {
     try {
+      debugPrint('🔍 Requesting device info from native...');
+
       // Try to get device address from native
       final result = await _wifiChannel.invokeMethod<Map>('getDeviceInfo');
+
+      debugPrint('📱 getDeviceInfo result: $result');
+
       if (result != null) {
         final deviceAddress = result['deviceAddress'] as String?;
+        final deviceName = result['deviceName'] as String?;
+
+        debugPrint('📱 Device Address: $deviceAddress, Device Name: $deviceName');
+
         if (deviceAddress != null && deviceAddress.isNotEmpty) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('wifi_direct_mac_address', deviceAddress);
           debugPrint('✅ Stored WiFi Direct MAC address during init: $deviceAddress');
+
+          // Notify listeners that MAC address has been stored
+          onMacAddressStored?.call(deviceAddress);
+        } else {
+          debugPrint('⚠️ Device address is null or empty!');
         }
+      } else {
+        debugPrint('⚠️ getDeviceInfo returned null!');
       }
     } catch (e) {
       debugPrint('⚠️ Could not get device address during init: $e');
-      // This is not critical - will be set when onDeviceChanged fires
     }
   }
 
-  /// Set WiFi Direct device name
-  /// This will change the device name shown to other WiFi Direct devices
+
   Future<bool> setDeviceName(String newName) async {
     try {
       debugPrint('📝 Setting WiFi Direct device name to: $newName');
@@ -753,6 +776,9 @@ class WiFiDirectService {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('wifi_direct_mac_address', deviceAddress);
             debugPrint('✅ Stored WiFi Direct MAC address: $deviceAddress');
+
+            // Notify listeners that MAC address has been stored
+            onMacAddressStored?.call(deviceAddress);
           } catch (e) {
             debugPrint('❌ Failed to store MAC address: $e');
           }

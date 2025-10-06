@@ -265,6 +265,18 @@ class MainActivity : FlutterActivity() {
         }
 
         channel?.let { ch ->
+            // CRITICAL: Request and store device info before starting discovery
+            wifiP2pManager.requestDeviceInfo(ch) { device ->
+                device?.let {
+                    android.util.Log.d("WiFiDirect", "📱 Device info at discovery: ${it.deviceName} (${it.deviceAddress})")
+                    it.deviceAddress?.let { macAddress ->
+                        val prefs = getSharedPreferences("resqlink_prefs", android.content.Context.MODE_PRIVATE)
+                        prefs.edit().putString("wifi_direct_mac_address", macAddress).apply()
+                        android.util.Log.d("WiFiDirect", "✅ Stored WiFi Direct MAC at discovery: $macAddress")
+                    }
+                }
+            }
+
             android.util.Log.d("WiFiDirect", "Initiating peer discovery with automatic group creation...")
             startDiscoveryWithAutoGroupCreation(ch, result)
         } ?: run {
@@ -961,16 +973,31 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
 
     private fun getDeviceInfo(result: MethodChannel.Result) {
         channel?.let { ch ->
-            wifiP2pManager.requestGroupInfo(ch) { group ->
-                // Try to get device address from the group owner (this device)
-                val deviceAddress = group?.owner?.deviceAddress ?: ""
-                val deviceName = group?.owner?.deviceName ?: ""
+            // CRITICAL: Use requestDeviceInfo to get THIS device's MAC address
+            // requestGroupInfo only works when a group is formed
+            wifiP2pManager.requestDeviceInfo(ch) { device ->
+                if (device != null) {
+                    val deviceAddress = device.deviceAddress ?: ""
+                    val deviceName = device.deviceName ?: ""
 
-                val deviceInfo = mapOf(
-                    "deviceAddress" to deviceAddress,
-                    "deviceName" to deviceName
-                )
-                result.success(deviceInfo)
+                    android.util.Log.d("WiFiDirect", "📱 getDeviceInfo: $deviceName ($deviceAddress)")
+
+                    // Store MAC address immediately
+                    if (deviceAddress.isNotEmpty()) {
+                        val prefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+                        prefs.edit().putString("wifi_direct_mac_address", deviceAddress).apply()
+                        android.util.Log.d("WiFiDirect", "✅ Stored MAC in getDeviceInfo: $deviceAddress")
+                    }
+
+                    val deviceInfo = mapOf(
+                        "deviceAddress" to deviceAddress,
+                        "deviceName" to deviceName
+                    )
+                    result.success(deviceInfo)
+                } else {
+                    android.util.Log.e("WiFiDirect", "❌ Device info is null")
+                    result.success(mapOf("deviceAddress" to "", "deviceName" to ""))
+                }
             }
         } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
     }
@@ -1130,7 +1157,22 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
     }
     wifiDirectReceiver = WifiDirectBroadcastReceiver(wifiP2pManager, channel, this)
     registerReceiver(wifiDirectReceiver, intentFilter)
-    
+
+    // CRITICAL: Request device info immediately to get WiFi Direct MAC address
+    channel?.let { ch ->
+        wifiP2pManager.requestDeviceInfo(ch) { device ->
+            device?.let {
+                android.util.Log.d("WiFiDirect", "Device info received: ${it.deviceName} (${it.deviceAddress})")
+                // Store MAC address immediately
+                it.deviceAddress?.let { macAddress ->
+                    val prefs = getSharedPreferences("resqlink_prefs", android.content.Context.MODE_PRIVATE)
+                    prefs.edit().putString("wifi_direct_mac_address", macAddress).apply()
+                    android.util.Log.d("WiFiDirect", "✅ Stored WiFi Direct MAC on init: $macAddress")
+                }
+            }
+        }
+    }
+
     // CRITICAL: Check for existing connections
     checkExistingWiFiDirectConnection()
     

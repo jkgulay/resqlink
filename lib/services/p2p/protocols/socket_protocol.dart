@@ -31,6 +31,14 @@ class SocketProtocol {
   void initialize(String deviceId, String userName) {
     _deviceId = deviceId;
     _userName = userName;
+    debugPrint('🔧 Socket protocol initialized with deviceId: $deviceId');
+  }
+
+  /// Update device ID (called after MAC address is stored)
+  void updateDeviceId(String newDeviceId) {
+    final oldDeviceId = _deviceId;
+    _deviceId = newDeviceId;
+    debugPrint('🔄 Socket protocol device ID updated: $oldDeviceId → $newDeviceId');
   }
 
   /// Start socket server

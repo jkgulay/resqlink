@@ -88,6 +88,25 @@ class WifiDirectBroadcastReceiver(
     android.util.Log.d("WifiDirectReceiver", "Group owner address: ${wifiP2pInfo?.groupOwnerAddress?.hostAddress}")
 
     if (networkInfo?.isConnected == true && wifiP2pInfo != null) {
+        // CRITICAL: Request device info AFTER connection to get real MAC address
+        channel?.let { ch ->
+            manager.requestDeviceInfo(ch) { device ->
+                device?.deviceAddress?.let { macAddress ->
+                    // Only store if it's not the placeholder MAC
+                    if (macAddress != "02:00:00:00:00:00" && macAddress.isNotEmpty()) {
+                        try {
+                            val prefs = activity.getSharedPreferences("resqlink_prefs", android.content.Context.MODE_PRIVATE)
+                            prefs.edit().putString("wifi_direct_mac_address", macAddress).apply()
+                            android.util.Log.d("WifiDirectReceiver", "✅ Stored REAL WiFi Direct MAC after connection: $macAddress")
+                        } catch (e: Exception) {
+                            android.util.Log.e("WifiDirectReceiver", "Failed to store MAC: ${e.message}")
+                        }
+                    } else {
+                        android.util.Log.w("WifiDirectReceiver", "⚠️ Skipping placeholder MAC: $macAddress")
+                    }
+                }
+            }
+        }
         val connectionInfo = mutableMapOf<String, Any>()
         connectionInfo["isConnected"] = true
         connectionInfo["isGroupOwner"] = wifiP2pInfo.isGroupOwner
