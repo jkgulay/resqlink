@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import '../../services/p2p/p2p_main_service.dart';
 import '../../services/p2p/p2p_base_service.dart';
+import '../../services/location_state_service.dart';
+import '../../controllers/gps_controller.dart';
 import '../../utils/responsive_helper.dart';
 import '../../utils/resqlink_theme.dart';
 import '../../models/message_model.dart';
+import '../../pages/gps_page.dart';
 
 class EmergencyActionsCard extends StatefulWidget {
   final P2PMainService p2pService;
@@ -25,6 +29,9 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
   bool _isLoading = false;
+  final LocationStateService _locationStateService = LocationStateService();
+
+  LocationModel? get _currentLocation => _locationStateService.currentLocation;
 
   @override
   void initState() {
@@ -355,6 +362,13 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
   }
 
   Future<void> _sendEmergencyMessage(EmergencyTemplate template) async {
+    // Get GPS controller from context
+    final gpsController = context.read<GpsController>();
+
+    // Refresh both location services
+    await _locationStateService.refreshLocation();
+    await gpsController.getCurrentLocation();
+
     final messageText = _getEmergencyMessage(template);
     final messageType = template == EmergencyTemplate.sos
         ? MessageType.sos
@@ -363,8 +377,17 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
     final connectedDevices = widget.p2pService.connectedDevices;
     final senderName = widget.p2pService.userName ?? 'Emergency User';
 
+    // Get current GPS coordinates from GPS controller (primary) or location state (fallback)
+    double? latitude = gpsController.lastKnownLocation?.latitude ?? _currentLocation?.latitude;
+    double? longitude = gpsController.lastKnownLocation?.longitude ?? _currentLocation?.longitude;
+
     debugPrint('🚨 Sending emergency message: $messageText');
     debugPrint('📱 Connected devices: ${connectedDevices.keys.toList()}');
+    if (latitude != null && longitude != null) {
+      debugPrint('📍 Including GPS location: $latitude, $longitude');
+    } else {
+      debugPrint('⚠️ No GPS location available - sending without coordinates');
+    }
 
     // CRITICAL FIX: Always try to send as broadcast if no specific devices
     if (connectedDevices.isEmpty) {
@@ -374,6 +397,8 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
           message: messageText,
           type: messageType,
           senderName: senderName,
+          latitude: latitude,
+          longitude: longitude,
           // Try broadcast to any available connections
         );
         debugPrint('✅ Emergency broadcast attempted');
@@ -394,6 +419,8 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
           type: messageType,
           targetDeviceId: deviceId, // CRITICAL: Target specific device
           senderName: senderName, // CRITICAL: Include actual sender name
+          latitude: latitude,
+          longitude: longitude,
         );
         debugPrint('✅ Emergency message sent to device: $deviceId');
       } catch (e) {
@@ -407,6 +434,8 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
         message: messageText,
         type: messageType,
         senderName: senderName,
+        latitude: latitude,
+        longitude: longitude,
       );
       debugPrint('✅ Emergency broadcast completed');
     } catch (e) {
@@ -415,17 +444,27 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
   }
 
   String _getEmergencyMessage(EmergencyTemplate template) {
+    // Get location to append to message
+    final gpsController = context.read<GpsController>();
+    final latitude = gpsController.lastKnownLocation?.latitude ?? _currentLocation?.latitude;
+    final longitude = gpsController.lastKnownLocation?.longitude ?? _currentLocation?.longitude;
+
+    String locationText = '';
+    if (latitude != null && longitude != null) {
+      locationText = '\n📍 Location: ${latitude.toStringAsFixed(6)}, ${longitude.toStringAsFixed(6)}';
+    }
+
     switch (template) {
       case EmergencyTemplate.sos:
-        return '🚨 SOS - I need immediate help!';
+        return '🚨 SOS - I need immediate help!$locationText';
       case EmergencyTemplate.trapped:
-        return '⚠️ I am trapped and need assistance!';
+        return '⚠️ I am trapped and need assistance!$locationText';
       case EmergencyTemplate.medical:
-        return '🏥 Medical emergency - I need medical help!';
+        return '🏥 Medical emergency - I need medical help!$locationText';
       case EmergencyTemplate.safe:
-        return '✅ I am safe and secure';
+        return '✅ I am safe and secure$locationText';
       case EmergencyTemplate.evacuating:
-        return '🚶 Evacuating area - proceeding to safety';
+        return '🚶 Evacuating area - proceeding to safety$locationText';
     }
   }
 

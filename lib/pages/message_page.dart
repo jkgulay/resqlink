@@ -659,59 +659,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _sendLocationViaP2P() async {
-    if (_selectedEndpointId == null || !mounted) {
-      if (mounted) {
-        _showErrorMessage('No conversation selected');
-      }
-      return;
-    }
-
-    if (widget.currentLocation == null) {
-      if (mounted) {
-        _showErrorMessage('Location not available. Please enable GPS.');
-      }
-      return;
-    }
-
-    try {
-      final locationModel = LocationModel(
-        latitude: widget.currentLocation!.latitude,
-        longitude: widget.currentLocation!.longitude,
-        timestamp: DateTime.now(),
-        userId: widget.p2pService.deviceId,
-        type: LocationType.normal,
-        message: 'Shared via P2P',
-      );
-
-      await LocationService.insertLocation(locationModel);
-
-      final messageId = 'msg_${DateTime.now().millisecondsSinceEpoch}_${widget.p2pService.deviceId?.hashCode ?? 0}';
-
-      await widget.p2pService.sendMessage(
-        id: messageId,
-        senderName: widget.p2pService.userName ?? 'Unknown',
-        message: '📍 Shared my location',
-        type: MessageType.location,
-        ttl: 5,
-        routePath: [],
-        targetDeviceId: _selectedEndpointId,
-        latitude: widget.currentLocation!.latitude,
-        longitude: widget.currentLocation!.longitude,
-      );
-
-      if (mounted) {
-        await _loadMessagesForDevice(_selectedEndpointId!);
-        _showSuccessMessage('Location shared via P2P');
-      }
-    } catch (e) {
-      debugPrint('❌ Error sending location via P2P: $e');
-      if (mounted) {
-        _showErrorMessage('Failed to share location via P2P');
-      }
-    }
-  }
-
   Future<void> _sendEmergencyMessage() async {
     if (_selectedEndpointId == null || !mounted) return;
 
@@ -722,10 +669,40 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     );
 
     if (confirm == true && mounted && _selectedEndpointId != null) {
-      try {
-        // Use the updated _sendMessage method which now handles targeting properly
-        await _sendMessage('🚨 Emergency SOS', MessageType.sos);
+      if (widget.currentLocation?.latitude == null || widget.currentLocation?.longitude == null) {
         if (mounted) {
+          _showErrorMessage('Location not available. Please enable GPS.');
+        }
+        return;
+      }
+
+      try {
+        final sosText =
+            '🚨 EMERGENCY SOS\nLat: ${widget.currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${widget.currentLocation!.longitude.toStringAsFixed(6)}';
+
+        final locationModel = LocationModel(
+          latitude: widget.currentLocation!.latitude,
+          longitude: widget.currentLocation!.longitude,
+          timestamp: DateTime.now(),
+          userId: widget.p2pService.deviceId,
+          type: LocationType.sos,
+          message: 'Emergency SOS',
+        );
+
+        await LocationService.insertLocation(locationModel);
+
+        // Send emergency SOS with location via P2P
+        await widget.p2pService.sendMessage(
+          message: sosText,
+          type: MessageType.sos,
+          targetDeviceId: _selectedEndpointId!,
+          latitude: widget.currentLocation!.latitude,
+          longitude: widget.currentLocation!.longitude,
+          senderName: widget.p2pService.userName ?? 'Unknown',
+        );
+
+        if (mounted) {
+          await _loadMessagesForDevice(_selectedEndpointId!);
           _showSuccessMessage('Emergency SOS sent to ${_selectedDeviceName ?? 'device'}');
         }
       } catch (e) {
@@ -997,7 +974,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             controller: _messageController,
             onSendMessage: _sendMessage,
             onSendLocation: _sendLocationMessage,
-            onSendLocationP2P: _sendLocationViaP2P,
             onSendEmergency: _sendEmergencyMessage,
             onTyping: _handleTyping,
             enabled: true,

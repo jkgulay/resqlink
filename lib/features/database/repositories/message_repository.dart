@@ -5,7 +5,6 @@ import '../../../models/message_model.dart';
 import '../core/database_manager.dart';
 import 'chat_repository.dart';
 
-/// Repository for message operations
 class MessageRepository {
   static const String _tableName = 'messages';
 
