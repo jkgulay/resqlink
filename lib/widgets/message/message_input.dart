@@ -6,7 +6,6 @@ class MessageInput extends StatelessWidget {
   final TextEditingController controller;
   final Function(String, MessageType) onSendMessage;
   final VoidCallback onSendLocation;
-  final VoidCallback onSendLocationP2P;
   final VoidCallback onSendEmergency;
   final Function(String) onTyping;
 
@@ -15,7 +14,6 @@ class MessageInput extends StatelessWidget {
     required this.controller,
     required this.onSendMessage,
     required this.onSendLocation,
-    required this.onSendLocationP2P,
     required this.onSendEmergency,
     required this.onTyping,
     required bool enabled,
@@ -41,19 +39,14 @@ class MessageInput extends StatelessWidget {
             Row(
               children: [
                 IconButton(
-                  icon: Icon(Icons.location_on, color: Colors.blue),
+                  icon: Icon(Icons.my_location, color: Colors.blue),
                   onPressed: onSendLocation,
-                  tooltip: 'Share Location',
-                ),
-                IconButton(
-                  icon: Icon(Icons.my_location, color: Colors.green),
-                  onPressed: onSendLocationP2P,
-                  tooltip: 'Share via P2P',
+                  tooltip: 'Share GPS Location',
                 ),
                 IconButton(
                   icon: Icon(Icons.warning, color: ResQLinkTheme.primaryRed),
                   onPressed: onSendEmergency,
-                  tooltip: 'Send Emergency',
+                  tooltip: 'Send Emergency SOS',
                 ),
               ],
             ),

@@ -102,6 +102,13 @@ abstract class P2PBaseService with ChangeNotifier {
     }
   }
 
+  /// Update device ID (called when MAC address becomes available)
+  void updateDeviceId(String newDeviceId) {
+    final oldDeviceId = _deviceId;
+    _deviceId = newDeviceId;
+    debugPrint('🔄 Base service device ID updated: $oldDeviceId → $newDeviceId');
+  }
+
   /// Generate or retrieve device ID
   /// CRITICAL: This should return the WiFi Direct MAC address when available,
   /// otherwise fall back to stored/generated ID

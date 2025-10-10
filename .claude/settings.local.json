@@ -12,7 +12,8 @@
       "Bash(timeout 60 flutter run -d RMX2040)",
       "Bash(timeout 60 flutter run -d RMX2040 --release)",
       "Bash(./gradlew --stop)",
-      "Bash(timeout 30 flutter run -d RMX2040 --release)"
+      "Bash(timeout 30 flutter run -d RMX2040 --release)",
+      "Bash(./gradlew:*)"
     ],
     "deny": [],
     "ask": []

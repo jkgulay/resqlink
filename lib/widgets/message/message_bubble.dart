@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/message_model.dart';
 import '../../utils/resqlink_theme.dart';
+import 'location_map_widget.dart';
 
 class MessageBubble extends StatelessWidget {
   final MessageModel message;
@@ -94,26 +95,39 @@ class MessageBubble extends StatelessWidget {
   }
 
   Widget _buildLocationPreview(BuildContext context, MessageModel message) {
-    return InkWell(
-      onTap: () => _showLocationDetails(context, message),
-      child: Container(
-        padding: EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.white12,
-          borderRadius: BorderRadius.circular(8),
+    // Show interactive map for location messages
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LocationMapWidget(
+          latitude: message.latitude!,
+          longitude: message.longitude!,
+          senderName: message.fromUser,
+          isEmergency: message.isEmergency,
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.location_on, color: Colors.white, size: 16),
-            SizedBox(width: 4),
-            Text(
-              'Location shared',
-              style: TextStyle(color: Colors.white, fontSize: 12),
+        SizedBox(height: 4),
+        InkWell(
+          onTap: () => _showLocationDetails(context, message),
+          child: Container(
+            padding: EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.white12,
+              borderRadius: BorderRadius.circular(6),
             ),
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.info_outline, color: Colors.white70, size: 14),
+                SizedBox(width: 4),
+                Text(
+                  'Tap for details',
+                  style: TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 

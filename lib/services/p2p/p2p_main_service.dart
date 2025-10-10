@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_discovery_service.dart';
@@ -11,7 +12,7 @@ import 'p2p_network_service.dart';
 import '../../helpers/chat_navigation_helper.dart';
 import '../../services/p2p/protocols/socket_protocol.dart';
 import '../messaging/message_router.dart';
-
+import '../settings_service.dart';
 
 class P2PMainService extends P2PBaseService {
   // Service components
@@ -45,14 +46,10 @@ class P2PMainService extends P2PBaseService {
 
   // Debounce mechanism for peer updates
   Timer? _peerUpdateDebounceTimer;
-  static const Duration _peerUpdateDebounceDelay = Duration(
-    milliseconds: 1000,
-  );
-
+  static const Duration _peerUpdateDebounceDelay = Duration(milliseconds: 1000);
 
   final Set<String> _processingDevices = {};
   final Set<String> _handshakeResponsesSent = {};
-
 
   @override
   Future<bool> initialize(String userName, {String? preferredRole}) async {
@@ -73,12 +70,20 @@ class P2PMainService extends P2PBaseService {
       _networkService = P2PNetworkService(this);
       _discoveryService = P2PDiscoveryService(this, _networkService);
 
-
       await _discoveryService.initialize();
 
       _wifiDirectService = WiFiDirectService.instance;
 
       await _wifiDirectService?.initialize();
+
+      _wifiDirectService?.onMacAddressStored = (macAddress) {
+        debugPrint('🔄 MAC address stored callback: $macAddress');
+        // Update socket protocol with correct MAC address
+        _socketProtocol.updateDeviceId(macAddress);
+        // Update base service device ID
+        updateDeviceId(macAddress);
+        debugPrint('✅ Updated device ID to MAC address: $macAddress');
+      };
 
       _socketProtocol = SocketProtocol();
 
@@ -95,7 +100,6 @@ class P2PMainService extends P2PBaseService {
 
       _messageRouter = MessageRouter();
       _messageRouter.setGlobalListener(_handleGlobalMessage);
-
 
       if (_wifiDirectService != null) {
         _setupWiFiDirectSync();
@@ -139,7 +143,6 @@ class P2PMainService extends P2PBaseService {
             final from = messageData['from'] as String?;
 
             if (message != null && from != null) {
-
               final messageHash = '${from}_${message.hashCode}';
 
               _cleanupMessageDeduplication();
@@ -507,23 +510,39 @@ class P2PMainService extends P2PBaseService {
         if (messageType == 'handshake') {
           // Handle handshake directly to establish WiFi Direct connection
           final deviceId = messageData['deviceId'] as String?;
+          final macAddress = messageData['macAddress'] as String?;
           final userName = messageData['userName'] as String?;
           final deviceName = messageData['deviceName'] as String?;
 
-          if (deviceId != null) {
+          // CRITICAL: Use MAC address as the device identifier if available
+          final finalDeviceId = macAddress ?? deviceId;
+
+          if (finalDeviceId != null) {
             // Prevent concurrent processing of the same device
-            if (_processingDevices.contains(deviceId)) {
-              debugPrint('⚠️ Handshake already being processed for device $deviceId');
+            if (_processingDevices.contains(finalDeviceId)) {
+              debugPrint(
+                '⚠️ Handshake already being processed for device $finalDeviceId',
+              );
               return;
             }
 
-            debugPrint('🤝 Processing WiFi Direct handshake from $deviceId ($userName)');
+            debugPrint(
+              '🤝 Processing WiFi Direct handshake from $userName',
+            );
+            debugPrint('📱 Device ID: $deviceId');
+            debugPrint('📍 MAC Address: $macAddress');
+            debugPrint('✅ Using identifier: $finalDeviceId');
 
             // Register device as connected for WiFi Direct (async, don't wait)
-            _registerWiFiDirectDevice(deviceId, userName ?? 'Unknown', deviceName ?? 'Unknown Device', from);
+            _registerWiFiDirectDevice(
+              finalDeviceId,
+              userName ?? 'Unknown',
+              deviceName ?? 'Unknown Device',
+              from,
+            );
 
             // Send handshake response (async, don't wait)
-            _sendHandshakeResponse(deviceId, from);
+            _sendHandshakeResponse(finalDeviceId, from);
             return;
           }
         }
@@ -531,19 +550,36 @@ class P2PMainService extends P2PBaseService {
         if (messageType == 'handshake_response') {
           // Handle handshake response
           final deviceId = messageData['deviceId'] as String?;
+          final macAddress = messageData['macAddress'] as String?;
           final userName = messageData['userName'] as String?;
           final deviceName = messageData['deviceName'] as String?;
 
-          if (deviceId != null) {
+          // CRITICAL: Use MAC address as the device identifier if available
+          final finalDeviceId = macAddress ?? deviceId;
+
+          if (finalDeviceId != null) {
             // Prevent concurrent processing of the same device
-            if (_processingDevices.contains(deviceId)) {
-              debugPrint('⚠️ Handshake response already being processed for device $deviceId');
+            if (_processingDevices.contains(finalDeviceId)) {
+              debugPrint(
+                '⚠️ Handshake response already being processed for device $finalDeviceId',
+              );
               return;
             }
 
-            debugPrint('🤝 Processing WiFi Direct handshake response from $deviceId ($userName)');
+            debugPrint(
+              '🤝 Processing WiFi Direct handshake response from $userName',
+            );
+            debugPrint('📱 Device ID: $deviceId');
+            debugPrint('📍 MAC Address: $macAddress');
+            debugPrint('✅ Using identifier: $finalDeviceId');
+
             // Register device as connected (async, don't wait)
-            _registerWiFiDirectDevice(deviceId, userName ?? 'Unknown', deviceName ?? 'Unknown Device', from);
+            _registerWiFiDirectDevice(
+              finalDeviceId,
+              userName ?? 'Unknown',
+              deviceName ?? 'Unknown Device',
+              from,
+            );
             return;
           }
         }
@@ -662,16 +698,11 @@ class P2PMainService extends P2PBaseService {
 
   /// Setup enhanced monitoring and verification
   void _setupEnhancedMonitoring() {
-
     // Check for system connections every 15 seconds
     Timer.periodic(Duration(seconds: 15), (_) {
       checkForSystemConnections();
     });
   }
-
-
-
-
 
   Future<bool> connectToDevice(Map<String, dynamic> device) async {
     try {
@@ -729,7 +760,6 @@ class P2PMainService extends P2PBaseService {
       return false;
     }
   }
-
 
   Future<bool> _connectViaMDNS(Map<String, dynamic> device) async {
     debugPrint('📡 Connecting via mDNS to: ${device['deviceName']}');
@@ -821,7 +851,6 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-
   /// Get online status
   bool get isOnline => _isOnline;
 
@@ -839,7 +868,6 @@ class P2PMainService extends P2PBaseService {
         return 'none';
     }
   }
-
 
   /// Get connecting status
   bool get isConnecting => _isConnecting;
@@ -933,9 +961,23 @@ class P2PMainService extends P2PBaseService {
     for (final peer in (_wifiDirectService?.discoveredPeers ?? <dynamic>[])) {
       final isConnected = peer.status == WiFiDirectPeerStatus.connected;
 
+      // CRITICAL FIX: Use custom device name with priority:
+      // 1. Handshake name (if connected)
+      // 2. Service discovery name (DNS-SD broadcast - before connection)
+      // 3. System WiFi Direct name (fallback)
+      final connectedDevice = connectedDevices[peer.deviceAddress];
+      final customNameFromDiscovery = _wifiDirectService?.getCustomName(
+        peer.deviceAddress,
+      );
+      final displayName =
+          connectedDevice?.userName ??
+          customNameFromDiscovery ??
+          peer.deviceName;
+
       deviceMap[peer.deviceAddress] = {
         'deviceId': peer.deviceAddress,
-        'deviceName': peer.deviceName,
+        'deviceName':
+            displayName, // Use custom name from handshake if available
         'deviceAddress': peer.deviceAddress,
         'connectionType': 'wifi_direct',
         'isAvailable':
@@ -945,8 +987,8 @@ class P2PMainService extends P2PBaseService {
         'isConnected': isConnected,
         'status': peer.status.toString(), // Add WiFi Direct status
         'isEmergency':
-            peer.deviceName.toLowerCase().contains('resqlink') ||
-            peer.deviceName.toLowerCase().contains('emergency'),
+            displayName.toLowerCase().contains('resqlink') ||
+            displayName.toLowerCase().contains('emergency'),
       };
     }
 
@@ -974,7 +1016,6 @@ class P2PMainService extends P2PBaseService {
         };
       }
     }
-
 
     // Final step: Override device names with connected device names (real names from handshake)
     for (final connectedDevice in connectedDevices.values) {
@@ -1006,7 +1047,7 @@ class P2PMainService extends P2PBaseService {
         return -45 - (timeDiff * 2); // Strong for local network
       case 'broadcast':
         return -55 - (timeDiff * 3); // Medium for broadcast
-     
+
       default:
         return -70 - (timeDiff * 5); // Weak for unknown
     }
@@ -1019,7 +1060,6 @@ class P2PMainService extends P2PBaseService {
       onDevicesDiscovered!(allDevices);
     }
   }
-
 
   Map<String, DeviceModel> get knownDevices {
     final knownMap = <String, DeviceModel>{};
@@ -1037,7 +1077,6 @@ class P2PMainService extends P2PBaseService {
     return knownMap;
   }
 
-
   @override
   Future<void> discoverDevices({bool force = false}) async {
     try {
@@ -1053,7 +1092,6 @@ class P2PMainService extends P2PBaseService {
 
       // Also use existing discovery service
       await _discoveryService.discoverDevices(force: force);
-
 
       // Trigger callback with all discovered devices
       _triggerDevicesDiscoveredCallback();
@@ -1129,6 +1167,8 @@ class P2PMainService extends P2PBaseService {
         'isEmergency': type == MessageType.emergency || type == MessageType.sos,
         'latitude': latitude,
         'longitude': longitude,
+        'ttl': ttl ?? P2PBaseService.maxTtl,  // Include TTL for multi-hop
+        'routePath': routePath ?? [deviceId!],  // Start route path with sender
       });
 
       // Send immediately - message queue functionality removed
@@ -1202,7 +1242,6 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-
   /// Initialize socket protocol after successful WiFi Direct connection
   Future<void> _initializeSocketProtocolAfterConnection() async {
     try {
@@ -1255,7 +1294,9 @@ class P2PMainService extends P2PBaseService {
     }
 
     if (toRemove.isNotEmpty) {
-      debugPrint('🧹 Cleaned up ${toRemove.length} old message entries from WiFi Direct deduplication');
+      debugPrint(
+        '🧹 Cleaned up ${toRemove.length} old message entries from WiFi Direct deduplication',
+      );
     }
 
     // Also cleanup any stale processing entries (devices being processed for > 10 seconds)
@@ -1286,9 +1327,16 @@ class P2PMainService extends P2PBaseService {
   List<String> getMessageTrace() => List.from(_messageTrace);
 
   /// Register WiFi Direct device as connected
-  Future<void> _registerWiFiDirectDevice(String deviceId, String userName, String deviceName, String? from) async {
+  Future<void> _registerWiFiDirectDevice(
+    String deviceId,
+    String userName,
+    String deviceName,
+    String? from,
+  ) async {
     try {
-      debugPrint('📱 Registering WiFi Direct device: $deviceId ($userName) from $from');
+      debugPrint(
+        '📱 Registering WiFi Direct device: $deviceId ($userName) from $from',
+      );
 
       // Use the base class method to add connected device (this handles deduplication)
       addConnectedDevice(deviceId, userName);
@@ -1298,7 +1346,9 @@ class P2PMainService extends P2PBaseService {
         _socketProtocol.registerWiFiDirectDevice(deviceId, from);
       }
 
-      debugPrint('✅ Successfully registered WiFi Direct device: $deviceId ($userName)');
+      debugPrint(
+        '✅ Successfully registered WiFi Direct device: $deviceId ($userName)',
+      );
       _addMessageTrace('Registered WiFi Direct device: $deviceId ($userName)');
 
       // Delay notification to prevent UI thread issues
@@ -1310,11 +1360,19 @@ class P2PMainService extends P2PBaseService {
   }
 
   /// Send handshake response via WiFi Direct
-  Future<void> _sendHandshakeResponse(String targetDeviceId, String? address) async {
+  Future<void> _sendHandshakeResponse(
+    String targetDeviceId,
+    String? address,
+  ) async {
     try {
+      // Get MAC address from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final macAddress = prefs.getString('wifi_direct_mac_address');
+
       final response = jsonEncode({
         'type': 'handshake_response',
         'deviceId': deviceId,
+        'macAddress': macAddress ?? deviceId, // Include MAC address
         'userName': userName,
         'deviceName': 'ResQLink Device',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
@@ -1322,7 +1380,9 @@ class P2PMainService extends P2PBaseService {
       });
 
       if (_wifiDirectService != null) {
-        _wifiDirectService!.sendMessage(response); // Don't await, send immediately
+        _wifiDirectService!.sendMessage(
+          response,
+        ); // Don't await, send immediately
         debugPrint('✅ Sent handshake response to $targetDeviceId');
         _addMessageTrace('Sent handshake response to $targetDeviceId');
       }
@@ -1381,7 +1441,6 @@ ${_messageTrace.take(5).join('\n')}
     _discoveryService.dispose();
     // Message queue service disposal removed
 
-
     _messageTrace.clear();
     _processedMessages.clear();
     _messageTimestamps.clear();
@@ -1397,7 +1456,95 @@ ${_messageTrace.take(5).join('\n')}
     // Save to history
     saveMessageToHistory(message);
 
+    // MULTI-HOP: Forward message to other connected devices if applicable
+    _maybeForwardMessage(message);
+
     notifyListeners();
+  }
+
+  /// Multi-hop message forwarding logic
+  Future<void> _maybeForwardMessage(MessageModel message) async {
+    try {
+      // Check if multi-hop is enabled
+      final settings = SettingsService.instance;
+      if (!settings.multiHopEnabled) {
+        debugPrint('🚫 Multi-hop disabled, not forwarding message');
+        return;
+      }
+
+      // Don't forward messages from ourselves
+      if (message.deviceId == deviceId) {
+        debugPrint('ℹ️ Message is from us, not forwarding');
+        return;
+      }
+
+      // Only forward emergency and broadcast messages
+      if (!message.isEmergency && message.targetDeviceId != null) {
+        debugPrint('ℹ️ Message is not emergency/broadcast, not forwarding');
+        return;
+      }
+
+      // Check TTL (time-to-live / hop count)
+      final currentTtl = message.ttl ?? P2PBaseService.maxTtl;
+      if (currentTtl <= 1) {
+        debugPrint('⏱️ Message TTL expired ($currentTtl), not forwarding');
+        return;
+      }
+
+      // Check if we've already forwarded this message (prevent loops)
+      final routePath = message.routePath ?? [];
+      if (routePath.contains(deviceId)) {
+        debugPrint('🔄 We already forwarded this message, skipping to prevent loop');
+        return;
+      }
+
+      // Get other connected devices (exclude the sender)
+      final otherDevices = connectedDevices.keys
+          .where((id) => id != message.deviceId && id != deviceId)
+          .toList();
+
+      if (otherDevices.isEmpty) {
+        debugPrint('📭 No other devices to forward to');
+        return;
+      }
+
+      debugPrint('🔁 Forwarding message to ${otherDevices.length} device(s) (TTL: $currentTtl → ${currentTtl - 1})');
+
+      // Create forwarded message with decremented TTL and updated route path
+      final updatedRoutePath = [...routePath, deviceId!];
+      final forwardedMessageJson = jsonEncode({
+        'type': 'message',
+        'messageId': message.messageId,
+        'message': message.message,
+        'senderName': message.fromUser,
+        'deviceId': message.deviceId,  // Original sender
+        'targetDeviceId': message.targetDeviceId,
+        'messageType': message.messageType.name,
+        'timestamp': message.timestamp,
+        'isEmergency': message.isEmergency,
+        'latitude': message.latitude,
+        'longitude': message.longitude,
+        'ttl': currentTtl - 1,  // Decrement TTL
+        'routePath': updatedRoutePath,  // Add ourselves to path
+      });
+
+      // Forward to all other connected devices
+      bool forwardSuccess = false;
+      if (_wifiDirectService != null) {
+        forwardSuccess = await _wifiDirectService!.sendMessage(forwardedMessageJson);
+      } else {
+        forwardSuccess = await _socketProtocol.broadcastMessage(forwardedMessageJson);
+      }
+
+      if (forwardSuccess) {
+        debugPrint('✅ Message forwarded successfully (hops: ${updatedRoutePath.length})');
+        _addMessageTrace('Forwarded message ${message.messageId} (TTL: ${currentTtl - 1})');
+      } else {
+        debugPrint('❌ Failed to forward message');
+      }
+    } catch (e) {
+      debugPrint('❌ Error forwarding message: $e');
+    }
   }
 
   @override
@@ -1413,11 +1560,6 @@ ${_messageTrace.take(5).join('\n')}
   /// Get socket protocol for external access
   SocketProtocol get socketProtocol => _socketProtocol;
 
-  /// Use ChatNavigationHelper statically for chat navigation
-
-  // Message queue service getter removed
-
-  /// Manually open WiFi Direct settings
   Future<void> openWiFiDirectSettings() async {
     await _wifiDirectService?.openWiFiDirectSettings();
   }

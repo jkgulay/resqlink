@@ -21,8 +21,6 @@ class ChatRepository {
     try {
       final db = await DatabaseManager.database;
 
-      // CRITICAL FIX: Use deviceAddress (MAC address) as the primary stable identifier
-      // This ensures ONE session per device, regardless of display name changes
       final stableDeviceId = deviceAddress ?? deviceId;
 
       // Session ID is now based on the stable device identifier (MAC address)
@@ -31,7 +29,10 @@ class ChatRepository {
       final now = DateTime.now();
 
       // First, merge ALL duplicate sessions with the same deviceAddress
-      await _mergeAllDuplicateSessionsByDeviceAddress(stableDeviceId, sessionId);
+      await _mergeAllDuplicateSessionsByDeviceAddress(
+        stableDeviceId,
+        sessionId,
+      );
 
       // Check for existing session using ONLY deviceAddress (MAC address)
       final existingSession = await db.query(
@@ -55,20 +56,21 @@ class ChatRepository {
         // ALWAYS update device name to reflect current displayName
         if (existingDeviceName != deviceName) {
           updateData['device_name'] = deviceName;
-          debugPrint('🔄 Updating device name from "$existingDeviceName" to "$deviceName" for session $existingId');
+          debugPrint(
+            '🔄 Updating device name from "$existingDeviceName" to "$deviceName" for session $existingId',
+          );
         }
 
         // If the session ID doesn't match our stable ID, update it
         if (existingId != sessionId) {
-          debugPrint('🔄 Migrating session ID from "$existingId" to "$sessionId"');
+          debugPrint(
+            '🔄 Migrating session ID from "$existingId" to "$sessionId"',
+          );
 
           // Update the session ID to use stable identifier
           await db.update(
             _tableName,
-            {
-              'id': sessionId,
-              ...updateData,
-            },
+            {'id': sessionId, ...updateData},
             where: 'id = ?',
             whereArgs: [existingId],
           );
@@ -81,7 +83,9 @@ class ChatRepository {
             whereArgs: [existingId],
           );
 
-          debugPrint('✅ Session ID migrated and updated: $existingId -> $sessionId');
+          debugPrint(
+            '✅ Session ID migrated and updated: $existingId -> $sessionId',
+          );
         } else {
           // Just update the existing session
           await db.update(
@@ -107,7 +111,9 @@ class ChatRepository {
         );
 
         await db.insert(_tableName, session.toMap());
-        debugPrint('✅ NEW chat session created with stable ID: $sessionId for device: $deviceName');
+        debugPrint(
+          '✅ NEW chat session created with stable ID: $sessionId for device: $deviceName',
+        );
         return sessionId;
       }
     } catch (e) {
@@ -133,7 +139,9 @@ class ChatRepository {
 
       if (duplicates.length <= 1) return; // No duplicates
 
-      debugPrint('🔍 Found ${duplicates.length} sessions for device $deviceAddress - merging...');
+      debugPrint(
+        '🔍 Found ${duplicates.length} sessions for device $deviceAddress - merging...',
+      );
 
       for (final dup in duplicates) {
         final dupId = dup['id'] as String;
@@ -148,16 +156,14 @@ class ChatRepository {
         );
 
         // Delete the duplicate session
-        await db.delete(
-          _tableName,
-          where: 'id = ?',
-          whereArgs: [dupId],
-        );
+        await db.delete(_tableName, where: 'id = ?', whereArgs: [dupId]);
 
         debugPrint('🧹 Merged and deleted duplicate session: $dupId');
       }
 
-      debugPrint('✅ Merged ${duplicates.length - 1} duplicate sessions into $targetSessionId');
+      debugPrint(
+        '✅ Merged ${duplicates.length - 1} duplicate sessions into $targetSessionId',
+      );
     } catch (e) {
       debugPrint('❌ Error merging duplicate sessions: $e');
     }
@@ -166,97 +172,101 @@ class ChatRepository {
   /// Get session by device ID (which should be the MAC address)
   /// Also checks device_address for backward compatibility
   static Future<ChatSession?> getSessionByDeviceId(String deviceId) async {
-  try {
-    final db = await DatabaseManager.database;
+    try {
+      final db = await DatabaseManager.database;
 
-    // Check both device_id and device_address to find the session
-    final results = await db.query(
-      _tableName,
-      where: 'device_id = ? OR device_address = ?',
-      whereArgs: [deviceId, deviceId],
-      orderBy: 'last_message_at DESC',
-      limit: 1,
-    );
-
-    if (results.isNotEmpty) {
-      return ChatSession.fromMap(results.first);
-    }
-    return null;
-  } catch (e) {
-    debugPrint('❌ Error getting chat session by device ID: $e');
-    return null;
-  }
-}
-
-/// Get or create a chat session for a device
-static Future<ChatSession> getOrCreateSessionByDeviceId(
-  String deviceId, {
-  String? deviceName,
-  String? deviceAddress,
-  String? currentUserId,
-  String? currentUserName,
-  String? peerUserName,
-}) async {
-  try {
-    // First try to get existing session
-    ChatSession? session = await getSessionByDeviceId(deviceId);
-    
-    if (session != null) {
-      // Update connection time for existing session
-      await updateConnection(
-        sessionId: session.id,
-        connectionType: ConnectionType.unknown, // You can determine this based on context
-        connectionTime: DateTime.now(),
+      // Check both device_id and device_address to find the session
+      final results = await db.query(
+        _tableName,
+        where: 'device_id = ? OR device_address = ?',
+        whereArgs: [deviceId, deviceId],
+        orderBy: 'last_message_at DESC',
+        limit: 1,
       );
-      return session;
+
+      if (results.isNotEmpty) {
+        return ChatSession.fromMap(results.first);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error getting chat session by device ID: $e');
+      return null;
     }
-
-    // Create new session if none exists
-    final sessionId = await createOrUpdate(
-      deviceId: deviceId,
-      deviceName: deviceName ?? 'Unknown Device',
-      deviceAddress: deviceAddress,
-      currentUserId: currentUserId,
-      currentUserName: currentUserName,
-      peerUserName: peerUserName,
-    );
-
-    // Get the newly created session
-    session = await getSession(sessionId);
-    if (session == null) {
-      throw Exception('Failed to create chat session');
-    }
-
-    return session;
-  } catch (e) {
-    debugPrint('❌ Error getting/creating chat session: $e');
-    rethrow;
   }
-}
+
+  /// Get or create a chat session for a device
+  static Future<ChatSession> getOrCreateSessionByDeviceId(
+    String deviceId, {
+    String? deviceName,
+    String? deviceAddress,
+    String? currentUserId,
+    String? currentUserName,
+    String? peerUserName,
+  }) async {
+    try {
+      // First try to get existing session
+      ChatSession? session = await getSessionByDeviceId(deviceId);
+
+      if (session != null) {
+        // Update connection time for existing session
+        await updateConnection(
+          sessionId: session.id,
+          connectionType:
+              ConnectionType.unknown, // You can determine this based on context
+          connectionTime: DateTime.now(),
+        );
+        return session;
+      }
+
+      // Create new session if none exists
+      final sessionId = await createOrUpdate(
+        deviceId: deviceId,
+        deviceName: deviceName ?? 'Unknown Device',
+        deviceAddress: deviceAddress,
+        currentUserId: currentUserId,
+        currentUserName: currentUserName,
+        peerUserName: peerUserName,
+      );
+
+      // Get the newly created session
+      session = await getSession(sessionId);
+      if (session == null) {
+        throw Exception('Failed to create chat session');
+      }
+
+      return session;
+    } catch (e) {
+      debugPrint('❌ Error getting/creating chat session: $e');
+      rethrow;
+    }
+  }
 
   /// Get all chat sessions with summary information
   static Future<List<ChatSessionSummary>> getAllSessions() async {
     try {
       return await DatabaseManager.transaction((txn) async {
         // Use simpler queries with timeout to avoid deadlocks
-        final sessions = await txn.query(
-          _tableName,
-          orderBy: 'last_message_at DESC',
-        ).timeout(const Duration(seconds: 3));
+        final sessions = await txn
+            .query(_tableName, orderBy: 'last_message_at DESC')
+            .timeout(const Duration(seconds: 3));
 
         final List<ChatSessionSummary> summaries = [];
 
         for (final sessionRow in sessions) {
           // Get last message for each session separately with timeout
-          final lastMessageResult = await txn.query(
-            'messages',
-            where: 'chatSessionId = ?',
-            whereArgs: [sessionRow['id']],
-            orderBy: 'timestamp DESC',
-            limit: 1,
-          ).timeout(const Duration(seconds: 1));
+          final lastMessageResult = await txn
+              .query(
+                'messages',
+                where: 'chatSessionId = ?',
+                whereArgs: [sessionRow['id']],
+                orderBy: 'timestamp DESC',
+                limit: 1,
+              )
+              .timeout(const Duration(seconds: 1));
 
-          final lastMessage = lastMessageResult.isNotEmpty ? lastMessageResult.first : null;
+          final lastMessage = lastMessageResult.isNotEmpty
+              ? lastMessageResult.first
+              : null;
 
           ConnectionType? connectionType;
           final connTypeStr = lastMessage?['connection_type'] as String?;
@@ -280,20 +290,22 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
                       .inMinutes <
                   5;
 
-          summaries.add(ChatSessionSummary(
-            sessionId: sessionRow['id'] as String,
-            deviceId: sessionRow['device_id'] as String,
-            deviceName: sessionRow['device_name'] as String,
-            lastMessage: lastMessage?['message'] as String?,
-            lastMessageTime: lastMessage?['timestamp'] != null
-                ? DateTime.fromMillisecondsSinceEpoch(
-                    lastMessage!['timestamp'] as int,
-                  )
-                : null,
-            unreadCount: sessionRow['unread_count'] as int? ?? 0,
-            isOnline: isOnline,
-            connectionType: connectionType,
-          ));
+          summaries.add(
+            ChatSessionSummary(
+              sessionId: sessionRow['id'] as String,
+              deviceId: sessionRow['device_id'] as String,
+              deviceName: sessionRow['device_name'] as String,
+              lastMessage: lastMessage?['message'] as String?,
+              lastMessageTime: lastMessage?['timestamp'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch(
+                      lastMessage!['timestamp'] as int,
+                    )
+                  : null,
+              unreadCount: sessionRow['unread_count'] as int? ?? 0,
+              isOnline: isOnline,
+              connectionType: connectionType,
+            ),
+          );
         }
 
         return summaries;
@@ -348,8 +360,9 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
     try {
       return await DatabaseManager.transaction((txn) async {
         // Use simpler query with timeout to prevent locks
-        final messageCountResult = await txn.rawQuery(
-          '''
+        final messageCountResult = await txn
+            .rawQuery(
+              '''
           SELECT
             COUNT(*) as total_messages,
             COUNT(CASE WHEN synced = 0 AND isMe = 0 THEN 1 END) as unread_count,
@@ -357,8 +370,9 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
           FROM messages
           WHERE chatSessionId = ?
         ''',
-          [sessionId],
-        ).timeout(const Duration(seconds: 2));
+              [sessionId],
+            )
+            .timeout(const Duration(seconds: 2));
 
         if (messageCountResult.isNotEmpty) {
           final row = messageCountResult.first;
@@ -366,16 +380,19 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
           final unreadCount = row['unread_count'] as int? ?? 0;
           final lastMessageTime = row['last_message_time'] as int?;
 
-          await txn.update(
-            _tableName,
-            {
-              'message_count': messageCount,
-              'unread_count': unreadCount,
-              if (lastMessageTime != null) 'last_message_at': lastMessageTime,
-            },
-            where: 'id = ?',
-            whereArgs: [sessionId],
-          ).timeout(const Duration(seconds: 1));
+          await txn
+              .update(
+                _tableName,
+                {
+                  'message_count': messageCount,
+                  'unread_count': unreadCount,
+                  if (lastMessageTime != null)
+                    'last_message_at': lastMessageTime,
+                },
+                where: 'id = ?',
+                whereArgs: [sessionId],
+              )
+              .timeout(const Duration(seconds: 1));
 
           return true;
         }
@@ -581,11 +598,36 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
       final allSessions = await db.query(_tableName);
       final Map<String, List<Map<String, dynamic>>> sessionsByDevice = {};
 
-      // Group sessions by device address (or device ID if address is missing)
+      // Group sessions by device address, device ID, AND device name
+      // This handles old sessions that may have different IDs but same name
       for (final session in allSessions) {
         final deviceAddress = session['device_address'] as String?;
         final deviceId = session['device_id'] as String?;
-        final key = deviceAddress ?? deviceId ?? 'unknown';
+        final deviceName = session['device_name'] as String?;
+
+        // CRITICAL: For old sessions without device_address, group by device_name
+        // This consolidates sessions like "John (device_123)", "John (device_456)", "John (02:00:00:00:00:00)"
+        String key;
+
+        // Check if this is a placeholder MAC address
+        final isPlaceholderMac = deviceAddress == '02:00:00:00:00:00' ||
+                                 deviceId == '02:00:00:00:00:00';
+
+        if (isPlaceholderMac && deviceName != null && deviceName.isNotEmpty) {
+          // For placeholder MACs, ALWAYS group by device name
+          key = 'name:$deviceName';
+        } else if (deviceAddress != null && deviceAddress.isNotEmpty && deviceAddress != '02:00:00:00:00:00') {
+          // Use real device address as primary key (MAC address format like fa:12:4d:33:db:56)
+          key = deviceAddress;
+        } else if (deviceId != null && deviceId.contains(':') && deviceId != '02:00:00:00:00:00') {
+          // If deviceId looks like a real MAC address, use it
+          key = deviceId;
+        } else if (deviceName != null && deviceName.isNotEmpty) {
+          // Fallback: group by device name to merge old duplicates
+          key = 'name:$deviceName';
+        } else {
+          key = deviceId ?? 'unknown';
+        }
 
         if (!sessionsByDevice.containsKey(key)) {
           sessionsByDevice[key] = [];
@@ -600,16 +642,25 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
 
         if (sessions.length <= 1) continue; // No duplicates for this device
 
-        debugPrint('🔍 Found ${sessions.length} sessions for device: $deviceKey');
+        debugPrint(
+          '🔍 Found ${sessions.length} sessions for device: $deviceKey',
+        );
 
-        // Generate the stable session ID for this device
-        final stableSessionId = 'chat_${deviceKey.replaceAll(':', '_')}';
-
-        // Find the best session to keep (most recent connection, highest message count)
         sessions.sort((a, b) {
+          final aAddress = a['device_address'] as String? ?? '';
+          final bAddress = b['device_address'] as String? ?? '';
+          final aIsPlaceholder = aAddress == '02:00:00:00:00:00' || aAddress.isEmpty;
+          final bIsPlaceholder = bAddress == '02:00:00:00:00:00' || bAddress.isEmpty;
+
+          if (aIsPlaceholder != bIsPlaceholder) {
+            return aIsPlaceholder ? 1 : -1; 
+          }
+
           final aConnection = a['last_connection_at'] as int? ?? 0;
           final bConnection = b['last_connection_at'] as int? ?? 0;
-          if (aConnection != bConnection) return bConnection.compareTo(aConnection);
+          if (aConnection != bConnection) {
+            return bConnection.compareTo(aConnection);
+          }
 
           final aMessages = a['message_count'] as int? ?? 0;
           final bMessages = b['message_count'] as int? ?? 0;
@@ -617,25 +668,51 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
 
           final aCreated = a['created_at'] as int? ?? 0;
           final bCreated = b['created_at'] as int? ?? 0;
-          return aCreated.compareTo(bCreated); // Older is better for created
+          return aCreated.compareTo(bCreated);
         });
 
         final keepSession = sessions.first;
         final latestDeviceName = keepSession['device_name'] as String;
 
-        // Check if we need to migrate to stable ID
+
+        String stableSessionId;
+        String? finalDeviceAddress;
+
+        if (deviceKey.startsWith('name:')) {
+          String? foundSessionId;
+          for (final session in sessions) {
+            final addr = session['device_address'] as String?;
+            final id = session['device_id'] as String?;
+            if (addr != null && addr.isNotEmpty && addr.contains(':')) {
+              finalDeviceAddress = addr;
+              foundSessionId = 'chat_${addr.replaceAll(':', '_')}';
+              break;
+            } else if (id != null && id.contains(':')) {
+              finalDeviceAddress = id;
+              foundSessionId = 'chat_${id.replaceAll(':', '_')}';
+              break;
+            }
+          }
+          stableSessionId = foundSessionId ?? (keepSession['id'] as String);
+        } else {
+          finalDeviceAddress = deviceKey;
+          stableSessionId =
+              'chat_${deviceKey.replaceAll(':', '_').replaceAll('name:', '')}';
+        }
+
         final existingId = keepSession['id'] as String;
         bool needsIdMigration = existingId != stableSessionId;
 
         if (needsIdMigration) {
-          debugPrint('🔄 Migrating session ID from "$existingId" to stable "$stableSessionId"');
+          debugPrint(
+            '🔄 Migrating session ID from "$existingId" to stable "$stableSessionId"',
+          );
 
-          // Update the kept session to use stable ID
           await db.update(
             _tableName,
             {
               'id': stableSessionId,
-              'device_address': deviceKey,
+              'device_address': finalDeviceAddress ?? deviceKey,
             },
             where: 'id = ?',
             whereArgs: [existingId],
@@ -674,11 +751,15 @@ static Future<ChatSession> getOrCreateSessionByDeviceId(
           debugPrint('🧹 Merged and deleted duplicate session: $duplicateId');
         }
 
-        debugPrint('✅ Consolidated ${sessions.length} sessions into: $stableSessionId ($latestDeviceName)');
+        debugPrint(
+          '✅ Consolidated ${sessions.length} sessions into: $stableSessionId ($latestDeviceName)',
+        );
       }
 
       if (mergedCount > 0) {
-        debugPrint('✅ Total duplicate sessions merged and cleaned: $mergedCount');
+        debugPrint(
+          '✅ Total duplicate sessions merged and cleaned: $mergedCount',
+        );
       } else {
         debugPrint('ℹ️ No duplicate sessions found to clean up');
       }
