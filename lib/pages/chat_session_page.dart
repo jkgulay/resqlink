@@ -303,8 +303,36 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   Future<void> _sendLocationMessage() async {
     if (_chatSession == null) return;
 
-    // Refresh location first
+    // Show loading
+    _showSnackBar('Getting GPS location...', isError: false);
+
+    // Get fresh GPS location
     await _locationStateService.refreshLocation();
+
+    // If still no location, try to get current position directly
+    if (_currentLocation == null) {
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        );
+
+        final freshLocation = LocationModel(
+          latitude: position.latitude,
+          longitude: position.longitude,
+          timestamp: DateTime.now(),
+          userId: widget.p2pService.deviceId ?? 'unknown',
+          type: LocationType.normal,
+          accuracy: position.accuracy,
+        );
+
+        _locationStateService.updateCurrentLocation(freshLocation);
+      } catch (e) {
+        debugPrint('❌ Error getting current position: $e');
+        _showSnackBar('Location not available. Please enable GPS.', isError: true);
+        return;
+      }
+    }
 
     if (_currentLocation == null) {
       _showSnackBar('Location not available. Please enable GPS.', isError: true);
