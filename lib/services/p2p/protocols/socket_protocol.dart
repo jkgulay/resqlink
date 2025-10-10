@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/message_model.dart';
 import '../../messaging/message_router.dart';
@@ -178,10 +179,15 @@ class SocketProtocol {
   }
 
   /// Send handshake message
-  void _sendHandshake(Socket socket) {
+  void _sendHandshake(Socket socket) async {
+    // Get MAC address from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final macAddress = prefs.getString('wifi_direct_mac_address');
+
     final handshake = jsonEncode({
       'type': 'handshake',
       'deviceId': _deviceId,
+      'macAddress': macAddress ?? _deviceId, // Include MAC address (fallback to deviceId)
       'userName': _userName,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
@@ -229,16 +235,23 @@ class SocketProtocol {
   /// Handle handshake message
   void _handleHandshake(Map<String, dynamic> data, Socket socket) {
     final deviceId = data['deviceId'] as String?;
+    final macAddress = data['macAddress'] as String?;
     final userName = data['userName'] as String?;
 
-    if (deviceId != null) {
-      _deviceSockets[deviceId] = socket;
+    // CRITICAL: Use MAC address as the device identifier if available
+    final finalDeviceId = macAddress ?? deviceId;
 
-      debugPrint('🤝 Device connected: $userName ($deviceId)');
+    if (finalDeviceId != null) {
+      _deviceSockets[finalDeviceId] = socket;
+
+      debugPrint('🤝 Device connected: $userName');
+      debugPrint('📱 Device ID: $deviceId');
+      debugPrint('📍 MAC Address: $macAddress');
+      debugPrint('✅ Using identifier: $finalDeviceId');
       debugPrint('📱 Total connected devices: ${_deviceSockets.length}');
 
-      // CRITICAL: Notify P2P service about the connected device
-      onDeviceConnected?.call(deviceId, userName ?? 'Unknown');
+      // CRITICAL: Notify P2P service about the connected device with MAC address
+      onDeviceConnected?.call(finalDeviceId, userName ?? 'Unknown');
 
       debugPrint('✅ Handshake completed with $userName ($deviceId)');
 

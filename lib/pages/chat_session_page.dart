@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:geolocator/geolocator.dart';
 import '../models/chat_session_model.dart';
 import '../models/message_model.dart';
 import '../features/database/repositories/chat_repository.dart';
@@ -313,8 +314,10 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     if (_currentLocation == null) {
       try {
         final position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 10),
+          locationSettings: LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 10),
+          ),
         );
 
         final freshLocation = LocationModel(

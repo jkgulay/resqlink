@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_discovery_service.dart';
@@ -509,32 +510,39 @@ class P2PMainService extends P2PBaseService {
         if (messageType == 'handshake') {
           // Handle handshake directly to establish WiFi Direct connection
           final deviceId = messageData['deviceId'] as String?;
+          final macAddress = messageData['macAddress'] as String?;
           final userName = messageData['userName'] as String?;
           final deviceName = messageData['deviceName'] as String?;
 
-          if (deviceId != null) {
+          // CRITICAL: Use MAC address as the device identifier if available
+          final finalDeviceId = macAddress ?? deviceId;
+
+          if (finalDeviceId != null) {
             // Prevent concurrent processing of the same device
-            if (_processingDevices.contains(deviceId)) {
+            if (_processingDevices.contains(finalDeviceId)) {
               debugPrint(
-                '⚠️ Handshake already being processed for device $deviceId',
+                '⚠️ Handshake already being processed for device $finalDeviceId',
               );
               return;
             }
 
             debugPrint(
-              '🤝 Processing WiFi Direct handshake from $deviceId ($userName)',
+              '🤝 Processing WiFi Direct handshake from $userName',
             );
+            debugPrint('📱 Device ID: $deviceId');
+            debugPrint('📍 MAC Address: $macAddress');
+            debugPrint('✅ Using identifier: $finalDeviceId');
 
             // Register device as connected for WiFi Direct (async, don't wait)
             _registerWiFiDirectDevice(
-              deviceId,
+              finalDeviceId,
               userName ?? 'Unknown',
               deviceName ?? 'Unknown Device',
               from,
             );
 
             // Send handshake response (async, don't wait)
-            _sendHandshakeResponse(deviceId, from);
+            _sendHandshakeResponse(finalDeviceId, from);
             return;
           }
         }
@@ -542,24 +550,32 @@ class P2PMainService extends P2PBaseService {
         if (messageType == 'handshake_response') {
           // Handle handshake response
           final deviceId = messageData['deviceId'] as String?;
+          final macAddress = messageData['macAddress'] as String?;
           final userName = messageData['userName'] as String?;
           final deviceName = messageData['deviceName'] as String?;
 
-          if (deviceId != null) {
+          // CRITICAL: Use MAC address as the device identifier if available
+          final finalDeviceId = macAddress ?? deviceId;
+
+          if (finalDeviceId != null) {
             // Prevent concurrent processing of the same device
-            if (_processingDevices.contains(deviceId)) {
+            if (_processingDevices.contains(finalDeviceId)) {
               debugPrint(
-                '⚠️ Handshake response already being processed for device $deviceId',
+                '⚠️ Handshake response already being processed for device $finalDeviceId',
               );
               return;
             }
 
             debugPrint(
-              '🤝 Processing WiFi Direct handshake response from $deviceId ($userName)',
+              '🤝 Processing WiFi Direct handshake response from $userName',
             );
+            debugPrint('📱 Device ID: $deviceId');
+            debugPrint('📍 MAC Address: $macAddress');
+            debugPrint('✅ Using identifier: $finalDeviceId');
+
             // Register device as connected (async, don't wait)
             _registerWiFiDirectDevice(
-              deviceId,
+              finalDeviceId,
               userName ?? 'Unknown',
               deviceName ?? 'Unknown Device',
               from,
@@ -1349,9 +1365,14 @@ class P2PMainService extends P2PBaseService {
     String? address,
   ) async {
     try {
+      // Get MAC address from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final macAddress = prefs.getString('wifi_direct_mac_address');
+
       final response = jsonEncode({
         'type': 'handshake_response',
         'deviceId': deviceId,
+        'macAddress': macAddress ?? deviceId, // Include MAC address
         'userName': userName,
         'deviceName': 'ResQLink Device',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
@@ -1539,11 +1560,6 @@ ${_messageTrace.take(5).join('\n')}
   /// Get socket protocol for external access
   SocketProtocol get socketProtocol => _socketProtocol;
 
-  /// Use ChatNavigationHelper statically for chat navigation
-
-  // Message queue service getter removed
-
-  /// Manually open WiFi Direct settings
   Future<void> openWiFiDirectSettings() async {
     await _wifiDirectService?.openWiFiDirectSettings();
   }

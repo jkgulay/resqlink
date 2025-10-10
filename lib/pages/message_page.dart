@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:resqlink/pages/gps_page.dart';
 import 'package:resqlink/services/messaging/message_sync_service.dart';
 import '../services/p2p/p2p_main_service.dart';
@@ -615,7 +616,28 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       return;
     }
 
-    if (widget.currentLocation?.latitude == null || widget.currentLocation?.longitude == null) {
+    // Show loading message
+    if (mounted) {
+      _showSuccessMessage('Getting GPS location...');
+    }
+
+    // Get fresh GPS position
+    double? latitude;
+    double? longitude;
+
+    // Try to get current GPS position
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+
+      latitude = position.latitude;
+      longitude = position.longitude;
+    } catch (e) {
+      debugPrint('❌ Error getting GPS position: $e');
       if (mounted) {
         _showErrorMessage('Location not available. Please enable GPS.');
       }
@@ -624,11 +646,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     try {
       final locationText =
-          '📍 Location shared\nLat: ${widget.currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${widget.currentLocation!.longitude.toStringAsFixed(6)}';
+          '📍 Location shared\nLat: ${latitude.toStringAsFixed(6)}\nLng: ${longitude.toStringAsFixed(6)}';
 
       final locationModel = LocationModel(
-        latitude: widget.currentLocation!.latitude,
-        longitude: widget.currentLocation!.longitude,
+        latitude: latitude,
+        longitude: longitude,
         timestamp: DateTime.now(),
         userId: widget.p2pService.deviceId,
         type: LocationType.normal,
@@ -642,8 +664,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         message: locationText,
         type: MessageType.location,
         targetDeviceId: _selectedEndpointId!,
-        latitude: widget.currentLocation!.latitude,
-        longitude: widget.currentLocation!.longitude,
+        latitude: latitude,
+        longitude: longitude,
         senderName: widget.p2pService.userName ?? 'Unknown',
       );
 
