@@ -28,6 +28,9 @@ class SocketProtocol {
   // CRITICAL: Callback for device connections
   Function(String deviceId, String userName)? onDeviceConnected;
 
+  // Callback for pong responses (for quality monitoring)
+  Function(String deviceId, int sequence)? onPongReceived;
+
   /// Initialize socket protocol
   void initialize(String deviceId, String userName) {
     _deviceId = deviceId;
@@ -63,7 +66,16 @@ class SocketProtocol {
           debugPrint('✅ Socket server started on port $attemptPort');
           break; // Success, exit the loop
         } on SocketException catch (e) {
-          if (e.osError?.errorCode == 98) { // Address already in use
+          // Cross-platform port in use detection:
+          // - Linux: error code 98 (EADDRINUSE)
+          // - Windows: error code 10048 (WSAEADDRINUSE)
+          // - Also check error message as fallback
+          final isPortInUse = e.osError?.errorCode == 98 ||
+              e.osError?.errorCode == 10048 ||
+              e.message.toLowerCase().contains('address already in use') ||
+              e.message.toLowerCase().contains('only one usage');
+
+          if (isPortInUse) {
             debugPrint('⚠️ Port $attemptPort already in use, trying next port...');
             if (attemptPort == port + 9) {
               // Last attempt failed
@@ -222,6 +234,10 @@ class SocketProtocol {
           _handleMessage(data, socket);
         case 'heartbeat':
           _handleHeartbeat(data, socket);
+        case 'ping':
+          _handlePing(data, socket);
+        case 'pong':
+          _handlePong(data, socket);
         case 'ack':
           _handleAcknowledgment(data);
         default:
@@ -306,6 +322,44 @@ class SocketProtocol {
     });
 
     _sendToSocket(socket, pong);
+  }
+
+  /// Handle ping (for quality monitoring)
+  void _handlePing(Map<String, dynamic> data, Socket socket) {
+    final sequence = data['sequence'] as int?;
+    final timestamp = data['timestamp'] as int?;
+
+    if (sequence != null && timestamp != null) {
+      final pong = jsonEncode({
+        'type': 'pong',
+        'sequence': sequence,
+        'originalTimestamp': timestamp,
+        'deviceId': _deviceId,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      _sendToSocket(socket, pong);
+    }
+  }
+
+  /// Handle pong (for quality monitoring)
+  void _handlePong(Map<String, dynamic> data, Socket socket) {
+    // Find device ID from socket
+    String? fromDevice;
+    _deviceSockets.forEach((deviceId, deviceSocket) {
+      if (deviceSocket == socket) {
+        fromDevice = deviceId;
+      }
+    });
+
+    // Pong responses are handled by the quality monitor through callback
+    // We don't process them here directly
+    if (fromDevice != null) {
+      final sequence = data['sequence'] as int?;
+      if (sequence != null && onPongReceived != null) {
+        onPongReceived?.call(fromDevice!, sequence);
+      }
+    }
   }
 
   /// Handle acknowledgment

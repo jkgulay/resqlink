@@ -103,12 +103,12 @@ class MessageDebugService {
     debugPrint('🧪 Starting message test - ID: $testId');
     
     try {
-      // Test 1: Check connection status
-      if (!p2pService.isConnected) {
+      // Test 1: Check connection status and peer availability
+      if (!p2pService.isConnected || p2pService.connectedDevices.isEmpty) {
         return TestResult(
           testId: testId,
           success: false,
-          error: 'No active connections',
+          error: 'No active peer connections (connected: ${p2pService.isConnected}, peers: ${p2pService.connectedDevices.length})',
           duration: DateTime.now().difference(startTime),
         );
       }

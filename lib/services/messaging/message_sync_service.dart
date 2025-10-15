@@ -192,8 +192,11 @@ class MessageSyncService {
             MessageStatus.failed,
           );
         }
-      } else if (p2pService != null && p2pService.isConnected) {
-        // Try P2P if offline but P2P is available
+      } else if (p2pService != null &&
+                 p2pService.isConnected &&
+                 p2pService.connectedDevices.isNotEmpty) {
+        // Try P2P if offline but P2P is available and has connected peers
+        debugPrint('📡 Attempting P2P send (${p2pService.connectedDevices.length} peers connected)');
         final success = await _sendViaP2P(messageModel, p2pService);
         if (success) {
           await MessageRepository.updateMessageStatus(
