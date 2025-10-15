@@ -925,6 +925,16 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
         channel?.let { ch ->
             wifiP2pManager.requestGroupInfo(ch) { group ->
                 if (group != null) {
+                    // CRITICAL: If we're the group owner, store our WiFi Direct MAC address
+                    if (group.isGroupOwner && group.owner != null) {
+                        val ownerMac = group.owner.deviceAddress
+                        if (ownerMac != null && ownerMac.isNotEmpty() && ownerMac != "02:00:00:00:00:00") {
+                            val prefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().putString("wifi_direct_mac_address", ownerMac).apply()
+                            android.util.Log.d("WiFiDirect", "✅ Stored group owner MAC address: $ownerMac")
+                        }
+                    }
+
                     val clients = group.clientList.map { client ->
                         mapOf(
                             "deviceName" to client.deviceName,
@@ -1225,6 +1235,16 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
         // Also request group info
         wifiP2pManager.requestGroupInfo(ch) { group ->
             if (group != null) {
+                // CRITICAL: If we're the group owner, store our WiFi Direct MAC address
+                if (group.isGroupOwner && group.owner != null) {
+                    val ownerMac = group.owner.deviceAddress
+                    if (ownerMac != null && ownerMac.isNotEmpty() && ownerMac != "02:00:00:00:00:00") {
+                        val prefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+                        prefs.edit().putString("wifi_direct_mac_address", ownerMac).apply()
+                        android.util.Log.d("WiFiDirect", "✅ Stored group owner MAC address: $ownerMac")
+                    }
+                }
+
                 val groupData = mapOf(
                     "networkName" to group.networkName,
                     "passphrase" to group.passphrase,

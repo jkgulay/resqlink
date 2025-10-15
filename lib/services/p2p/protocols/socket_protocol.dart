@@ -31,6 +31,9 @@ class SocketProtocol {
   // Callback for pong responses (for quality monitoring)
   Function(String deviceId, int sequence)? onPongReceived;
 
+  // Callback to resolve IP address to MAC address from WiFi Direct peers
+  Function(String ipAddress)? onResolveIpToMac;
+
   /// Initialize socket protocol
   void initialize(String deviceId, String userName) {
     _deviceId = deviceId;
@@ -254,22 +257,36 @@ class SocketProtocol {
     final macAddress = data['macAddress'] as String?;
     final userName = data['userName'] as String?;
 
-    // CRITICAL: Use MAC address as the device identifier if available
-    final finalDeviceId = macAddress ?? deviceId;
+    // CRITICAL: Try to resolve the real MAC address from the socket IP
+    String? resolvedMac;
+    if (onResolveIpToMac != null) {
+      final ipAddress = socket.remoteAddress.address;
+      resolvedMac = onResolveIpToMac!(ipAddress);
+      if (resolvedMac != null) {
+        debugPrint('🔍 Resolved IP $ipAddress to MAC: $resolvedMac');
+      }
+    }
+
+    // Priority for device identifier:
+    // 1. Resolved MAC from WiFi Direct peer list (most reliable)
+    // 2. MAC address from handshake
+    // 3. Device ID from handshake
+    final finalDeviceId = resolvedMac ?? macAddress ?? deviceId;
 
     if (finalDeviceId != null) {
       _deviceSockets[finalDeviceId] = socket;
 
       debugPrint('🤝 Device connected: $userName');
-      debugPrint('📱 Device ID: $deviceId');
-      debugPrint('📍 MAC Address: $macAddress');
-      debugPrint('✅ Using identifier: $finalDeviceId');
+      debugPrint('📱 Device ID (from handshake): $deviceId');
+      debugPrint('📍 MAC Address (from handshake): $macAddress');
+      debugPrint('🔍 Resolved MAC (from WiFi Direct): $resolvedMac');
+      debugPrint('✅ Using final identifier: $finalDeviceId');
       debugPrint('📱 Total connected devices: ${_deviceSockets.length}');
 
       // CRITICAL: Notify P2P service about the connected device with MAC address
       onDeviceConnected?.call(finalDeviceId, userName ?? 'Unknown');
 
-      debugPrint('✅ Handshake completed with $userName ($deviceId)');
+      debugPrint('✅ Handshake completed with $userName ($finalDeviceId)');
 
       // Send acknowledgment
       final ack = jsonEncode({

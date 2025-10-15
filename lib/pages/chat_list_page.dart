@@ -289,9 +289,20 @@ class _ChatListPageState extends State<ChatListPage>
           IconButton(
             icon: Icon(Icons.search),
             onPressed: () {
-              setState(() {
-                _searchController.clear();
-                _searchQuery = '';
+              // Focus on the search bar
+              FocusScope.of(context).requestFocus(FocusNode());
+              // Scroll to search bar if needed
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_searchController.text.isEmpty) {
+                  // Give a visual hint
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Use the search bar below to filter chats'),
+                      duration: Duration(seconds: 2),
+                      backgroundColor: ResQLinkTheme.cardDark,
+                    ),
+                  );
+                }
               });
             },
           ),

@@ -598,41 +598,53 @@ class ChatRepository {
       final allSessions = await db.query(_tableName);
       final Map<String, List<Map<String, dynamic>>> sessionsByDevice = {};
 
-      // Group sessions by device address, device ID, AND device name
-      // This handles old sessions that may have different IDs but same name
+      // ENHANCED: Group sessions by device name to catch all variants of same person
+      // This consolidates "Kyle (02:00:00:00:00:00)", "Kyle (device_123)", "HONOR X9c (fa:12:4d:33:db:56)"
+      final Map<String, List<Map<String, dynamic>>> sessionsByName = {};
+
       for (final session in allSessions) {
-        final deviceAddress = session['device_address'] as String?;
-        final deviceId = session['device_id'] as String?;
+
         final deviceName = session['device_name'] as String?;
 
-        // CRITICAL: For old sessions without device_address, group by device_name
-        // This consolidates sessions like "John (device_123)", "John (device_456)", "John (02:00:00:00:00:00)"
-        String key;
+        if (deviceName == null || deviceName.isEmpty) continue;
 
-        // Check if this is a placeholder MAC address
-        final isPlaceholderMac = deviceAddress == '02:00:00:00:00:00' ||
-                                 deviceId == '02:00:00:00:00:00';
+        // Normalize device name for grouping (remove extra spaces, lowercase)
+        final normalizedName = deviceName.trim().toLowerCase();
 
-        if (isPlaceholderMac && deviceName != null && deviceName.isNotEmpty) {
-          // For placeholder MACs, ALWAYS group by device name
-          key = 'name:$deviceName';
-        } else if (deviceAddress != null && deviceAddress.isNotEmpty && deviceAddress != '02:00:00:00:00:00') {
-          // Use real device address as primary key (MAC address format like fa:12:4d:33:db:56)
-          key = deviceAddress;
-        } else if (deviceId != null && deviceId.contains(':') && deviceId != '02:00:00:00:00:00') {
-          // If deviceId looks like a real MAC address, use it
-          key = deviceId;
-        } else if (deviceName != null && deviceName.isNotEmpty) {
-          // Fallback: group by device name to merge old duplicates
-          key = 'name:$deviceName';
-        } else {
-          key = deviceId ?? 'unknown';
+        if (!sessionsByName.containsKey(normalizedName)) { 
+          sessionsByName[normalizedName] = [];
+        }
+        sessionsByName[normalizedName]!.add(session);
+      }
+
+      // Now merge sessionsByName into sessionsByDevice
+      for (final entry in sessionsByName.entries) {
+        final nameKey = entry.key;
+        final nameSessions = entry.value;
+
+        // Find if any session has a real MAC address
+        String? realMacAddress;
+        for (final session in nameSessions) {
+          final addr = session['device_address'] as String?;
+          final id = session['device_id'] as String?;
+
+          // Check if this is a REAL MAC address (not placeholder, contains colons)
+          if (addr != null && addr.contains(':') && addr != '02:00:00:00:00:00') {
+            realMacAddress = addr;
+            break;
+          } else if (id != null && id.contains(':') && id != '02:00:00:00:00:00') {
+            realMacAddress = id;
+            break;
+          }
         }
 
-        if (!sessionsByDevice.containsKey(key)) {
-          sessionsByDevice[key] = [];
+        // Use real MAC if found, otherwise use name-based key
+        final groupKey = realMacAddress ?? 'name:$nameKey';
+
+        if (!sessionsByDevice.containsKey(groupKey)) {
+          sessionsByDevice[groupKey] = [];
         }
-        sessionsByDevice[key]!.add(session);
+        sessionsByDevice[groupKey]!.addAll(nameSessions);
       }
 
       // Process each device's sessions
@@ -646,34 +658,69 @@ class ChatRepository {
           '🔍 Found ${sessions.length} sessions for device: $deviceKey',
         );
 
+        // Sort to find the "best" session to keep
+        // Priority: Real MAC > Most recent > Most messages > Oldest session
         sessions.sort((a, b) {
           final aAddress = a['device_address'] as String? ?? '';
           final bAddress = b['device_address'] as String? ?? '';
+          final aName = a['device_name'] as String? ?? '';
+          final bName = b['device_name'] as String? ?? '';
+
+          // Check if addresses are placeholder or real MACs
           final aIsPlaceholder = aAddress == '02:00:00:00:00:00' || aAddress.isEmpty;
           final bIsPlaceholder = bAddress == '02:00:00:00:00:00' || bAddress.isEmpty;
+          final aIsRealMac = aAddress.contains(':') && !aIsPlaceholder;
+          final bIsRealMac = bAddress.contains(':') && !bIsPlaceholder;
 
-          if (aIsPlaceholder != bIsPlaceholder) {
-            return aIsPlaceholder ? 1 : -1; 
+          // Priority 1: Prefer sessions with REAL MAC addresses
+          if (aIsRealMac != bIsRealMac) {
+            return aIsRealMac ? -1 : 1; // Real MAC comes first
           }
 
+          // Priority 2: Prefer sessions with device model names over user names
+          // Device names like "HONOR X9c" are more stable than user names like "Kyle"
+          final aLooksLikeModel = aName.length > 3 &&
+              (aName.contains(RegExp(r'[0-9]')) || aName.toUpperCase() == aName);
+          final bLooksLikeModel = bName.length > 3 &&
+              (bName.contains(RegExp(r'[0-9]')) || bName.toUpperCase() == bName);
+
+          if (aLooksLikeModel != bLooksLikeModel) {
+            return aLooksLikeModel ? -1 : 1;
+          }
+
+          // Priority 3: Most recent connection
           final aConnection = a['last_connection_at'] as int? ?? 0;
           final bConnection = b['last_connection_at'] as int? ?? 0;
           if (aConnection != bConnection) {
             return bConnection.compareTo(aConnection);
           }
 
+          // Priority 4: Most messages
           final aMessages = a['message_count'] as int? ?? 0;
           final bMessages = b['message_count'] as int? ?? 0;
           if (aMessages != bMessages) return bMessages.compareTo(aMessages);
 
+          // Priority 5: Oldest session (created first)
           final aCreated = a['created_at'] as int? ?? 0;
           final bCreated = b['created_at'] as int? ?? 0;
           return aCreated.compareTo(bCreated);
         });
 
         final keepSession = sessions.first;
-        final latestDeviceName = keepSession['device_name'] as String;
+        String finalDeviceName = keepSession['device_name'] as String;
 
+        // Find the best device name (prefer device model names over user names)
+        for (final session in sessions) {
+          final name = session['device_name'] as String?;
+          if (name != null && name.isNotEmpty) {
+            // Prefer names that look like device models (contain numbers or are uppercase)
+            if (name.length > 3 &&
+                (name.contains(RegExp(r'[0-9]')) || name.toUpperCase() == name)) {
+              finalDeviceName = name;
+              break;
+            }
+          }
+        }
 
         String stableSessionId;
         String? finalDeviceAddress;
@@ -683,11 +730,11 @@ class ChatRepository {
           for (final session in sessions) {
             final addr = session['device_address'] as String?;
             final id = session['device_id'] as String?;
-            if (addr != null && addr.isNotEmpty && addr.contains(':')) {
+            if (addr != null && addr.isNotEmpty && addr.contains(':') && addr != '02:00:00:00:00:00') {
               finalDeviceAddress = addr;
               foundSessionId = 'chat_${addr.replaceAll(':', '_')}';
               break;
-            } else if (id != null && id.contains(':')) {
+            } else if (id != null && id.contains(':') && id != '02:00:00:00:00:00') {
               finalDeviceAddress = id;
               foundSessionId = 'chat_${id.replaceAll(':', '_')}';
               break;
@@ -712,6 +759,7 @@ class ChatRepository {
             _tableName,
             {
               'id': stableSessionId,
+              'device_name': finalDeviceName, // Update to best device name
               'device_address': finalDeviceAddress ?? deviceKey,
             },
             where: 'id = ?',
@@ -724,6 +772,17 @@ class ChatRepository {
             {'chatSessionId': stableSessionId},
             where: 'chatSessionId = ?',
             whereArgs: [existingId],
+          );
+        } else {
+          // Even if no ID migration needed, update the device name to the best one
+          await db.update(
+            _tableName,
+            {
+              'device_name': finalDeviceName,
+              'device_address': finalDeviceAddress ?? deviceKey,
+            },
+            where: 'id = ?',
+            whereArgs: [stableSessionId],
           );
         }
 
@@ -752,7 +811,7 @@ class ChatRepository {
         }
 
         debugPrint(
-          '✅ Consolidated ${sessions.length} sessions into: $stableSessionId ($latestDeviceName)',
+          '✅ Consolidated ${sessions.length} sessions into: $stableSessionId ($finalDeviceName)',
         );
       }
 

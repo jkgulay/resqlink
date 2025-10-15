@@ -15,6 +15,8 @@ class P2PWiFiDirectHandler {
   final SocketProtocol _socketProtocol;
   WiFiDirectService? _wifiDirectService;
 
+
+
   // Callbacks
   void Function(List<WiFiDirectPeer>)? onPeersUpdated;
   void Function(String deviceId, String userName)? onDeviceRegistered;
@@ -192,8 +194,14 @@ class P2PWiFiDirectHandler {
       }
 
       if (peer.status == WiFiDirectPeerStatus.connected) {
-        debugPrint('➕ Adding connected WiFi Direct peer: ${peer.deviceName}');
-        _baseService.addConnectedDevice(peer.deviceAddress, peer.deviceName);
+        // CRITICAL: Only add the device if it's not already connected
+        // This prevents overwriting the display name from handshake with the device name
+        if (!_baseService.connectedDevices.containsKey(peer.deviceAddress)) {
+          debugPrint('➕ Adding connected WiFi Direct peer: ${peer.deviceName}');
+          _baseService.addConnectedDevice(peer.deviceAddress, peer.deviceName);
+        } else {
+          debugPrint('ℹ️ WiFi Direct peer already connected, preserving existing name: ${_baseService.connectedDevices[peer.deviceAddress]?.userName}');
+        }
       }
     }
   }
@@ -206,12 +214,15 @@ class P2PWiFiDirectHandler {
           debugPrint(
             '🆕 New WiFi Direct connection detected: ${peer.deviceName}',
           );
+          // CRITICAL: Only add if not already connected (preserves display name from handshake)
           _baseService.addConnectedDevice(peer.deviceAddress, peer.deviceName);
 
           // Wait for socket/handshake completion
           debugPrint(
             '⏳ Waiting for socket connection establishment with ${peer.deviceName}',
           );
+        } else {
+          debugPrint('ℹ️ WiFi Direct peer already connected, preserving existing name: ${_baseService.connectedDevices[peer.deviceAddress]?.userName}');
         }
       }
     }
@@ -463,20 +474,34 @@ class P2PWiFiDirectHandler {
         '🔌 Initializing socket protocol after WiFi Direct connection...',
       );
 
+      // Wait a moment for connection to stabilize
+      await Future.delayed(Duration(milliseconds: 500));
+
       final connectionInfo = await _wifiDirectService?.getConnectionInfo();
+
+      debugPrint('📋 Connection Info Received:');
+      debugPrint('  - Full Info: $connectionInfo');
+      debugPrint('  - Is Group Owner: ${connectionInfo?['isGroupOwner']}');
+      debugPrint('  - Group Owner Address: ${connectionInfo?['groupOwnerAddress']}');
+
       final isGroupOwner = connectionInfo?['isGroupOwner'] ?? false;
       final groupOwnerAddress = connectionInfo?['groupOwnerAddress'] ?? '';
 
       if (isGroupOwner) {
-        debugPrint('👑 Starting socket server as group owner');
+        debugPrint('👑 I am the GROUP OWNER - Starting socket SERVER');
         await _socketProtocol.startServer();
       } else if (groupOwnerAddress.isNotEmpty) {
-        debugPrint('📱 Connecting to socket server at: $groupOwnerAddress');
+        debugPrint('📱 I am the CLIENT - Connecting to server at: $groupOwnerAddress');
         await _socketProtocol.connectToServer(groupOwnerAddress);
       } else {
         debugPrint(
-          '⚠️ Cannot determine socket connection - trying server mode',
+          '⚠️ WARNING: Cannot determine group owner info!',
         );
+        debugPrint('  - isGroupOwner: $isGroupOwner');
+        debugPrint('  - groupOwnerAddress: "$groupOwnerAddress"');
+        debugPrint('  - Defaulting to SERVER mode (may cause conflicts)');
+
+        // Try to start server but log warning
         await _socketProtocol.startServer();
       }
 
@@ -519,10 +544,18 @@ class P2PWiFiDirectHandler {
       final prefs = await SharedPreferences.getInstance();
       final macAddress = prefs.getString('wifi_direct_mac_address');
 
+      // CRITICAL: Use the stored MAC address for BOTH deviceId and macAddress fields
+      // This ensures the peer receives our real WiFi Direct MAC address
+      final ourMacAddress = macAddress ?? _baseService.deviceId ?? '02:00:00:00:00:00';
+
+      debugPrint('📤 Sending handshake response to $targetDeviceId');
+      debugPrint('   Our MAC Address: $ourMacAddress');
+      debugPrint('   Our userName: ${_baseService.userName}');
+
       final response = jsonEncode({
         'type': 'handshake_response',
-        'deviceId': _baseService.deviceId,
-        'macAddress': macAddress ?? _baseService.deviceId,
+        'deviceId': ourMacAddress,  // Use real MAC here
+        'macAddress': ourMacAddress,  // Use real MAC here
         'userName': _baseService.userName,
         'deviceName': 'ResQLink Device',
         'timestamp': DateTime.now().millisecondsSinceEpoch,

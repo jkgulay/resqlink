@@ -26,6 +26,7 @@ class P2PMessageHandler {
 
   // Callbacks
   void Function(MessageModel)? onMessageProcessed;
+  String? Function(String ipAddress)? onResolveIpToMac;
 
   P2PMessageHandler(
     this._baseService,
@@ -61,6 +62,23 @@ class P2PMessageHandler {
       _processedMessages.add(messageHash);
       _messageTimestamps[messageHash] = now;
 
+      // CRITICAL: Resolve IP to MAC address before routing
+      String? resolvedMac;
+      if (onResolveIpToMac != null && from != null) {
+        // Extract IP from "/192.168.49.1:8889" format
+        final ipMatch = RegExp(r'(\d+\.\d+\.\d+\.\d+)').firstMatch(from);
+        if (ipMatch != null) {
+          final ipAddress = ipMatch.group(1)!;
+          resolvedMac = onResolveIpToMac!(ipAddress);
+          if (resolvedMac != null) {
+            debugPrint('🔍 Resolved message sender IP $ipAddress to MAC: $resolvedMac');
+          }
+        }
+      }
+
+      // Use resolved MAC if available, otherwise use raw from address
+      final deviceIdentifier = resolvedMac ?? from ?? 'unknown';
+
       // Parse message to check if it's a handshake
       try {
         final messageData = jsonDecode(message);
@@ -80,7 +98,8 @@ class P2PMessageHandler {
       }
 
       // Route through MessageRouter for non-handshake messages
-      await _messageRouter.routeRawMessage(message, from ?? 'unknown');
+      // CRITICAL: Pass resolved MAC address, not raw IP/port
+      await _messageRouter.routeRawMessage(message, deviceIdentifier);
 
       _addMessageTrace('WiFi Direct message routed successfully');
       debugPrint('✅ WiFi Direct message routed successfully via MessageRouter');
@@ -107,16 +126,34 @@ class P2PMessageHandler {
     final userName = messageData['userName'] as String?;
     final deviceName = messageData['deviceName'] as String?;
 
-    // CRITICAL: Use MAC address as the device identifier if available
-    final finalDeviceId = macAddress ?? deviceId;
+    // CRITICAL: Try to resolve the real MAC address from the IP
+    String? resolvedMac;
+    if (onResolveIpToMac != null && from != null) {
+      // Extract IP from "/192.168.49.1:8889" format
+      final ipMatch = RegExp(r'(\d+\.\d+\.\d+\.\d+)').firstMatch(from);
+      if (ipMatch != null) {
+        final ipAddress = ipMatch.group(1)!;
+        resolvedMac = onResolveIpToMac!(ipAddress);
+        if (resolvedMac != null) {
+          debugPrint('🔍 Resolved WiFi Direct IP $ipAddress to MAC: $resolvedMac');
+        }
+      }
+    }
+
+    // Priority for device identifier:
+    // 1. Resolved MAC from WiFi Direct peer list (most reliable)
+    // 2. MAC address from handshake
+    // 3. Device ID from handshake
+    final finalDeviceId = resolvedMac ?? macAddress ?? deviceId;
 
     if (finalDeviceId != null) {
       debugPrint(
         '🤝 Processing WiFi Direct handshake from $userName',
       );
-      debugPrint('📱 Device ID: $deviceId');
-      debugPrint('📍 MAC Address: $macAddress');
-      debugPrint('✅ Using identifier: $finalDeviceId');
+      debugPrint('📱 Device ID (from handshake): $deviceId');
+      debugPrint('📍 MAC Address (from handshake): $macAddress');
+      debugPrint('🔍 Resolved MAC (from WiFi Direct): $resolvedMac');
+      debugPrint('✅ Using final identifier: $finalDeviceId');
 
       // Register device (async)
       await _wifiDirectHandler.registerWiFiDirectDevice(
@@ -141,16 +178,34 @@ class P2PMessageHandler {
     final userName = messageData['userName'] as String?;
     final deviceName = messageData['deviceName'] as String?;
 
-    // CRITICAL: Use MAC address as the device identifier if available
-    final finalDeviceId = macAddress ?? deviceId;
+    // CRITICAL: Try to resolve the real MAC address from the IP
+    String? resolvedMac;
+    if (onResolveIpToMac != null && from != null) {
+      // Extract IP from "/192.168.49.1:8889" format
+      final ipMatch = RegExp(r'(\d+\.\d+\.\d+\.\d+)').firstMatch(from);
+      if (ipMatch != null) {
+        final ipAddress = ipMatch.group(1)!;
+        resolvedMac = onResolveIpToMac!(ipAddress);
+        if (resolvedMac != null) {
+          debugPrint('🔍 Resolved WiFi Direct response IP $ipAddress to MAC: $resolvedMac');
+        }
+      }
+    }
+
+    // Priority for device identifier:
+    // 1. Resolved MAC from WiFi Direct peer list (most reliable)
+    // 2. MAC address from handshake
+    // 3. Device ID from handshake
+    final finalDeviceId = resolvedMac ?? macAddress ?? deviceId;
 
     if (finalDeviceId != null) {
       debugPrint(
         '🤝 Processing WiFi Direct handshake response from $userName',
       );
-      debugPrint('📱 Device ID: $deviceId');
-      debugPrint('📍 MAC Address: $macAddress');
-      debugPrint('✅ Using identifier: $finalDeviceId');
+      debugPrint('📱 Device ID (from handshake): $deviceId');
+      debugPrint('📍 MAC Address (from handshake): $macAddress');
+      debugPrint('🔍 Resolved MAC (from WiFi Direct): $resolvedMac');
+      debugPrint('✅ Using final identifier: $finalDeviceId');
 
       // Register device (async)
       await _wifiDirectHandler.registerWiFiDirectDevice(

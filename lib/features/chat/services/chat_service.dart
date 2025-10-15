@@ -355,20 +355,44 @@ class ChatService extends ChangeNotifier {
 
     final message = event.message;
 
-    // Ensure message has chat session ID
-    if (message.chatSessionId == null) {
-      final sessionId = 'chat_${event.fromDeviceId.replaceAll(':', '_')}';
-      final updatedMessage = message.copyWith(chatSessionId: sessionId);
-      await MessageRepository.insert(updatedMessage);
+    // Determine the correct session ID for this message
+    String sessionId;
 
-      // Add to local cache
-      _sessionMessages.putIfAbsent(sessionId, () => []).add(updatedMessage);
-      _messageStreamControllers[sessionId]?.add(updatedMessage);
+    if (message.chatSessionId != null && message.chatSessionId!.isNotEmpty) {
+      // Message already has a session ID
+      sessionId = message.chatSessionId!;
     } else {
-      // Add to local cache
-      _sessionMessages.putIfAbsent(message.chatSessionId!, () => []).add(message);
-      _messageStreamControllers[message.chatSessionId!]?.add(message);
+      // Find existing session for this device OR create new session ID
+      final existingSession = await ChatRepository.getSessionByDeviceId(event.fromDeviceId);
+
+      if (existingSession != null) {
+        sessionId = existingSession.id;
+        debugPrint('📍 Found existing session: $sessionId for device: ${event.fromDeviceId}');
+      } else {
+        // Create MAC-based session ID for new conversation
+        sessionId = 'chat_${event.fromDeviceId.replaceAll(':', '_')}';
+        debugPrint('📍 Creating new session: $sessionId for device: ${event.fromDeviceId}');
+
+        // Create the session
+        await createOrGetSession(
+          deviceId: event.fromDeviceId,
+          deviceName: message.fromUser,
+          deviceAddress: event.fromDeviceId,
+        );
+      }
     }
+
+    // Ensure message has the correct session ID
+    final updatedMessage = message.chatSessionId == sessionId
+        ? message
+        : message.copyWith(chatSessionId: sessionId);
+
+    // Insert/update message in database
+    await MessageRepository.insert(updatedMessage);
+
+    // Add to local cache
+    _sessionMessages.putIfAbsent(sessionId, () => []).add(updatedMessage);
+    _messageStreamControllers[sessionId]?.add(updatedMessage);
 
     // Update sessions
     await loadSessions();

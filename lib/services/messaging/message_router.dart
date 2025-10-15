@@ -189,16 +189,17 @@ class MessageRouter {
         return;
       }
       
-      if (messageType == 'heartbeat' || messageType == 'ack') {
+      if (messageType == 'heartbeat' || messageType == 'ack' || messageType == 'ping' || messageType == 'pong') {
         // Don't route system messages as chat messages
         debugPrint('💓 Ignoring system message: $messageType');
         return;
       }
 
       // Extract sender information - CRITICAL: use the actual sender's device ID
-      final senderDeviceId = data['deviceId'] ?? 
-                            data['senderDeviceId'] ?? 
-                            fromDevice ?? 
+      // PRIORITY: fromDevice (already resolved by socket protocol) > message payload
+      final senderDeviceId = fromDevice ??
+                            data['deviceId'] ??
+                            data['senderDeviceId'] ??
                             'unknown';
       
       final senderName = data['senderName'] ?? 
