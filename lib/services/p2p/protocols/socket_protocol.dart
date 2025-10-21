@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/message_model.dart';
 import '../../messaging/message_router.dart';
+import '../../identity_service.dart';
 
 class SocketProtocol {
   static const int defaultPort= 8888;
@@ -25,20 +25,15 @@ class SocketProtocol {
   String? _deviceId;
   String? _userName;
 
-  // CRITICAL: Callback for device connections
+  // Callbacks
   Function(String deviceId, String userName)? onDeviceConnected;
-
-  // Callback for pong responses (for quality monitoring)
   Function(String deviceId, int sequence)? onPongReceived;
 
-  // Callback to resolve IP address to MAC address from WiFi Direct peers
-  Function(String ipAddress)? onResolveIpToMac;
-
-  /// Initialize socket protocol
+  /// Initialize socket protocol with UUID
   void initialize(String deviceId, String userName) {
     _deviceId = deviceId;
     _userName = userName;
-    debugPrint('🔧 Socket protocol initialized with deviceId: $deviceId');
+    debugPrint('🔧 Socket protocol initialized with UUID: $deviceId');
   }
 
   /// Update device ID (called after MAC address is stored)
@@ -195,16 +190,25 @@ class SocketProtocol {
 
   /// Send handshake message
   void _sendHandshake(Socket socket) async {
-    // Get MAC address from SharedPreferences
-    final prefs = await SharedPreferences.getInstance();
-    final macAddress = prefs.getString('wifi_direct_mac_address');
+    debugPrint('🤝 Preparing to send handshake...');
+
+    // Get UUID from IdentityService
+    final identity = IdentityService();
+    final deviceId = await identity.getDeviceId();
+
+    debugPrint('✅ Sending handshake with UUID: $deviceId, DisplayName: $_userName');
 
     final handshake = jsonEncode({
       'type': 'handshake',
-      'deviceId': _deviceId,
-      'macAddress': macAddress ?? _deviceId, // Include MAC address (fallback to deviceId)
-      'userName': _userName,
+      'deviceId': deviceId,            // Persistent UUID (unique identifier)
+      'displayName': _userName,        // User's chosen name (UI display)
       'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'protocol_version': '3.0',       // v3.0 = UUID-based identification
+
+      // Legacy fields for backward compatibility with older versions
+      'deviceMac': deviceId,
+      'macAddress': deviceId,
+      'userName': _userName,
     });
 
     _sendToSocket(socket, handshake);
@@ -252,55 +256,64 @@ class SocketProtocol {
   }
 
   /// Handle handshake message
-  void _handleHandshake(Map<String, dynamic> data, Socket socket) {
-    final deviceId = data['deviceId'] as String?;
-    final macAddress = data['macAddress'] as String?;
-    final userName = data['userName'] as String?;
+  Future<void> _handleHandshake(Map<String, dynamic> data, Socket socket) async {
+    final ipAddress = socket.remoteAddress.address;
+    final protocolVersion = data['protocol_version'] ?? '1.0';
 
-    // CRITICAL: Try to resolve the real MAC address from the socket IP
-    String? resolvedMac;
-    if (onResolveIpToMac != null) {
-      final ipAddress = socket.remoteAddress.address;
-      resolvedMac = onResolveIpToMac!(ipAddress);
-      if (resolvedMac != null) {
-        debugPrint('🔍 Resolved IP $ipAddress to MAC: $resolvedMac');
-      }
+    // v3.0+ uses UUID as deviceId
+    String? peerDeviceId = data['deviceId'] as String?;
+    String? peerDisplayName = data['displayName'] as String?;
+
+    // Legacy fallback for older versions
+    if (peerDeviceId == null || peerDeviceId.isEmpty) {
+      peerDeviceId = data['deviceMac'] as String? ??
+                     data['macAddress'] as String?;
+      peerDisplayName = peerDisplayName ?? data['userName'] as String?;
     }
 
-    // Priority for device identifier:
-    // 1. Resolved MAC from WiFi Direct peer list (most reliable)
-    // 2. MAC address from handshake
-    // 3. Device ID from handshake
-    final finalDeviceId = resolvedMac ?? macAddress ?? deviceId;
+    debugPrint('🤝 Received handshake from $ipAddress');
+    debugPrint('   Protocol: $protocolVersion');
+    debugPrint('   Peer Device ID: $peerDeviceId');
+    debugPrint('   Display Name: $peerDisplayName');
 
-    if (finalDeviceId != null) {
-      _deviceSockets[finalDeviceId] = socket;
-
-      debugPrint('🤝 Device connected: $userName');
-      debugPrint('📱 Device ID (from handshake): $deviceId');
-      debugPrint('📍 MAC Address (from handshake): $macAddress');
-      debugPrint('🔍 Resolved MAC (from WiFi Direct): $resolvedMac');
-      debugPrint('✅ Using final identifier: $finalDeviceId');
-      debugPrint('📱 Total connected devices: ${_deviceSockets.length}');
-
-      // CRITICAL: Notify P2P service about the connected device with MAC address
-      onDeviceConnected?.call(finalDeviceId, userName ?? 'Unknown');
-
-      debugPrint('✅ Handshake completed with $userName ($finalDeviceId)');
-
-      // Send acknowledgment
-      final ack = jsonEncode({
-        'type': 'ack',
-        'ackType': 'handshake',
-        'deviceId': _deviceId,
-        'userName': _userName,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
-
-      _sendToSocket(socket, ack);
-    } else {
-      debugPrint('⚠️ Handshake missing deviceId');
+    // Validate device ID exists
+    if (peerDeviceId == null || peerDeviceId.isEmpty) {
+      debugPrint('❌ REJECTING handshake: No device identifier provided');
+      return;
     }
+
+    // Register the socket with the device ID (UUID)
+    _deviceSockets[peerDeviceId] = socket;
+
+    debugPrint('🤝 Device connected: $peerDisplayName');
+    debugPrint('📍 Device ID: $peerDeviceId');
+    debugPrint('📱 Total connected devices: ${_deviceSockets.length}');
+
+    // Notify P2P service about the connected device
+    onDeviceConnected?.call(peerDeviceId, peerDisplayName ?? 'Unknown');
+
+    debugPrint('✅ Handshake completed with $peerDisplayName ($peerDeviceId)');
+
+    // Send acknowledgment with our UUID
+    final identity = IdentityService();
+    final ourDeviceId = await identity.getDeviceId();
+
+    final ack = jsonEncode({
+      'type': 'ack',
+      'ackType': 'handshake',
+      'deviceId': ourDeviceId,           // Our UUID
+      'displayName': _userName,          // Our display name
+      'peerId': peerDeviceId,            // Acknowledge their UUID
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'protocol_version': '3.0',
+
+      // Legacy fields for backward compatibility
+      'deviceMac': ourDeviceId,
+      'macAddress': ourDeviceId,
+      'userName': _userName,
+    });
+
+    _sendToSocket(socket, ack);
   }
 
   /// Handle regular message
@@ -380,9 +393,14 @@ class SocketProtocol {
   }
 
   /// Handle acknowledgment
-  void _handleAcknowledgment(Map<String, dynamic> data) {
+  Future<void> _handleAcknowledgment(Map<String, dynamic> data) async {
     final ackType = data['ackType'] as String?;
     final messageId = data['messageId'] as String?;
+
+    // UUID-based system - no need to learn MAC from peers
+    if (ackType == 'handshake') {
+      debugPrint('✅ Handshake acknowledged');
+    }
 
     if (ackType == 'message' && messageId != null) {
       debugPrint('✅ Message acknowledged: $messageId');

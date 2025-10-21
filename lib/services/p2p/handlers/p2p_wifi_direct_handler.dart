@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../wifi_direct_service.dart';
 import '../p2p_base_service.dart';
 import '../../../models/device_model.dart';
@@ -14,8 +13,6 @@ class P2PWiFiDirectHandler {
   final P2PConnectionManager _connectionManager;
   final SocketProtocol _socketProtocol;
   WiFiDirectService? _wifiDirectService;
-
-
 
   // Callbacks
   void Function(List<WiFiDirectPeer>)? onPeersUpdated;
@@ -35,13 +32,8 @@ class P2PWiFiDirectHandler {
       _wifiDirectService = WiFiDirectService.instance;
       await _wifiDirectService?.initialize();
 
-      // Setup MAC address callback
-      _wifiDirectService?.onMacAddressStored = (macAddress) {
-        debugPrint('🔄 MAC address stored callback: $macAddress');
-        _socketProtocol.updateDeviceId(macAddress);
-        _baseService.updateDeviceId(macAddress);
-        debugPrint('✅ Updated device ID to MAC address: $macAddress');
-      };
+      // UUID-based system - no MAC address management needed
+      debugPrint('✅ WiFiDirectHandler: Using UUID-based identification');
 
       _setupWiFiDirectStreams();
       debugPrint('✅ WiFi Direct handler initialized');
@@ -168,10 +160,14 @@ class P2PWiFiDirectHandler {
   /// Update discovered peers from WiFi Direct
   void _updateDiscoveredPeersFromWiFiDirect(List<WiFiDirectPeer> peers) {
     for (final peer in peers) {
+      // CRITICAL: Use custom display name if available, otherwise fall back to system device name
+      final customName = _wifiDirectService?.getCustomName(peer.deviceAddress);
+      final displayName = customName ?? peer.deviceName;
+
       final deviceModel = DeviceModel(
         id: peer.deviceAddress,
         deviceId: peer.deviceAddress,
-        userName: peer.deviceName,
+        userName: displayName,  // Use custom name if available
         isHost: false,
         isOnline: true,
         createdAt: DateTime.now(),
@@ -193,15 +189,12 @@ class P2PWiFiDirectHandler {
         _baseService.discoveredResQLinkDevices.add(deviceModel);
       }
 
+      // UUID-based system: DON'T register devices here with MAC address
+      // Wait for socket handshake to exchange UUIDs first
+      // The handshake handler will call addConnectedDevice() with the UUID
       if (peer.status == WiFiDirectPeerStatus.connected) {
-        // CRITICAL: Only add the device if it's not already connected
-        // This prevents overwriting the display name from handshake with the device name
-        if (!_baseService.connectedDevices.containsKey(peer.deviceAddress)) {
-          debugPrint('➕ Adding connected WiFi Direct peer: ${peer.deviceName}');
-          _baseService.addConnectedDevice(peer.deviceAddress, peer.deviceName);
-        } else {
-          debugPrint('ℹ️ WiFi Direct peer already connected, preserving existing name: ${_baseService.connectedDevices[peer.deviceAddress]?.userName}');
-        }
+        debugPrint('🔌 WiFi Direct peer connected: $displayName (${peer.deviceAddress})');
+        debugPrint('⏳ Waiting for socket handshake to exchange UUIDs...');
       }
     }
   }
@@ -210,12 +203,13 @@ class P2PWiFiDirectHandler {
   void _checkForNewConnectedPeers(List<WiFiDirectPeer> peers) {
     for (final peer in peers) {
       if (peer.status == WiFiDirectPeerStatus.connected) {
+        // UUID-based system: Don't register with MAC address
+        // Let the socket handshake exchange UUIDs first
+        final customName = _wifiDirectService?.getCustomName(peer.deviceAddress);
+        final displayName = customName ?? peer.deviceName;
+
         if (!_baseService.connectedDevices.containsKey(peer.deviceAddress)) {
-          debugPrint(
-            '🆕 New WiFi Direct connection detected: ${peer.deviceName}',
-          );
-          // CRITICAL: Only add if not already connected (preserves display name from handshake)
-          _baseService.addConnectedDevice(peer.deviceAddress, peer.deviceName);
+          debugPrint('🆕 New WiFi Direct connection: $displayName (${peer.deviceAddress})');
 
           // Wait for socket/handshake completion
           debugPrint(
@@ -268,11 +262,12 @@ class P2PWiFiDirectHandler {
 
         // WiFi Direct status: 0 = connected
         if (statusInt == 0 && deviceAddress.isNotEmpty) {
-          debugPrint('✅ Found connected peer: $deviceName ($deviceAddress)');
+          // Use custom display name if available
+          final customName = _wifiDirectService?.getCustomName(deviceAddress);
+          final displayName = customName ?? deviceName;
 
-          if (!_baseService.connectedDevices.containsKey(deviceAddress)) {
-            _baseService.addConnectedDevice(deviceAddress, deviceName);
-          }
+          debugPrint('✅ Found connected peer: $displayName ($deviceAddress)');
+          debugPrint('⏳ UUID-based system: Waiting for handshake to register device...');
 
           // Update discovered devices with connected status
           final existingIndex = _baseService.discoveredResQLinkDevices.indexWhere(
@@ -434,7 +429,6 @@ class P2PWiFiDirectHandler {
     }
   }
 
-  /// Check for system-level WiFi Direct connections
   Future<void> checkForSystemConnections() async {
     try {
       debugPrint('🔍 Checking for system-level connections...');
@@ -444,7 +438,6 @@ class P2PWiFiDirectHandler {
     }
   }
 
-  /// Connect to a WiFi Direct peer
   Future<bool> connectToPeer(String deviceAddress) async {
     try {
       debugPrint('📡 Connecting via WiFi Direct to: $deviceAddress');
@@ -541,25 +534,34 @@ class P2PWiFiDirectHandler {
     String? address,
   ) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final macAddress = prefs.getString('wifi_direct_mac_address');
+      debugPrint('📤 Preparing handshake response to $targetDeviceId');
 
-      // CRITICAL: Use the stored MAC address for BOTH deviceId and macAddress fields
-      // This ensures the peer receives our real WiFi Direct MAC address
-      final ourMacAddress = macAddress ?? _baseService.deviceId ?? '02:00:00:00:00:00';
+      // Get our UUID from base service
+      final ourDeviceId = _baseService.deviceId;
+      final ourUserName = _baseService.userName;
 
-      debugPrint('📤 Sending handshake response to $targetDeviceId');
-      debugPrint('   Our MAC Address: $ourMacAddress');
-      debugPrint('   Our userName: ${_baseService.userName}');
+      if (ourDeviceId == null || ourUserName == null) {
+        debugPrint('⚠️ Cannot send handshake response: Device not initialized');
+        return;
+      }
+
+      debugPrint('   Our UUID: $ourDeviceId');
+      debugPrint('   Peer UUID: $targetDeviceId');
+      debugPrint('   Our userName: $ourUserName');
 
       final response = jsonEncode({
         'type': 'handshake_response',
-        'deviceId': ourMacAddress,  // Use real MAC here
-        'macAddress': ourMacAddress,  // Use real MAC here
-        'userName': _baseService.userName,
-        'deviceName': 'ResQLink Device',
+        'deviceId': ourDeviceId,
+        'displayName': ourUserName,
+        'peerDeviceId': targetDeviceId,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'protocol_version': '1.0',
+        'protocol_version': '3.0',  // v3.0 = UUID-based
+
+        // Legacy fields for backward compatibility
+        'macAddress': ourDeviceId,
+        'peerMacAddress': targetDeviceId,
+        'userName': ourUserName,
+        'deviceName': 'ResQLink Device',
       });
 
       if (_wifiDirectService != null) {

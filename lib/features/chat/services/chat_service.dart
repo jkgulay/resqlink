@@ -187,13 +187,25 @@ class ChatService extends ChangeNotifier {
     double? longitude,
   }) async {
     try {
+      // UUID-based system - validate target device ID is not empty
+      if (targetDeviceId.isEmpty) {
+        debugPrint('❌ Cannot send message: Empty target device ID');
+        debugPrint('   fromUser (Display Name): $fromUser');
+        return false;
+      }
+
+      debugPrint('📤 ChatService sending message:');
+      debugPrint('   From (Display): $fromUser');
+      debugPrint('   To (UUID): $targetDeviceId');
+      debugPrint('   Message: "$message"');
+
       final messageId = MessageModel.generateMessageId(targetDeviceId);
       final timestamp = DateTime.now();
 
       final messageModel = MessageModel(
         messageId: messageId,
-        endpointId: targetDeviceId,
-        fromUser: fromUser,
+        endpointId: targetDeviceId, // MAC address for routing
+        fromUser: fromUser, // Display name for UI
         message: message,
         isMe: true,
         isEmergency: type == MessageType.emergency || type == MessageType.sos,
@@ -205,7 +217,7 @@ class ChatService extends ChangeNotifier {
         connectionType: connectionType,
         latitude: latitude,
         longitude: longitude,
-        deviceId: targetDeviceId,
+        deviceId: targetDeviceId, // MAC address as device identifier
       );
 
       // Save to database
@@ -319,17 +331,27 @@ class ChatService extends ChangeNotifier {
   void _handleDeviceConnected(DeviceConnectionEvent event) async {
     debugPrint('📱 ========== DEVICE CONNECTED ==========');
     debugPrint('   Device ID (should be MAC): ${event.deviceId}');
-    debugPrint('   Device Name: ${event.deviceName}');
+    debugPrint('   Device Name (Display): ${event.deviceName}');
     debugPrint('   Connection Type: ${event.connectionType}');
 
-    // CRITICAL FIX: Pass deviceId as deviceAddress for MAC-based session IDs
+    // UUID-based system - validate device ID is not empty
+    if (event.deviceId.isEmpty) {
+      debugPrint('   ❌ Rejecting connection: Empty device ID');
+      debugPrint('   Device Name: ${event.deviceName}');
+      debugPrint('========================================');
+      return;
+    }
+
+    debugPrint('   ✅ Device UUID validated');
+
+    // UUID-based session IDs
     final sessionId = await createOrGetSession(
-      deviceId: event.deviceId,
-      deviceName: event.deviceName,
+      deviceId: event.deviceId, // UUID as identifier
+      deviceName: event.deviceName, // Display name for UI
       deviceAddress: event.deviceId, // Use deviceId as the stable MAC address
       currentUserId: 'local', // This should come from user service
-      currentUserName: event.currentUserName, // From landing page
-      peerUserName: event.deviceName, // Peer's display name
+      currentUserName: event.currentUserName, // From landing page (display name)
+      peerUserName: event.deviceName, // Peer's display name (for UI)
     );
 
     if (sessionId != null) {
@@ -353,6 +375,15 @@ class ChatService extends ChangeNotifier {
   void _handleMessageReceived(MessageReceivedEvent event) async {
     debugPrint('📨 Message received from: ${event.fromDeviceId}');
 
+    // Validate sender has some device ID
+    if (event.fromDeviceId.isEmpty) {
+      debugPrint('❌ Rejecting message: No sender device ID');
+      return;
+    }
+
+    // UUID-based system - all device IDs are valid UUIDs
+    debugPrint('ℹ️ Message from device UUID: ${event.fromDeviceId}');
+
     final message = event.message;
 
     // Determine the correct session ID for this message
@@ -367,17 +398,17 @@ class ChatService extends ChangeNotifier {
 
       if (existingSession != null) {
         sessionId = existingSession.id;
-        debugPrint('📍 Found existing session: $sessionId for device: ${event.fromDeviceId}');
+        debugPrint('📍 Found existing session: $sessionId for device (MAC): ${event.fromDeviceId}');
       } else {
         // Create MAC-based session ID for new conversation
         sessionId = 'chat_${event.fromDeviceId.replaceAll(':', '_')}';
-        debugPrint('📍 Creating new session: $sessionId for device: ${event.fromDeviceId}');
+        debugPrint('📍 Creating new session: $sessionId for device (MAC): ${event.fromDeviceId}');
 
         // Create the session
         await createOrGetSession(
-          deviceId: event.fromDeviceId,
-          deviceName: message.fromUser,
-          deviceAddress: event.fromDeviceId,
+          deviceId: event.fromDeviceId, // MAC address
+          deviceName: message.fromUser, // Display name
+          deviceAddress: event.fromDeviceId, // MAC address
         );
       }
     }

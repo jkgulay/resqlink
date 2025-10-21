@@ -92,6 +92,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     // Set up lifecycle handler
     SystemChannels.lifecycle.setMessageHandler(_handleLifecycleMessage);
+
+    // CRITICAL FIX: Check permissions immediately on first launch
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAndRequestPermissions();
+    });
   }
 
   Widget _buildHomePage() {
@@ -107,10 +112,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         builder: (context, controller, locationState, gpsController, child) {
           return RefreshIndicator(
             onRefresh: () async {
-              await controller.refreshLocation();
-              await locationState.refreshLocation();
-              await gpsController
-                  .getCurrentLocation(); // Also refresh GPS location
+              // CRITICAL FIX: Add device scan to pull-to-refresh
+              debugPrint('🔄 Pull to refresh triggered');
+              await Future.wait([
+                controller.refreshLocation(),
+                locationState.refreshLocation(),
+                gpsController.getCurrentLocation(),
+                _homeController.startScan(), // Trigger device scan
+              ]);
             },
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -382,6 +391,72 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
+  /// CRITICAL FIX: Check and request permissions with user feedback
+  Future<void> _checkAndRequestPermissions() async {
+    if (!mounted) return;
+
+    try {
+      debugPrint('🔐 Checking WiFi Direct permissions...');
+
+      final granted = await _p2pService.checkAndRequestPermissions();
+
+      if (!granted && mounted) {
+        debugPrint('⚠️ Permissions not granted, showing user prompt');
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.warning, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Location & Nearby Devices permissions required for WiFi Direct',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'GRANT',
+              textColor: Colors.white,
+              onPressed: () async {
+                await _p2pService.checkAndRequestPermissions();
+                // Retry after permission grant
+                if (mounted) {
+                  await Future.delayed(Duration(milliseconds: 500));
+                  _checkAndRequestPermissions();
+                }
+              },
+            ),
+          ),
+        );
+      } else if (granted) {
+        debugPrint('✅ All permissions granted');
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking permissions: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.error, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text('Failed to check permissions: ${e.toString()}'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _onAppPaused() async {
     debugPrint('App paused - saving state');
   }
@@ -461,6 +536,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _onDeviceConnected(String deviceId, String userName) async {
     debugPrint("✅ Device connected: $userName ($deviceId)");
 
+    // CRITICAL FIX: Register device with identifier resolver
+    // This maps display name to MAC address for message routing
+    _p2pService.registerDevice(deviceId, userName);
+    debugPrint("📝 Registered device: Display Name='$userName', MAC='$deviceId'");
+
     // Prevent duplicate connection processing for the same device
     if (_recentlyConnectedDevices.containsKey(deviceId)) {
       final lastConnection = _recentlyConnectedDevices[deviceId]!;
@@ -480,13 +560,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (mounted) {
       // Create device map for navigation
       final device = {
-        'deviceId': deviceId,
-        'deviceAddress': deviceId,
-        'deviceName': userName,
+        'deviceId': deviceId,  // MAC address as identifier
+        'deviceAddress': deviceId,  // MAC address
+        'deviceName': userName,  // Display name for UI
         'isConnected': true,
       };
 
-      // Create persistent conversation for the device
+      // Create persistent conversation for the device (uses MAC as identifier)
       try {
         await _createPersistentConversationForDevice(deviceId, userName);
       } catch (e) {

@@ -2,10 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/message_model.dart';
 import '../../models/device_model.dart';
 import '../temporary_identity_service.dart';
+import '../identity_service.dart';
 
 /// Base P2P service with core functionality
 abstract class P2PBaseService with ChangeNotifier {
@@ -75,71 +75,43 @@ abstract class P2PBaseService with ChangeNotifier {
   /// Initialize the service
   Future<bool> initialize(String userName, {String? preferredRole}) async {
     debugPrint('🚀 P2P Base Service initializing with userName: $userName');
-    
+
     try {
+      // Get UUID from IdentityService
+      final identity = IdentityService();
+      _deviceId = await identity.getDeviceId();
+
+      // Save display name to IdentityService
       _userName = userName;
-      _deviceId = await _getOrCreateDeviceId();
-      
+      await identity.setDisplayName(userName);
+
       if (preferredRole != null) {
         _currentRole = _parseRole(preferredRole);
       }
 
       // Check permissions
       await checkAndRequestPermissions();
-      
+
       // Monitor connectivity
       _monitorConnectivity();
-      
+
       // Start cleanup timer
       _startMessageCleanup();
-      
-      debugPrint('✅ P2P Base Service initialized - DeviceID: $_deviceId, UserName: $_userName');
+
+      debugPrint('✅ P2P Base Service initialized - UUID: $_deviceId, DisplayName: $_userName');
       return true;
-      
+
     } catch (e) {
       debugPrint('❌ P2P Base Service initialization failed: $e');
       return false;
     }
   }
 
-  /// Update device ID (called when MAC address becomes available)
+  /// Update device ID (called when UUID needs to be refreshed)
   void updateDeviceId(String newDeviceId) {
     final oldDeviceId = _deviceId;
     _deviceId = newDeviceId;
     debugPrint('🔄 Base service device ID updated: $oldDeviceId → $newDeviceId');
-  }
-
-  /// Generate or retrieve device ID
-  /// CRITICAL: This should return the WiFi Direct MAC address when available,
-  /// otherwise fall back to stored/generated ID
-  Future<String> _getOrCreateDeviceId() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-
-      // First, try to get the WiFi Direct MAC address (this will be set by WiFiDirectService)
-      String? macAddress = prefs.getString('wifi_direct_mac_address');
-
-      if (macAddress != null && macAddress.isNotEmpty) {
-        debugPrint('📱 Using WiFi Direct MAC address as device ID: $macAddress');
-        return macAddress;
-      }
-
-      // Fallback to stored device ID
-      String? deviceId = prefs.getString('p2p_device_id');
-
-      if (deviceId == null) {
-        deviceId = 'device_${DateTime.now().millisecondsSinceEpoch}';
-        await prefs.setString('p2p_device_id', deviceId);
-        debugPrint('📱 Generated new device ID: $deviceId');
-      } else {
-        debugPrint('📱 Using existing device ID: $deviceId');
-      }
-
-      return deviceId;
-    } catch (e) {
-      debugPrint('❌ Error with device ID: $e');
-      return 'device_${DateTime.now().millisecondsSinceEpoch}';
-    }
   }
 
   /// Parse role string to enum

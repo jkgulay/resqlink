@@ -9,7 +9,7 @@ class ChatRepository {
   static const String _tableName = 'chat_sessions';
 
   /// Create or update a chat session with enhanced deduplication
-  /// CRITICAL: Uses deviceAddress (MAC address) as the stable identifier
+  /// CRITICAL: Uses deviceAddress (UUID) as the stable identifier
   static Future<String> createOrUpdate({
     required String deviceId,
     required String deviceName,
@@ -21,10 +21,24 @@ class ChatRepository {
     try {
       final db = await DatabaseManager.database;
 
+      // CRITICAL FIX: Validate UUID before proceeding
       final stableDeviceId = deviceAddress ?? deviceId;
 
-      // Session ID is now based on the stable device identifier (MAC address)
+      if (stableDeviceId.isEmpty) {
+        debugPrint('❌ Cannot create session: Empty UUID "$stableDeviceId"');
+        debugPrint('   deviceId: $deviceId');
+        debugPrint('   deviceAddress: $deviceAddress');
+        debugPrint('   deviceName: $deviceName');
+        debugPrint('   Rejecting empty/invalid UUIDs');
+        return ''; // Return empty string to indicate failure
+      }
+
+      // Session ID is now based on the stable device identifier (UUID)
       final sessionId = 'chat_${stableDeviceId.replaceAll(':', '_')}';
+
+      debugPrint('✅ Creating/updating session with validated UUID: $stableDeviceId');
+      debugPrint('   Display Name: $deviceName');
+      debugPrint('   Session ID: $sessionId');
 
       final now = DateTime.now();
 
@@ -34,7 +48,7 @@ class ChatRepository {
         sessionId,
       );
 
-      // Check for existing session using ONLY deviceAddress (MAC address)
+      // Check for existing session using ONLY deviceAddress (UUID)
       final existingSession = await db.query(
         _tableName,
         where: 'device_address = ? OR device_id = ? OR id = ?',
@@ -169,7 +183,7 @@ class ChatRepository {
     }
   }
 
-  /// Get session by device ID (which should be the MAC address)
+  /// Get session by device ID (which should be the UUID)
   /// Also checks device_address for backward compatibility
   static Future<ChatSession?> getSessionByDeviceId(String deviceId) async {
     try {
@@ -599,7 +613,7 @@ class ChatRepository {
       final Map<String, List<Map<String, dynamic>>> sessionsByDevice = {};
 
       // ENHANCED: Group sessions by device name to catch all variants of same person
-      // This consolidates "Kyle (02:00:00:00:00:00)", "Kyle (device_123)", "HONOR X9c (fa:12:4d:33:db:56)"
+      // This consolidates sessions with different UUIDs but same device names
       final Map<String, List<Map<String, dynamic>>> sessionsByName = {};
 
       for (final session in allSessions) {
@@ -622,24 +636,24 @@ class ChatRepository {
         final nameKey = entry.key;
         final nameSessions = entry.value;
 
-        // Find if any session has a real MAC address
-        String? realMacAddress;
+        // Find if any session has a real UUID
+        String? realUuid;
         for (final session in nameSessions) {
           final addr = session['device_address'] as String?;
           final id = session['device_id'] as String?;
 
-          // Check if this is a REAL MAC address (not placeholder, contains colons)
-          if (addr != null && addr.contains(':') && addr != '02:00:00:00:00:00') {
-            realMacAddress = addr;
+          // Check if this is a REAL UUID (not empty)
+          if (addr != null && addr.isNotEmpty) {
+            realUuid = addr;
             break;
-          } else if (id != null && id.contains(':') && id != '02:00:00:00:00:00') {
-            realMacAddress = id;
+          } else if (id != null && id.isNotEmpty) {
+            realUuid = id;
             break;
           }
         }
 
-        // Use real MAC if found, otherwise use name-based key
-        final groupKey = realMacAddress ?? 'name:$nameKey';
+        // Use real UUID if found, otherwise use name-based key
+        final groupKey = realUuid ?? 'name:$nameKey';
 
         if (!sessionsByDevice.containsKey(groupKey)) {
           sessionsByDevice[groupKey] = [];
@@ -659,22 +673,20 @@ class ChatRepository {
         );
 
         // Sort to find the "best" session to keep
-        // Priority: Real MAC > Most recent > Most messages > Oldest session
+        // Priority: Valid UUID > Most recent > Most messages > Oldest session
         sessions.sort((a, b) {
           final aAddress = a['device_address'] as String? ?? '';
           final bAddress = b['device_address'] as String? ?? '';
           final aName = a['device_name'] as String? ?? '';
           final bName = b['device_name'] as String? ?? '';
 
-          // Check if addresses are placeholder or real MACs
-          final aIsPlaceholder = aAddress == '02:00:00:00:00:00' || aAddress.isEmpty;
-          final bIsPlaceholder = bAddress == '02:00:00:00:00:00' || bAddress.isEmpty;
-          final aIsRealMac = aAddress.contains(':') && !aIsPlaceholder;
-          final bIsRealMac = bAddress.contains(':') && !bIsPlaceholder;
+          // Check if addresses are valid UUIDs
+          final aIsValid = aAddress.isNotEmpty;
+          final bIsValid = bAddress.isNotEmpty;
 
-          // Priority 1: Prefer sessions with REAL MAC addresses
-          if (aIsRealMac != bIsRealMac) {
-            return aIsRealMac ? -1 : 1; // Real MAC comes first
+          // Priority 1: Prefer sessions with valid UUIDs
+          if (aIsValid != bIsValid) {
+            return aIsValid ? -1 : 1; // Valid UUID comes first
           }
 
           // Priority 2: Prefer sessions with device model names over user names
@@ -730,11 +742,11 @@ class ChatRepository {
           for (final session in sessions) {
             final addr = session['device_address'] as String?;
             final id = session['device_id'] as String?;
-            if (addr != null && addr.isNotEmpty && addr.contains(':') && addr != '02:00:00:00:00:00') {
+            if (addr != null && addr.isNotEmpty) {
               finalDeviceAddress = addr;
               foundSessionId = 'chat_${addr.replaceAll(':', '_')}';
               break;
-            } else if (id != null && id.contains(':') && id != '02:00:00:00:00:00') {
+            } else if (id != null && id.isNotEmpty) {
               finalDeviceAddress = id;
               foundSessionId = 'chat_${id.replaceAll(':', '_')}';
               break;

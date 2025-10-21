@@ -13,7 +13,11 @@
       "Bash(timeout 60 flutter run -d RMX2040 --release)",
       "Bash(./gradlew --stop)",
       "Bash(timeout 30 flutter run -d RMX2040 --release)",
-      "Bash(./gradlew:*)"
+      "Bash(./gradlew:*)",
+      "Bash(adb install -r \"c:\\Users\\brosg\\Desktop\\Notes\\resqlink\\build\\app\\outputs\\flutter-apk\\app-debug.apk\")",
+      "Bash(adb install:*)",
+      "Bash(cat:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

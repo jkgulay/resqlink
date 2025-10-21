@@ -26,9 +26,24 @@ class WifiDirectBroadcastReceiver(
             WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
                 val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
                 val isEnabled = state == WifiP2pManager.WIFI_P2P_STATE_ENABLED
-                
-                Log.d("WifiDirectReceiver", "WiFi P2P state changed: $isEnabled")
-                
+
+                Log.d("WifiDirectReceiver", "📡 WiFi P2P state changed: enabled=$isEnabled, state=$state")
+
+                // CRITICAL FIX: Request device info when WiFi Direct becomes enabled
+                if (isEnabled) {
+                    Log.d("WifiDirectReceiver", "🔍 WiFi Direct enabled - requesting device info...")
+                    channel?.let { ch ->
+                        manager.requestDeviceInfo(ch) { device ->
+                            if (device != null) {
+                                Log.d("WifiDirectReceiver", "📱 Device info from state change: ${device.deviceName} (${device.deviceAddress})")
+                                sendDeviceInfo(device)
+                            } else {
+                                Log.w("WifiDirectReceiver", "⚠️ Device info is null after WiFi Direct enabled")
+                            }
+                        }
+                    } ?: Log.w("WifiDirectReceiver", "⚠️ Channel is null, cannot request device info")
+                }
+
                 val stateMap = mapOf(
                     "isEnabled" to isEnabled,
                     "state" to state
@@ -37,8 +52,41 @@ class WifiDirectBroadcastReceiver(
             }
 
             WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
-                Log.d("WifiDirectReceiver", "Peers list changed")
-                activity.sendToFlutter("wifi_direct", "onPeersChanged", emptyMap<String, Any>())
+                Log.d("WifiDirectReceiver", "Peers list changed - requesting peer list...")
+
+                // CRITICAL FIX: Request peer list when peers change
+                channel?.let { ch ->
+                    manager.requestPeers(ch) { peers ->
+                        val peersList = peers.deviceList.map { device ->
+                            mapOf(
+                                "deviceName" to (device.deviceName ?: "Unknown Device"),
+                                "deviceAddress" to (device.deviceAddress ?: "Unknown Address"),
+                                "status" to when(device.status) {
+                                    WifiP2pDevice.AVAILABLE -> "available"
+                                    WifiP2pDevice.INVITED -> "invited"
+                                    WifiP2pDevice.CONNECTED -> "connected"
+                                    WifiP2pDevice.FAILED -> "failed"
+                                    WifiP2pDevice.UNAVAILABLE -> "unavailable"
+                                    else -> "unknown"
+                                },
+                                "primaryDeviceType" to (device.primaryDeviceType ?: "Unknown Type")
+                            )
+                        }
+
+                        Log.d("WifiDirectReceiver", "✅ Found ${peersList.size} peers:")
+                        peersList.forEach { peer ->
+                            Log.d("WifiDirectReceiver", "  📱 ${peer["deviceName"]} (${peer["deviceAddress"]}) - ${peer["status"]}")
+                        }
+
+                        // Send peer list to Flutter
+                        activity.sendToFlutter("wifi_direct", "onPeersUpdated", mapOf("peers" to peersList))
+
+                        // Also send onPeersChanged for backward compatibility
+                        activity.sendToFlutter("wifi_direct", "onPeersChanged", mapOf("peers" to peersList))
+                    }
+                } ?: run {
+                    Log.e("WifiDirectReceiver", "❌ Channel is null, cannot request peers")
+                }
             }
 
             WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
@@ -46,36 +94,87 @@ class WifiDirectBroadcastReceiver(
             }
 
             WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION -> {
+                Log.d("WifiDirectReceiver", "📱 WIFI_P2P_THIS_DEVICE_CHANGED_ACTION received!")
                 val device = intent.getParcelableExtra<WifiP2pDevice>(WifiP2pManager.EXTRA_WIFI_P2P_DEVICE)
-                device?.let { sendDeviceInfo(it) }
+                if (device != null) {
+                    Log.d("WifiDirectReceiver", "📱 Device changed: ${device.deviceName} (${device.deviceAddress})")
+                    sendDeviceInfo(device)
+                } else {
+                    Log.w("WifiDirectReceiver", "⚠️ Device is null in WIFI_P2P_THIS_DEVICE_CHANGED_ACTION")
+                }
             }
         }
     }
 
+    private fun getWifiDirectMacFromInterface(): String? {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val intf = interfaces.nextElement()
+                val name = intf.name
+                if (name.startsWith("p2p")) {
+                    val mac = intf.hardwareAddress
+                    if (mac != null && mac.size == 6) {
+                        val macString = mac.joinToString(":") { String.format("%02X", it) }
+                        Log.d("WifiDirectReceiver", "🔍 Found p2p interface '$name' with MAC: $macString")
+                        if (macString != "02:00:00:00:00:00") {
+                            return macString
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("WifiDirectReceiver", "❌ Error getting MAC from interface: ${e.message}")
+        }
+        return null
+    }
+
     private fun sendDeviceInfo(device: WifiP2pDevice) {
-        val deviceMap = mutableMapOf<String, Any>()
-        deviceMap["deviceName"] = device.deviceName ?: "Unknown Device"
-        deviceMap["deviceAddress"] = device.deviceAddress ?: "Unknown Address"
-        deviceMap["primaryDeviceType"] = device.primaryDeviceType ?: "Unknown Type"
-        deviceMap["secondaryDeviceType"] = device.secondaryDeviceType ?: "Unknown Secondary Type"
-        deviceMap["status"] = device.status
+        Log.d("WifiDirectReceiver", "📤 sendDeviceInfo called")
 
-        // Remove deprecated WPS properties - use simpler approach
-        deviceMap["supportsWps"] = true // Default assumption for modern devices
+        var macAddress = device.deviceAddress ?: ""
+        val deviceName = device.deviceName ?: "Unknown Device"
 
-        // CRITICAL: Store WiFi Direct MAC address in SharedPreferences for native access
-        device.deviceAddress?.let { macAddress ->
-            try {
-                val prefs = activity.getSharedPreferences("resqlink_prefs", android.content.Context.MODE_PRIVATE)
-                prefs.edit().putString("wifi_direct_mac_address", macAddress).apply()
-                android.util.Log.d("WifiDirectReceiver", "✅ Stored WiFi Direct MAC: $macAddress")
-            } catch (e: Exception) {
-                android.util.Log.e("WifiDirectReceiver", "Failed to store MAC address: ${e.message}")
+        Log.d("WifiDirectReceiver", "📱 Device info from API: $deviceName ($macAddress)")
+
+        // CRITICAL FIX: If API returns placeholder, try to get from network interface
+        if (macAddress.isEmpty() || macAddress == "02:00:00:00:00:00") {
+            Log.w("WifiDirectReceiver", "⚠️ API returned placeholder/empty MAC, trying network interface...")
+            val interfaceMac = getWifiDirectMacFromInterface()
+            if (interfaceMac != null) {
+                Log.d("WifiDirectReceiver", "✅ Got real MAC from network interface: $interfaceMac")
+                macAddress = interfaceMac
+            } else {
+                Log.w("WifiDirectReceiver", "⚠️ Could not get MAC from network interface either")
             }
         }
 
-        // Ensure we have a non-null map
+        val deviceMap = mutableMapOf<String, Any>()
+        deviceMap["deviceName"] = deviceName
+        deviceMap["deviceAddress"] = macAddress
+        deviceMap["primaryDeviceType"] = device.primaryDeviceType ?: "Unknown Type"
+        deviceMap["secondaryDeviceType"] = device.secondaryDeviceType ?: "Unknown Secondary Type"
+        deviceMap["status"] = device.status
+        deviceMap["supportsWps"] = true
+
+        Log.d("WifiDirectReceiver", "📤 Device info map with MAC: $deviceMap")
+
+        // Store MAC address if valid
+        if (macAddress.isNotEmpty() && macAddress != "02:00:00:00:00:00") {
+            try {
+                val prefs = activity.getSharedPreferences("resqlink_prefs", android.content.Context.MODE_PRIVATE)
+                prefs.edit().putString("wifi_direct_mac_address", macAddress).apply()
+                Log.d("WifiDirectReceiver", "✅ Stored WiFi Direct MAC: $macAddress")
+            } catch (e: Exception) {
+                Log.e("WifiDirectReceiver", "❌ Failed to store MAC address: ${e.message}")
+            }
+        } else {
+            Log.w("WifiDirectReceiver", "⚠️ Skipping placeholder MAC: $macAddress")
+        }
+
+        Log.d("WifiDirectReceiver", "📞 Sending onDeviceChanged to Flutter")
         activity.sendToFlutter("wifi_direct", "onDeviceChanged", deviceMap)
+        Log.d("WifiDirectReceiver", "✅ sendToFlutter completed")
     }
 
  private fun handleConnectionChanged(intent: Intent) {
@@ -89,24 +188,18 @@ class WifiDirectBroadcastReceiver(
 
     if (networkInfo?.isConnected == true && wifiP2pInfo != null) {
         // CRITICAL: Request device info AFTER connection to get real MAC address
+        Log.d("WifiDirectReceiver", "🔍 Connection established - requesting device info...")
         channel?.let { ch ->
             manager.requestDeviceInfo(ch) { device ->
-                device?.deviceAddress?.let { macAddress ->
-                    // Only store if it's not the placeholder MAC
-                    if (macAddress != "02:00:00:00:00:00" && macAddress.isNotEmpty()) {
-                        try {
-                            val prefs = activity.getSharedPreferences("resqlink_prefs", android.content.Context.MODE_PRIVATE)
-                            prefs.edit().putString("wifi_direct_mac_address", macAddress).apply()
-                            android.util.Log.d("WifiDirectReceiver", "✅ Stored REAL WiFi Direct MAC after connection: $macAddress")
-                        } catch (e: Exception) {
-                            android.util.Log.e("WifiDirectReceiver", "Failed to store MAC: ${e.message}")
-                        }
-                    } else {
-                        android.util.Log.w("WifiDirectReceiver", "⚠️ Skipping placeholder MAC: $macAddress")
-                    }
+                if (device != null) {
+                    Log.d("WifiDirectReceiver", "📱 Device info after connection: ${device.deviceName} (${device.deviceAddress})")
+                    // Send to Flutter which will validate and store
+                    sendDeviceInfo(device)
+                } else {
+                    Log.w("WifiDirectReceiver", "⚠️ Device info is null after connection")
                 }
             }
-        }
+        } ?: Log.w("WifiDirectReceiver", "⚠️ Channel is null after connection")
         val connectionInfo = mutableMapOf<String, Any>()
         connectionInfo["isConnected"] = true
         connectionInfo["isGroupOwner"] = wifiP2pInfo.isGroupOwner

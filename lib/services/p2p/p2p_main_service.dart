@@ -18,6 +18,7 @@ import 'monitoring/connection_quality_monitor.dart';
 import 'monitoring/reconnection_manager.dart';
 import 'monitoring/device_prioritization.dart';
 import 'monitoring/timeout_manager.dart';
+import 'managers/identifier_resolver.dart';
 
 
 class P2PMainService extends P2PBaseService {
@@ -32,6 +33,7 @@ class P2PMainService extends P2PBaseService {
   late P2PWiFiDirectHandler _wifiDirectHandler;
   late P2PMessageHandler _messageHandler;
   late P2PDeviceManager _deviceManager;
+  late IdentifierResolver _identifierResolver;
 
   // Enhanced monitoring and management
   late ConnectionQualityMonitor _qualityMonitor;
@@ -79,18 +81,26 @@ class P2PMainService extends P2PBaseService {
 
   /// Initialize core service components
   Future<void> _initializeCoreComponents() async {
+    // Identifier resolver (UUID-based system)
+    _identifierResolver = IdentifierResolver();
+
     // Network and discovery services
     _networkService = P2PNetworkService(this);
     _discoveryService = P2PDiscoveryService(this, _networkService);
     await _discoveryService.initialize();
 
-    // Socket protocol
+    // Socket protocol (UUID-based)
     _socketProtocol = SocketProtocol();
     await _socketProtocol.forceCleanup();
     _socketProtocol.initialize(deviceId!, userName!);
 
     // Message router
     _messageRouter = MessageRouter();
+
+    // CRITICAL FIX: Register IdentifierResolver with MessageRouter
+    // This allows MessageRouter to resolve display names to MAC addresses
+    _messageRouter.setIdentifierResolver(_identifierResolver);
+    debugPrint('✅ IdentifierResolver registered with MessageRouter');
 
     debugPrint('✅ Core components initialized');
   }
@@ -136,6 +146,8 @@ class P2PMainService extends P2PBaseService {
 
   /// Setup connections and callbacks between components
   void _setupConnectionsAndCallbacks() {
+    // UUID-based system - no MAC address updates needed
+
     // Socket protocol callbacks
     _socketProtocol.onDeviceConnected = (deviceId, userName) {
       debugPrint(
@@ -155,9 +167,9 @@ class P2PMainService extends P2PBaseService {
         final connectedPeers = _deviceManager.discoveredDevices.values
             .where((deviceMap) {
               final isConnected = deviceMap['isConnected'] as bool? ?? false;
-              final deviceAddress = deviceMap['deviceAddress'] as String?;
-              // Check if device is connected and has a real MAC address (contains ':')
-              return isConnected && deviceAddress != null && deviceAddress.contains(':') && deviceAddress != '02:00:00:00:00:00';
+              final deviceId = deviceMap['deviceId'] as String? ?? deviceMap['deviceAddress'] as String?;
+              // Check if device is connected and has a valid UUID
+              return isConnected && deviceId != null && deviceId.isNotEmpty;
             })
             .toList();
 
@@ -188,8 +200,8 @@ class P2PMainService extends P2PBaseService {
       }
     }
 
-    // Set the resolver for both socket protocol and message handler
-    _socketProtocol.onResolveIpToMac = resolveIpToMac;
+    // UUID-based system - no IP to MAC resolution needed
+    // Message handler still may use resolver for legacy support
     _messageHandler.onResolveIpToMac = resolveIpToMac;
 
     // WiFi Direct handler callbacks
@@ -684,6 +696,9 @@ class P2PMainService extends P2PBaseService {
     _reconnectionManager.stopReconnection(deviceId);
   }
 
+  /// Update all device references when MAC address changes
+  // UUID-based system - device IDs never change, so this method is not needed
+
   /// Get detailed service status
   String getDetailedStatus() {
     final networkStatus = _networkService.getNetworkStatus();
@@ -736,6 +751,14 @@ ${_messageHandler.getMessageTrace().take(5).join('\n')}
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final random = timestamp.hashCode;
     return 'msg_${timestamp}_${deviceId.hashCode}_$random';
+  }
+
+  /// Get identifier resolver for external access
+  IdentifierResolver get identifierResolver => _identifierResolver;
+
+  /// Register device with identifier resolver
+  void registerDevice(String macAddress, String displayName) {
+    _identifierResolver.registerDevice(macAddress, displayName);
   }
 
   @override

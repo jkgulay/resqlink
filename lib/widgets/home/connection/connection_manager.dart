@@ -89,13 +89,39 @@ class ConnectionManager {
 
     try {
       final deviceName = device['deviceName'] ?? 'Unknown Device';
+      final deviceId = device['deviceId'] as String?;
+      final deviceAddress = device['deviceAddress'] as String?;
+
+      // Use UUID as identifier, validate it's not empty
+      final targetUuid = deviceAddress ?? deviceId;
+
+      if (targetUuid == null || targetUuid.isEmpty) {
+        debugPrint('❌ Cannot send test message: Invalid device ID "$targetUuid"');
+        debugPrint('   Device Name: $deviceName');
+        if (currentContext.mounted) {
+          ScaffoldMessenger.of(currentContext).showSnackBar(
+            SnackBar(
+              content: Text('Cannot send: Invalid device address'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+        return;
+      }
+
       final testMessage = 'Hello from ResQLink! This is a test message.';
+
+      debugPrint('📤 Sending test message:');
+      debugPrint('   To (Display): $deviceName');
+      debugPrint('   To (UUID): $targetUuid');
+      debugPrint('   From (Display): ${controller.p2pService.userName ?? 'User'}');
 
       await controller.p2pService.sendMessage(
         message: testMessage,
         type: MessageType.text,
-        targetDeviceId: device['deviceId'],
-        senderName: controller.p2pService.userName ?? 'User',
+        targetDeviceId: targetUuid, // Use validated UUID
+        senderName: controller.p2pService.userName ?? 'User', // Display name
       );
 
       if (currentContext.mounted) {
@@ -226,8 +252,18 @@ class ConnectionManager {
     Map<String, dynamic> device,
     HomeController controller,
   ) {
-    final deviceId = device['deviceId'] ?? device['deviceAddress'];
-    return controller.p2pService.connectedDevices.containsKey(deviceId);
+    // Use UUID as identifier
+    final deviceId = device['deviceId'] as String?;
+    final deviceAddress = device['deviceAddress'] as String?;
+    final deviceUuid = deviceAddress ?? deviceId;
+
+    // Validate UUID is not empty
+    if (deviceUuid == null || deviceUuid.isEmpty) {
+      debugPrint('⚠️ isDeviceConnected: Invalid device ID "$deviceUuid"');
+      return false;
+    }
+
+    return controller.p2pService.connectedDevices.containsKey(deviceUuid);
   }
 
   /// Get connection status text for UI

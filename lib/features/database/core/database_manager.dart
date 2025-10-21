@@ -7,7 +7,7 @@ import 'package:path/path.dart';
 class DatabaseManager {
   static Database? _database;
   static const String _dbName = 'resqlink_enhanced.db';
-  static const int _dbVersion = 10;
+  static const int _dbVersion = 11;
 
   // Add connection pooling and state tracking
   static bool _isInitializing = false;
@@ -397,6 +397,9 @@ class DatabaseManager {
       if (oldVersion < 10) {
         await _upgradeToV10(db);
       }
+      if (oldVersion < 11) {
+        await _upgradeToV11(db);
+      }
 
       debugPrint('✅ Database upgrade completed successfully');
     } catch (e) {
@@ -748,6 +751,77 @@ class DatabaseManager {
     }
 
     debugPrint('✅ Database upgrade to version 10 completed');
+  }
+
+  static Future<void> _upgradeToV11(Database db) async {
+    debugPrint('🔄 Upgrading to database version 11...');
+
+    try {
+      // CRITICAL FIX: Add UNIQUE constraint on device_address to prevent duplicates
+      // We need to recreate the table to add UNIQUE constraint
+
+      debugPrint('📊 Creating new chat_sessions table with UNIQUE constraint...');
+
+      // Create new table with UNIQUE constraint
+      await db.execute('''
+        CREATE TABLE chat_sessions_new (
+          id TEXT PRIMARY KEY,
+          device_id TEXT NOT NULL,
+          device_name TEXT NOT NULL,
+          device_address TEXT UNIQUE,
+          created_at INTEGER NOT NULL,
+          last_message_at INTEGER NOT NULL,
+          last_connection_at INTEGER,
+          message_count INTEGER DEFAULT 0,
+          unread_count INTEGER DEFAULT 0,
+          connection_history TEXT,
+          status INTEGER DEFAULT 0,
+          metadata TEXT
+        )
+      ''');
+
+      // Copy data from old table, removing duplicates
+      await db.execute('''
+        INSERT INTO chat_sessions_new
+        SELECT id, device_id, device_name, device_address, created_at,
+               last_message_at, last_connection_at, message_count, unread_count,
+               connection_history, status, metadata
+        FROM chat_sessions
+        WHERE device_address IS NOT NULL AND device_address != ''
+        GROUP BY device_address
+        HAVING id = MAX(id)
+      ''');
+
+      // Also copy sessions without device_address
+      await db.execute('''
+        INSERT OR IGNORE INTO chat_sessions_new
+        SELECT id, device_id, device_name, device_address, created_at,
+               last_message_at, last_connection_at, message_count, unread_count,
+               connection_history, status, metadata
+        FROM chat_sessions
+        WHERE device_address IS NULL OR device_address = ''
+      ''');
+
+      // Drop old table
+      await db.execute('DROP TABLE chat_sessions');
+
+      // Rename new table
+      await db.execute('ALTER TABLE chat_sessions_new RENAME TO chat_sessions');
+
+      // Recreate indexes
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_chat_sessions_device_id ON chat_sessions (device_id)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_chat_sessions_last_message ON chat_sessions (last_message_at)',
+      );
+
+      debugPrint('✅ Added UNIQUE constraint on device_address');
+      debugPrint('✅ Database upgrade to version 11 completed');
+    } catch (e) {
+      debugPrint('❌ Error upgrading to version 11: $e');
+      // Don't rethrow - allow app to continue with old schema
+    }
   }
 
   static Future<int> _getDatabaseSize() async {
