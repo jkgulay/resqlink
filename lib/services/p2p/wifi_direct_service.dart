@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class WiFiDirectService {
   static const String channelName = 'resqlink/wifi';
@@ -45,9 +44,6 @@ class WiFiDirectService {
   // Store custom device names from service discovery
   final Map<String, String> _customDeviceNames = {};
   final Map<String, String> _deviceMACs = {};
-
-  // Callback for when MAC address is stored
-  Function(String macAddress)? onMacAddressStored;
 
   // Getters for discovered peers
   List<WiFiDirectPeer> get discoveredPeers => List.from(_discoveredPeers);
@@ -113,21 +109,9 @@ class WiFiDirectService {
       debugPrint('📱 getDeviceInfo result: $result');
 
       if (result != null) {
-        final deviceAddress = result['deviceAddress'] as String?;
         final deviceName = result['deviceName'] as String?;
-
-        debugPrint('📱 Device Address: $deviceAddress, Device Name: $deviceName');
-
-        if (deviceAddress != null && deviceAddress.isNotEmpty) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('wifi_direct_mac_address', deviceAddress);
-          debugPrint('✅ Stored WiFi Direct MAC address during init: $deviceAddress');
-
-          // Notify listeners that MAC address has been stored
-          onMacAddressStored?.call(deviceAddress);
-        } else {
-          debugPrint('⚠️ Device address is null or empty!');
-        }
+        debugPrint('📱 Device Name: $deviceName');
+        // UUID-based system - no MAC storage needed
       } else {
         debugPrint('⚠️ getDeviceInfo returned null!');
       }
@@ -765,24 +749,8 @@ class WiFiDirectService {
 
       case 'onDeviceChanged':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
-        final deviceAddress = args['deviceAddress'] as String?;
-        debugPrint(
-          '📱 Device info: ${args['deviceName']} (${args['deviceAddress']})',
-        );
-
-        // CRITICAL: Store this device's MAC address for use as stable device ID
-        if (deviceAddress != null && deviceAddress.isNotEmpty) {
-          try {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setString('wifi_direct_mac_address', deviceAddress);
-            debugPrint('✅ Stored WiFi Direct MAC address: $deviceAddress');
-
-            // Notify listeners that MAC address has been stored
-            onMacAddressStored?.call(deviceAddress);
-          } catch (e) {
-            debugPrint('❌ Failed to store MAC address: $e');
-          }
-        }
+        debugPrint('📱 Device info: ${args['deviceName']}');
+        // UUID-based system - no MAC storage needed
 
       case 'onServerSocketReady':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});

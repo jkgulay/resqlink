@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/message_model.dart';
 import '../../messaging/message_router.dart';
+import '../../identity_service.dart';
 
 class SocketProtocol {
   static const int defaultPort= 8888;
@@ -25,14 +25,15 @@ class SocketProtocol {
   String? _deviceId;
   String? _userName;
 
-  // CRITICAL: Callback for device connections
+  // Callbacks
   Function(String deviceId, String userName)? onDeviceConnected;
+  Function(String deviceId, int sequence)? onPongReceived;
 
-  /// Initialize socket protocol
+  /// Initialize socket protocol with UUID
   void initialize(String deviceId, String userName) {
     _deviceId = deviceId;
     _userName = userName;
-    debugPrint('🔧 Socket protocol initialized with deviceId: $deviceId');
+    debugPrint('🔧 Socket protocol initialized with UUID: $deviceId');
   }
 
   /// Update device ID (called after MAC address is stored)
@@ -63,7 +64,16 @@ class SocketProtocol {
           debugPrint('✅ Socket server started on port $attemptPort');
           break; // Success, exit the loop
         } on SocketException catch (e) {
-          if (e.osError?.errorCode == 98) { // Address already in use
+          // Cross-platform port in use detection:
+          // - Linux: error code 98 (EADDRINUSE)
+          // - Windows: error code 10048 (WSAEADDRINUSE)
+          // - Also check error message as fallback
+          final isPortInUse = e.osError?.errorCode == 98 ||
+              e.osError?.errorCode == 10048 ||
+              e.message.toLowerCase().contains('address already in use') ||
+              e.message.toLowerCase().contains('only one usage');
+
+          if (isPortInUse) {
             debugPrint('⚠️ Port $attemptPort already in use, trying next port...');
             if (attemptPort == port + 9) {
               // Last attempt failed
@@ -180,16 +190,25 @@ class SocketProtocol {
 
   /// Send handshake message
   void _sendHandshake(Socket socket) async {
-    // Get MAC address from SharedPreferences
-    final prefs = await SharedPreferences.getInstance();
-    final macAddress = prefs.getString('wifi_direct_mac_address');
+    debugPrint('🤝 Preparing to send handshake...');
+
+    // Get UUID from IdentityService
+    final identity = IdentityService();
+    final deviceId = await identity.getDeviceId();
+
+    debugPrint('✅ Sending handshake with UUID: $deviceId, DisplayName: $_userName');
 
     final handshake = jsonEncode({
       'type': 'handshake',
-      'deviceId': _deviceId,
-      'macAddress': macAddress ?? _deviceId, // Include MAC address (fallback to deviceId)
-      'userName': _userName,
+      'deviceId': deviceId,            // Persistent UUID (unique identifier)
+      'displayName': _userName,        // User's chosen name (UI display)
       'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'protocol_version': '3.0',       // v3.0 = UUID-based identification
+
+      // Legacy fields for backward compatibility with older versions
+      'deviceMac': deviceId,
+      'macAddress': deviceId,
+      'userName': _userName,
     });
 
     _sendToSocket(socket, handshake);
@@ -222,6 +241,10 @@ class SocketProtocol {
           _handleMessage(data, socket);
         case 'heartbeat':
           _handleHeartbeat(data, socket);
+        case 'ping':
+          _handlePing(data, socket);
+        case 'pong':
+          _handlePong(data, socket);
         case 'ack':
           _handleAcknowledgment(data);
         default:
@@ -233,41 +256,64 @@ class SocketProtocol {
   }
 
   /// Handle handshake message
-  void _handleHandshake(Map<String, dynamic> data, Socket socket) {
-    final deviceId = data['deviceId'] as String?;
-    final macAddress = data['macAddress'] as String?;
-    final userName = data['userName'] as String?;
+  Future<void> _handleHandshake(Map<String, dynamic> data, Socket socket) async {
+    final ipAddress = socket.remoteAddress.address;
+    final protocolVersion = data['protocol_version'] ?? '1.0';
 
-    // CRITICAL: Use MAC address as the device identifier if available
-    final finalDeviceId = macAddress ?? deviceId;
+    // v3.0+ uses UUID as deviceId
+    String? peerDeviceId = data['deviceId'] as String?;
+    String? peerDisplayName = data['displayName'] as String?;
 
-    if (finalDeviceId != null) {
-      _deviceSockets[finalDeviceId] = socket;
-
-      debugPrint('🤝 Device connected: $userName');
-      debugPrint('📱 Device ID: $deviceId');
-      debugPrint('📍 MAC Address: $macAddress');
-      debugPrint('✅ Using identifier: $finalDeviceId');
-      debugPrint('📱 Total connected devices: ${_deviceSockets.length}');
-
-      // CRITICAL: Notify P2P service about the connected device with MAC address
-      onDeviceConnected?.call(finalDeviceId, userName ?? 'Unknown');
-
-      debugPrint('✅ Handshake completed with $userName ($deviceId)');
-
-      // Send acknowledgment
-      final ack = jsonEncode({
-        'type': 'ack',
-        'ackType': 'handshake',
-        'deviceId': _deviceId,
-        'userName': _userName,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
-
-      _sendToSocket(socket, ack);
-    } else {
-      debugPrint('⚠️ Handshake missing deviceId');
+    // Legacy fallback for older versions
+    if (peerDeviceId == null || peerDeviceId.isEmpty) {
+      peerDeviceId = data['deviceMac'] as String? ??
+                     data['macAddress'] as String?;
+      peerDisplayName = peerDisplayName ?? data['userName'] as String?;
     }
+
+    debugPrint('🤝 Received handshake from $ipAddress');
+    debugPrint('   Protocol: $protocolVersion');
+    debugPrint('   Peer Device ID: $peerDeviceId');
+    debugPrint('   Display Name: $peerDisplayName');
+
+    // Validate device ID exists
+    if (peerDeviceId == null || peerDeviceId.isEmpty) {
+      debugPrint('❌ REJECTING handshake: No device identifier provided');
+      return;
+    }
+
+    // Register the socket with the device ID (UUID)
+    _deviceSockets[peerDeviceId] = socket;
+
+    debugPrint('🤝 Device connected: $peerDisplayName');
+    debugPrint('📍 Device ID: $peerDeviceId');
+    debugPrint('📱 Total connected devices: ${_deviceSockets.length}');
+
+    // Notify P2P service about the connected device
+    onDeviceConnected?.call(peerDeviceId, peerDisplayName ?? 'Unknown');
+
+    debugPrint('✅ Handshake completed with $peerDisplayName ($peerDeviceId)');
+
+    // Send acknowledgment with our UUID
+    final identity = IdentityService();
+    final ourDeviceId = await identity.getDeviceId();
+
+    final ack = jsonEncode({
+      'type': 'ack',
+      'ackType': 'handshake',
+      'deviceId': ourDeviceId,           // Our UUID
+      'displayName': _userName,          // Our display name
+      'peerId': peerDeviceId,            // Acknowledge their UUID
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'protocol_version': '3.0',
+
+      // Legacy fields for backward compatibility
+      'deviceMac': ourDeviceId,
+      'macAddress': ourDeviceId,
+      'userName': _userName,
+    });
+
+    _sendToSocket(socket, ack);
   }
 
   /// Handle regular message
@@ -308,10 +354,53 @@ class SocketProtocol {
     _sendToSocket(socket, pong);
   }
 
+  /// Handle ping (for quality monitoring)
+  void _handlePing(Map<String, dynamic> data, Socket socket) {
+    final sequence = data['sequence'] as int?;
+    final timestamp = data['timestamp'] as int?;
+
+    if (sequence != null && timestamp != null) {
+      final pong = jsonEncode({
+        'type': 'pong',
+        'sequence': sequence,
+        'originalTimestamp': timestamp,
+        'deviceId': _deviceId,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      _sendToSocket(socket, pong);
+    }
+  }
+
+  /// Handle pong (for quality monitoring)
+  void _handlePong(Map<String, dynamic> data, Socket socket) {
+    // Find device ID from socket
+    String? fromDevice;
+    _deviceSockets.forEach((deviceId, deviceSocket) {
+      if (deviceSocket == socket) {
+        fromDevice = deviceId;
+      }
+    });
+
+    // Pong responses are handled by the quality monitor through callback
+    // We don't process them here directly
+    if (fromDevice != null) {
+      final sequence = data['sequence'] as int?;
+      if (sequence != null && onPongReceived != null) {
+        onPongReceived?.call(fromDevice!, sequence);
+      }
+    }
+  }
+
   /// Handle acknowledgment
-  void _handleAcknowledgment(Map<String, dynamic> data) {
+  Future<void> _handleAcknowledgment(Map<String, dynamic> data) async {
     final ackType = data['ackType'] as String?;
     final messageId = data['messageId'] as String?;
+
+    // UUID-based system - no need to learn MAC from peers
+    if (ackType == 'handshake') {
+      debugPrint('✅ Handshake acknowledged');
+    }
 
     if (ackType == 'message' && messageId != null) {
       debugPrint('✅ Message acknowledged: $messageId');

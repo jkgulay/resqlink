@@ -7,6 +7,7 @@ import '../../features/database/repositories/chat_repository.dart';
 
 import '../chat/session_deduplication_service.dart';
 import '../../utils/session_consistency_checker.dart';
+import '../p2p/managers/identifier_resolver.dart';
 
 class MessageRouter {
   static final MessageRouter _instance = MessageRouter._internal();
@@ -21,14 +22,23 @@ class MessageRouter {
 
   // Message queue for offline devices
   final Map<String, List<MessageModel>> _messageQueue = {};
-  
+
   // Track device connections for proper routing
   final Map<String, String> _deviceConnections = {};
 
   // Message deduplication to prevent duplicate processing
   final Set<String> _processedMessageIds = {};
   final Map<String, DateTime> _messageTimestamps = {};
-  static const Duration _deduplicationWindow = Duration(minutes: 5); 
+  static const Duration _deduplicationWindow = Duration(minutes: 5);
+
+  // Identifier resolver for display name to UUID mapping
+  IdentifierResolver? _identifierResolver;
+
+  /// Set the identifier resolver (should be called by P2PMainService)
+  void setIdentifierResolver(IdentifierResolver resolver) {
+    _identifierResolver = resolver;
+    debugPrint('✅ IdentifierResolver registered with MessageRouter');
+  }
 
   void registerDeviceConnection(String deviceId, String socketId) {
     _deviceConnections[socketId] = deviceId;
@@ -36,7 +46,10 @@ class MessageRouter {
   }
 
   /// Register a listener for a specific device
-  void registerDeviceListener(String deviceId, Function(MessageModel) listener) {
+  void registerDeviceListener(
+    String deviceId,
+    Function(MessageModel) listener,
+  ) {
     _deviceListeners[deviceId] = listener;
     debugPrint('📱 Registered listener for device: $deviceId');
 
@@ -96,7 +109,7 @@ class MessageRouter {
       _globalListener?.call(message);
 
       final senderDeviceId = message.deviceId;
-      
+
       if (!message.isMe && senderDeviceId != null) {
         final senderListener = _deviceListeners[senderDeviceId];
         if (senderListener != null) {
@@ -107,13 +120,16 @@ class MessageRouter {
           _queueMessage(senderDeviceId, message);
         }
       }
-      
+
       // Handle targeted messages (both sent and received)
-      if (message.targetDeviceId != null && message.targetDeviceId != 'broadcast') {
+      if (message.targetDeviceId != null &&
+          message.targetDeviceId != 'broadcast') {
         final targetListener = _deviceListeners[message.targetDeviceId!];
         if (targetListener != null) {
           // Show all messages (sent and received) in target's chat
-          debugPrint('✅ Routing message to target chat: ${message.targetDeviceId}');
+          debugPrint(
+            '✅ Routing message to target chat: ${message.targetDeviceId}',
+          );
           targetListener(message);
         } else if (message.isMe) {
           // Queue sent messages for target's chat if not open
@@ -149,7 +165,9 @@ class MessageRouter {
           listener(message);
         }
         _messageQueue.remove(deviceId);
-        debugPrint('✅ Processed ${messages.length} queued messages for $deviceId');
+        debugPrint(
+          '✅ Processed ${messages.length} queued messages for $deviceId',
+        );
       }
     }
   }
@@ -171,7 +189,9 @@ class MessageRouter {
     }
 
     if (toRemove.isNotEmpty) {
-      debugPrint('🧹 Cleaned up ${toRemove.length} old message entries from MessageRouter');
+      debugPrint(
+        '🧹 Cleaned up ${toRemove.length} old message entries from MessageRouter',
+      );
     }
   }
 
@@ -182,54 +202,94 @@ class MessageRouter {
 
       // Handle different message types
       final messageType = data['type'] as String?;
-      
+
       if (messageType == 'handshake' || messageType == 'handshake_response') {
         // Don't route handshake messages as chat messages
         debugPrint('🤝 Ignoring handshake message');
         return;
       }
-      
-      if (messageType == 'heartbeat' || messageType == 'ack') {
+
+      if (messageType == 'heartbeat' ||
+          messageType == 'ack' ||
+          messageType == 'ping' ||
+          messageType == 'pong') {
         // Don't route system messages as chat messages
         debugPrint('💓 Ignoring system message: $messageType');
         return;
       }
 
-      // Extract sender information - CRITICAL: use the actual sender's device ID
-      final senderDeviceId = data['deviceId'] ?? 
-                            data['senderDeviceId'] ?? 
-                            fromDevice ?? 
-                            'unknown';
-      
-      final senderName = data['senderName'] ?? 
-                        data['from'] ?? 
-                        data['fromUser'] ?? 
-                        data['userName'] ?? 
-                        'Unknown';
+      // Get sender device ID from multiple sources
+      // PRIORITY: fromDevice (already resolved by socket protocol) > message payload
+      String? senderDeviceId =
+          fromDevice ?? data['deviceId'] ?? data['senderDeviceId'];
 
-      // Extract target information
-      final targetDeviceId = data['targetDeviceId'] ?? 
-                            data['endpointId'] ?? 
-                            'broadcast';
+      // Validate sender has some identifier
+      if (senderDeviceId == null || senderDeviceId.isEmpty) {
+        debugPrint('❌ Rejecting message: No sender device ID provided');
+        debugPrint('   Message payload: ${data['message']}');
+        return;
+      }
 
-      // CRITICAL: Generate session ID from MAC address (deviceId), NOT display names
+      // UUID-based system - all device IDs are valid UUIDs
+      debugPrint('ℹ️ Message from device UUID: "$senderDeviceId"');
+
+      // Extract sender display name (for UI only, NOT for routing)
+      final senderName =
+          data['senderName'] ??
+          data['from'] ??
+          data['fromUser'] ??
+          data['userName'] ??
+          'Unknown';
+
+      debugPrint('📨 Message from: $senderName (UUID: $senderDeviceId)');
+
+      // Extract and validate target information
+      String? targetDeviceId =
+          data['targetDeviceId'] ?? data['endpointId'] ?? 'broadcast';
+
+      // Validate target UUID if not broadcast
+      if (targetDeviceId != 'broadcast' && targetDeviceId != 'unknown') {
+        // Try to resolve display name to UUID if IdentifierResolver is available
+        if (_identifierResolver != null) {
+          final resolvedId = _identifierResolver!.validateDeviceIdentifier(
+            identifier: targetDeviceId,
+            operation: 'Message routing',
+            context: 'Target device',
+          );
+          if (resolvedId != null) {
+            debugPrint('✅ Resolved target identifier to UUID: $resolvedId');
+            targetDeviceId = resolvedId;
+          }
+        }
+
+        // UUID-based system - validate that target is not empty
+        if (targetDeviceId == null || targetDeviceId.isEmpty) {
+          debugPrint('⚠️ Empty target device ID, treating as broadcast');
+          targetDeviceId = 'broadcast';
+        }
+      }
+
+      // CRITICAL: Generate session ID from device UUID (endpointId), NOT display names
       // This ensures messages always go to the correct stable session
       String? chatSessionId = data['chatSessionId'];
       if (chatSessionId == null || chatSessionId.isEmpty) {
-        // Use MAC address-based session ID
-        chatSessionId = 'chat_${senderDeviceId.replaceAll(':', '_')}';
-        debugPrint('📍 Generated MAC-based session ID: $chatSessionId for device: $senderDeviceId');
+        // Use UUID-based session ID for stability
+        chatSessionId = 'chat_${senderDeviceId.replaceAll('-', '_')}';
+        debugPrint(
+          '📍 Generated UUID-based session ID: $chatSessionId for device: $senderDeviceId',
+        );
       }
 
-      // Create message model with proper sender/target mapping
       final messageModel = MessageModel(
-        messageId: data['messageId'] ?? MessageModel.generateMessageId(senderDeviceId),
-        // CRITICAL: endpointId should be the conversation partner
-        // For incoming messages, that's the sender
-        endpointId: senderDeviceId, // This is who the message is FROM
-        deviceId: senderDeviceId,   // The sender's device ID
-        targetDeviceId: targetDeviceId, // Who it was sent TO
-        fromUser: senderName,
+        messageId:
+            data['messageId'] ??
+            MessageModel.generateMessageId(senderDeviceId),
+
+        // ARCHITECTURE: endpointId = UUID (routing), fromUser = display name (UI)
+        endpointId: senderDeviceId,   // Sender's UUID (routing identifier)
+        fromUser: senderName,          // Sender's display name (UI only)
+        deviceId: senderDeviceId,      // Same as endpointId (legacy)
+        targetDeviceId: targetDeviceId, // Recipient UUID or 'broadcast'
         message: data['message'] ?? '',
         isMe: false, // This is an incoming message
         isEmergency: data['isEmergency'] ?? false,
@@ -284,21 +344,26 @@ class MessageRouter {
     _messageQueue.remove(deviceId);
     debugPrint('🧹 Cleared queue for device: $deviceId');
   }
-  
+
   /// Debug: Print current routing state
   void debugPrintState() {
     debugPrint('📊 MessageRouter State:');
     debugPrint('  Active Listeners: ${_deviceListeners.keys.toList()}');
     debugPrint('  Device Connections: $_deviceConnections');
-    debugPrint('  Queued Messages: ${_messageQueue.keys.map((k) => '$k: ${_messageQueue[k]?.length}')}');
+    debugPrint(
+      '  Queued Messages: ${_messageQueue.keys.map((k) => '$k: ${_messageQueue[k]?.length}')}',
+    );
   }
 
   /// Trigger session deduplication (can be called from UI)
   static Future<void> runSessionDeduplication() async {
     try {
       debugPrint('🔧 Starting session deduplication from MessageRouter...');
-      final mergedCount = await SessionDeduplicationService.deduplicateAllSessions();
-      debugPrint('✅ Session deduplication completed. Merged $mergedCount sessions.');
+      final mergedCount =
+          await SessionDeduplicationService.deduplicateAllSessions();
+      debugPrint(
+        '✅ Session deduplication completed. Merged $mergedCount sessions.',
+      );
     } catch (e) {
       debugPrint('❌ Error during session deduplication: $e');
     }
@@ -315,7 +380,9 @@ class MessageRouter {
       final totalIssues = healthScore?['totalIssues'] as int? ?? 0;
 
       if (totalIssues > 0) {
-        debugPrint('⚠️ Found $totalIssues consistency issues. Consider running fixSessionInconsistencies()');
+        debugPrint(
+          '⚠️ Found $totalIssues consistency issues. Consider running fixSessionInconsistencies()',
+        );
       } else {
         debugPrint('✅ All sessions are consistent!');
       }
@@ -344,8 +411,8 @@ class MessageRouter {
 /// Extension to add isBroadcast getter to MessageModel
 extension MessageModelExtensions on MessageModel {
   /// Check if this is a broadcast message
-  bool get isBroadcast => 
-      endpointId == 'broadcast' || 
+  bool get isBroadcast =>
+      endpointId == 'broadcast' ||
       targetDeviceId == 'broadcast' ||
       endpointId == 'unknown';
 }

@@ -61,13 +61,11 @@ class ConnectionDiscoveryCard extends StatelessWidget {
               ConnectionHeader(controller: controller),
               SizedBox(height: ResponsiveSpacing.lg(context)),
               ConnectionStats(controller: controller),
-              if (controller.discoveredDevices.isNotEmpty) ...[
-                SizedBox(height: ResponsiveSpacing.xl(context)),
-                DeviceList(
-                  controller: controller,
-                  onDeviceChatTap: onDeviceChatTap,
-                ),
-              ],
+              SizedBox(height: ResponsiveSpacing.xl(context)),
+              DeviceList(
+                controller: controller,
+                onDeviceChatTap: onDeviceChatTap,
+              ),
               if (controller.isConnected) ...[
                 SizedBox(height: ResponsiveSpacing.lg(context)),
                 ConnectedDevices(controller: controller),

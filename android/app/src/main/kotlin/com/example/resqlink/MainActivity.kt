@@ -337,47 +337,18 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
     channel?.let { ch ->
         wifiP2pManager.requestConnectionInfo(ch) { info ->
             if (info?.groupFormed == true) {
-                Thread {
-                    try {
-                        if (info.isGroupOwner) {
-                            startServerSocket()
-                            isGroupOwner = true
-                        } else {
-                            // Add retry mechanism for client connection
-                            var connected = false
-                            var attempts = 0
-                            while (!connected && attempts < 3) {
-                                try {
-                                    connectToGroupOwner(info.groupOwnerAddress?.hostAddress ?: "")
-                                    connected = true
-                                } catch (e: Exception) {
-                                    attempts++
-                                    Thread.sleep(1000)
-                                }
-                            }
-                            isGroupOwner = false
-                        }
-                        
-                        isSocketEstablished = true
-                        
-                        runOnUiThread {
-                            val socketData = mapOf(
-                                "success" to true,
-                                "isGroupOwner" to info.isGroupOwner,
-                                "groupOwnerAddress" to (info.groupOwnerAddress?.hostAddress ?: ""),
-                                "socketPort" to 8888,
-                                "socketEstablished" to true
-                            )
-                            wifiMethodChannel.invokeMethod("onSocketEstablished", socketData)
-                            result.success(socketData)
-                        }
-                    } catch (e: Exception) {
-                        isSocketEstablished = false
-                        runOnUiThread {
-                            result.error("SOCKET_ERROR", "Failed to establish socket: ${e.message}", null)
-                        }
-                    }
-                }.start()
+                isSocketEstablished = true
+                isGroupOwner = info.isGroupOwner
+
+                val socketData = mapOf(
+                    "success" to true,
+                    "isGroupOwner" to info.isGroupOwner,
+                    "groupOwnerAddress" to (info.groupOwnerAddress?.hostAddress ?: ""),
+                    "socketPort" to 8888,
+                    "socketEstablished" to true
+                )
+                wifiMethodChannel.invokeMethod("onSocketEstablished", socketData)
+                result.success(socketData)
             } else {
                 result.error("NO_GROUP", "No WiFi Direct group formed", null)
             }
@@ -925,6 +896,16 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
         channel?.let { ch ->
             wifiP2pManager.requestGroupInfo(ch) { group ->
                 if (group != null) {
+                    // CRITICAL: If we're the group owner, store our WiFi Direct MAC address
+                    if (group.isGroupOwner && group.owner != null) {
+                        val ownerMac = group.owner.deviceAddress
+                        if (ownerMac != null && ownerMac.isNotEmpty() && ownerMac != "02:00:00:00:00:00") {
+                            val prefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().putString("wifi_direct_mac_address", ownerMac).apply()
+                            android.util.Log.d("WiFiDirect", "✅ Stored group owner MAC address: $ownerMac")
+                        }
+                    }
+
                     val clients = group.clientList.map { client ->
                         mapOf(
                             "deviceName" to client.deviceName,
@@ -1225,6 +1206,16 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
         // Also request group info
         wifiP2pManager.requestGroupInfo(ch) { group ->
             if (group != null) {
+                // CRITICAL: If we're the group owner, store our WiFi Direct MAC address
+                if (group.isGroupOwner && group.owner != null) {
+                    val ownerMac = group.owner.deviceAddress
+                    if (ownerMac != null && ownerMac.isNotEmpty() && ownerMac != "02:00:00:00:00:00") {
+                        val prefs = getSharedPreferences("resqlink_prefs", Context.MODE_PRIVATE)
+                        prefs.edit().putString("wifi_direct_mac_address", ownerMac).apply()
+                        android.util.Log.d("WiFiDirect", "✅ Stored group owner MAC address: $ownerMac")
+                    }
+                }
+
                 val groupData = mapOf(
                     "networkName" to group.networkName,
                     "passphrase" to group.passphrase,

@@ -6,10 +6,17 @@ enum MessageStatus { pending, sent, delivered, failed, synced, received }
 
 enum MessageType { text, emergency, location, sos, system, file }
 
+/// Message model with clear identifier architecture:
+/// - endpointId: Device's wlan0 MAC address (stable, used for routing/sessions)
+/// - fromUser: User's display name from landing page (used for UI display only)
+/// - targetDeviceId: Recipient's MAC address (null for broadcast)
+/// - deviceId: Same as endpointId (legacy compatibility)
 class MessageModel {
   final int? id;
-  final String endpointId;
-  final String fromUser;
+
+  // CRITICAL: Identifier architecture
+  final String endpointId;      // Sender's wlan0 MAC (routing/session ID)
+  final String fromUser;         // Sender's display name (UI only)
   final String message;
   final bool isMe;
   final bool isEmergency;
@@ -25,10 +32,11 @@ class MessageModel {
   final int? ttl;
   final String? connectionType;
   final Map<String, dynamic>? deviceInfo;
-  final String? targetDeviceId;
+  final String? targetDeviceId;  // Target MAC (null = broadcast)
   final MessageType messageType;
   final String? chatSessionId;
-  final String? deviceId;
+  final String? deviceId;        // Same as endpointId (legacy compat)
+
   // Database-generated fields (read-only, not set in constructor)
   final int? retryCount;
   final int? lastRetryTime;
@@ -37,8 +45,8 @@ class MessageModel {
 
   MessageModel({
     this.id,
-    required this.endpointId,
-    required this.fromUser,
+    required this.endpointId,     // MAC address (wlan0) - routing identifier
+    required this.fromUser,        // Display name - UI only
     required this.message,
     required this.isMe,
     required this.isEmergency,
@@ -54,19 +62,17 @@ class MessageModel {
     this.ttl,
     this.connectionType,
     this.deviceInfo,
-    this.targetDeviceId,
+    this.targetDeviceId,          // Target MAC (null = broadcast)
     MessageType? messageType,
     this.chatSessionId,
-    this.deviceId,
-    // Database-generated fields (typically null when creating new messages)
+    this.deviceId,                // Same as endpointId (legacy)
+    // Database-generated fields
     this.retryCount,
     this.lastRetryTime,
     this.priority,
     this.createdAt,
   }) : type = type ?? (isEmergency ? 'emergency' : 'message'),
-       messageType =
-           messageType ??
-           (isEmergency ? MessageType.emergency : MessageType.text);
+       messageType = messageType ?? (isEmergency ? MessageType.emergency : MessageType.text);
 
   // DateTime getter for convenience
   DateTime get dateTime => DateTime.fromMillisecondsSinceEpoch(timestamp);

@@ -79,13 +79,14 @@ class P2PDiscoveryService {
         _discoveryInProgress = false;
       });
 
-      // Check network connectivity to determine discovery strategy
+      // Always attempt WiFi Direct discovery since it creates its own network
+      // Check network connectivity to determine additional discovery strategies
       final interfaces = await NetworkInterface.list();
       final hasNetworkInterfaces = interfaces.isNotEmpty &&
           interfaces.any((interface) => interface.addresses.isNotEmpty);
 
       if (hasNetworkInterfaces) {
-        debugPrint('📡 Network interfaces available - running full discovery');
+        debugPrint('📡 Network interfaces available - running full discovery (including WiFi Direct)');
         // Run all discovery methods in parallel
         await Future.wait([
           _discoverWifiDirectDevices(),
@@ -94,8 +95,9 @@ class P2PDiscoveryService {
           _discoverBroadcastDevices(),
         ], eagerError: false);
       } else {
-        debugPrint('📱 No network interfaces - focusing on WiFi Direct discovery');
-        // Only run WiFi Direct discovery when offline
+        debugPrint('📱 No traditional network interfaces - running WiFi Direct & network discovery');
+        // WiFi Direct can work without traditional network interfaces
+        // Always attempt WiFi Direct and ResQLink network discovery
         await Future.wait([
           _discoverWifiDirectDevices(),
           _discoverResQLinkNetworks(),
@@ -185,10 +187,17 @@ class P2PDiscoveryService {
 
       // Check network connectivity first
       final interfaces = await NetworkInterface.list();
-      if (interfaces.isEmpty ||
-          !interfaces.any((interface) => interface.addresses.isNotEmpty)) {
+      // CRITICAL FIX: Filter out p2p interfaces and loopback, need traditional network
+      final hasTraditionalNetwork = interfaces.any((interface) {
+        final name = interface.name.toLowerCase();
+        final isP2P = name.startsWith('p2p');
+        final isLoopback = interface.addresses.any((addr) => addr.isLoopback);
+        return !isP2P && !isLoopback && interface.addresses.isNotEmpty;
+      });
+
+      if (!hasTraditionalNetwork) {
         debugPrint(
-          '⚠️ No network interfaces available, skipping mDNS discovery',
+          '⚠️ No traditional network interfaces available (WiFi Direct only), skipping mDNS discovery',
         );
         return;
       }
@@ -288,10 +297,17 @@ class P2PDiscoveryService {
 
       // Check network connectivity first
       final interfaces = await NetworkInterface.list();
-      if (interfaces.isEmpty ||
-          !interfaces.any((interface) => interface.addresses.isNotEmpty)) {
+      // CRITICAL FIX: Filter out p2p interfaces and loopback, need traditional network
+      final hasTraditionalNetwork = interfaces.any((interface) {
+        final name = interface.name.toLowerCase();
+        final isP2P = name.startsWith('p2p');
+        final isLoopback = interface.addresses.any((addr) => addr.isLoopback);
+        return !isP2P && !isLoopback && interface.addresses.isNotEmpty;
+      });
+
+      if (!hasTraditionalNetwork) {
         debugPrint(
-          '⚠️ No network interfaces available, skipping broadcast discovery',
+          '⚠️ No traditional network interfaces available (WiFi Direct only), skipping UDP broadcast discovery',
         );
         return;
       }

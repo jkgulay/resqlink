@@ -212,28 +212,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
         icon: Icon(Icons.more_vert, color: Colors.white),
         onSelected: onMenuAction,
         itemBuilder: (context) => [
-          PopupMenuItem(
-            value: 'scan',
-            child: Row(
-              children: [
-                Icon(Icons.search, color: Colors.white70, size: 20),
-                SizedBox(width: 8),
-                Text('Scan for Devices', style: TextStyle(color: Colors.white)),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: 'create_group',
-            child: Row(
-              children: [
-                Icon(Icons.wifi_tethering, color: Colors.white70, size: 20),
-                SizedBox(width: 8),
-                Text('Create Group', style: TextStyle(color: Colors.white)),
-              ],
-            ),
-          ),
           if (isChatView) ...[
-            PopupMenuDivider(),
             PopupMenuItem(
               value: 'clear_chat',
               child: Row(

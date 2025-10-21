@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_discovery_service.dart';
 import '../../models/message_model.dart';
@@ -10,46 +8,41 @@ import 'wifi_direct_service.dart';
 import 'p2p_base_service.dart';
 import 'p2p_network_service.dart';
 import '../../helpers/chat_navigation_helper.dart';
-import '../../services/p2p/protocols/socket_protocol.dart';
+import 'protocols/socket_protocol.dart';
 import '../messaging/message_router.dart';
-import '../settings_service.dart';
+import 'managers/p2p_connection_manager.dart';
+import 'handlers/p2p_wifi_direct_handler.dart';
+import 'handlers/p2p_message_handler.dart';
+import 'managers/p2p_device_manager.dart';
+import 'monitoring/connection_quality_monitor.dart';
+import 'monitoring/reconnection_manager.dart';
+import 'monitoring/device_prioritization.dart';
+import 'monitoring/timeout_manager.dart';
+import 'managers/identifier_resolver.dart';
+
 
 class P2PMainService extends P2PBaseService {
-  // Service components
+  // Core service components
   late P2PNetworkService _networkService;
   late P2PDiscoveryService _discoveryService;
-  WiFiDirectService? _wifiDirectService;
-
   late SocketProtocol _socketProtocol;
   late MessageRouter _messageRouter;
 
-  // Enhanced state
-  bool _isOnline = false;
+  // Specialized managers and handlers
+  late P2PConnectionManager _connectionManager;
+  late P2PWiFiDirectHandler _wifiDirectHandler;
+  late P2PMessageHandler _messageHandler;
+  late P2PDeviceManager _deviceManager;
+  late IdentifierResolver _identifierResolver;
 
-  // Additional state for widget compatibility
-  P2PConnectionMode _currentConnectionMode = P2PConnectionMode.none;
-  bool _isConnecting = false;
+  // Enhanced monitoring and management
+  late ConnectionQualityMonitor _qualityMonitor;
+  late ReconnectionManager _reconnectionManager;
+  late DevicePrioritization _devicePrioritization;
+  late TimeoutManager _timeoutManager;
 
-  // Message tracing for debugging
-  final List<String> _messageTrace = [];
-
-  // Message deduplication at WiFi Direct level
-  final Set<String> _processedMessages = {};
-  final Map<String, DateTime> _messageTimestamps = {};
-  static const Duration _messageDedupWindow = Duration(seconds: 5);
-
-  // Debounce mechanism for connection state changes
-  Timer? _connectionStateDebounceTimer;
-  static const Duration _connectionStateDebounceDelay = Duration(
-    milliseconds: 500,
-  );
-
-  // Debounce mechanism for peer updates
-  Timer? _peerUpdateDebounceTimer;
-  static const Duration _peerUpdateDebounceDelay = Duration(milliseconds: 1000);
-
-  final Set<String> _processingDevices = {};
-  final Set<String> _handshakeResponsesSent = {};
+  Timer? _monitoringTimer;
+  Timer? _pingTimer;
 
   @override
   Future<bool> initialize(String userName, {String? preferredRole}) async {
@@ -66,819 +59,446 @@ class P2PMainService extends P2PBaseService {
         return false;
       }
 
-      // Initialize service components
-      _networkService = P2PNetworkService(this);
-      _discoveryService = P2PDiscoveryService(this, _networkService);
+      // Initialize core components
+      await _initializeCoreComponents();
 
-      await _discoveryService.initialize();
+      // Initialize specialized managers and handlers
+      await _initializeManagers();
 
-      _wifiDirectService = WiFiDirectService.instance;
-
-      await _wifiDirectService?.initialize();
-
-      _wifiDirectService?.onMacAddressStored = (macAddress) {
-        debugPrint('🔄 MAC address stored callback: $macAddress');
-        // Update socket protocol with correct MAC address
-        _socketProtocol.updateDeviceId(macAddress);
-        // Update base service device ID
-        updateDeviceId(macAddress);
-        debugPrint('✅ Updated device ID to MAC address: $macAddress');
-      };
-
-      _socketProtocol = SocketProtocol();
-
-      await _socketProtocol.forceCleanup();
-
-      _socketProtocol.initialize(deviceId!, userName);
-
-      _socketProtocol.onDeviceConnected = (deviceId, userName) {
-        debugPrint(
-          '🔗 Device connected via SocketProtocol: $userName ($deviceId)',
-        );
-        addConnectedDevice(deviceId, userName);
-      };
-
-      _messageRouter = MessageRouter();
-      _messageRouter.setGlobalListener(_handleGlobalMessage);
-
-      if (_wifiDirectService != null) {
-        _setupWiFiDirectSync();
-
-        _setupWiFiDirectMessageStream();
-      }
-
-      _addMessageTrace('Main service initialized with userName: $userName');
-      debugPrint('✅ P2P Main Service initialized successfully');
+      // Setup connections and callbacks
+      _setupConnectionsAndCallbacks();
 
       // Setup enhanced monitoring
       _setupEnhancedMonitoring();
 
+      debugPrint('✅ P2P Main Service initialized successfully');
       return true;
     } catch (e) {
       debugPrint('❌ P2P Main Service initialization failed: $e');
-      _addMessageTrace('Service initialization failed: $e');
       return false;
     }
   }
 
-  WiFiDirectService? get wifiDirectService => _wifiDirectService;
+  /// Initialize core service components
+  Future<void> _initializeCoreComponents() async {
+    // Identifier resolver (UUID-based system)
+    _identifierResolver = IdentifierResolver();
 
-  /// Debounce connection state changes to prevent race conditions
-  void _debounceConnectionStateChange(VoidCallback callback) {
-    _connectionStateDebounceTimer?.cancel();
-    _connectionStateDebounceTimer = Timer(
-      _connectionStateDebounceDelay,
-      callback,
+    // Network and discovery services
+    _networkService = P2PNetworkService(this);
+    _discoveryService = P2PDiscoveryService(this, _networkService);
+    await _discoveryService.initialize();
+
+    // Socket protocol (UUID-based)
+    _socketProtocol = SocketProtocol();
+    await _socketProtocol.forceCleanup();
+    _socketProtocol.initialize(deviceId!, userName!);
+
+    // Message router
+    _messageRouter = MessageRouter();
+
+    // CRITICAL FIX: Register IdentifierResolver with MessageRouter
+    // This allows MessageRouter to resolve display names to MAC addresses
+    _messageRouter.setIdentifierResolver(_identifierResolver);
+    debugPrint('✅ IdentifierResolver registered with MessageRouter');
+
+    debugPrint('✅ Core components initialized');
+  }
+
+  /// Initialize specialized managers and handlers
+  Future<void> _initializeManagers() async {
+    // Connection manager
+    _connectionManager = P2PConnectionManager(this);
+
+    // WiFi Direct handler
+    _wifiDirectHandler = P2PWiFiDirectHandler(
+      this,
+      _connectionManager,
+      _socketProtocol,
     );
-  }
+    await _wifiDirectHandler.initialize();
 
-  void _setupWiFiDirectMessageStream() {
-    _wifiDirectService?.messageStream
-        .listen((messageData) {
-          debugPrint('📨 WiFi Direct message stream received: $messageData');
-
-          final messageType = messageData['type'] as String?;
-          if (messageType == 'message_received') {
-            final message = messageData['message'] as String?;
-            final from = messageData['from'] as String?;
-
-            if (message != null && from != null) {
-              final messageHash = '${from}_${message.hashCode}';
-
-              _cleanupMessageDeduplication();
-
-              final now = DateTime.now();
-              final existingTimestamp = _messageTimestamps[messageHash];
-              if (existingTimestamp != null) {
-                final timeDiff = now.difference(existingTimestamp).inSeconds;
-                if (timeDiff < 5) {
-                  debugPrint(
-                    '! Duplicate WiFi Direct message blocked: $messageHash',
-                  );
-                  return;
-                }
-              }
-
-              // Mark as processed with current timestamp
-              _processedMessages.add(messageHash);
-              _messageTimestamps[messageHash] = now;
-
-              _handleIncomingMessage(message, from);
-            }
-          }
-        })
-        .onError((error) {
-          debugPrint('❌ WiFi Direct message stream error: $error');
-        });
-
-    debugPrint(
-      '✅ WiFi Direct message stream listener setup complete with deduplication',
+    // Message handler
+    _messageHandler = P2PMessageHandler(
+      this,
+      _messageRouter,
+      _socketProtocol,
+      _wifiDirectHandler,
     );
+
+    // Device manager
+    _deviceManager = P2PDeviceManager(this, _connectionManager);
+    _deviceManager.setWiFiDirectService(_wifiDirectHandler.wifiDirectService);
+
+    // Enhanced monitoring and management
+    _qualityMonitor = ConnectionQualityMonitor();
+    _reconnectionManager = ReconnectionManager(
+      maxReconnectionAttempts: emergencyMode ? 10 : 5,
+      initialDelay: Duration(seconds: emergencyMode ? 1 : 2),
+    );
+    _devicePrioritization = DevicePrioritization();
+    _timeoutManager = TimeoutManager(
+      config: emergencyMode ? TimeoutConfig.emergency() : TimeoutConfig(),
+    );
+
+    debugPrint('✅ Managers and handlers initialized');
   }
 
-  void _setupWiFiDirectSync() {
-    _wifiDirectService?.connectionStream.listen((connectionState) {
-      debugPrint('🔗 WiFi Direct connection state changed: $connectionState');
+  /// Setup connections and callbacks between components
+  void _setupConnectionsAndCallbacks() {
+    // UUID-based system - no MAC address updates needed
 
-      // Use a debounce mechanism to avoid rapid state changes
-      _debounceConnectionStateChange(() {
-        if (connectionState == WiFiDirectConnectionState.connected) {
-          _currentConnectionMode = P2PConnectionMode.wifiDirect;
-          updateConnectionStatus(true);
-          _refreshConnectedPeers();
-        } else if (connectionState == WiFiDirectConnectionState.disconnected) {
-          if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
-            _currentConnectionMode = P2PConnectionMode.none;
-            updateConnectionStatus(false);
-            _clearWiFiDirectDevices();
-          }
-        }
-        notifyListeners();
-      });
-    });
-
-    _wifiDirectService?.peersStream.listen((peers) {
-      debugPrint('👥 WiFi Direct peers updated: ${peers.length} peers found');
-
-      // Debounce peer updates to prevent excessive processing
-      _peerUpdateDebounceTimer?.cancel();
-      _peerUpdateDebounceTimer = Timer(_peerUpdateDebounceDelay, () {
-        _updateDiscoveredPeersFromWiFiDirect(peers);
-        _checkForNewConnectedPeers(peers);
-        _triggerDevicesDiscoveredCallback();
-        notifyListeners();
-      });
-    });
-
-    _wifiDirectService?.stateStream.listen((state) {
-      debugPrint('📡 WiFi Direct state update: $state');
-
-      // Handle connection changes
-      if (state['connectionChanged'] == true) {
-        final connectionInfo = Map<String, dynamic>.from(
-          state['connectionInfo'] as Map? ?? {},
-        );
-        _handleWiFiDirectConnectionChange(connectionInfo);
-      }
-
-      if (state['socketReady'] == true) {
-        debugPrint('🔌 WiFi Direct socket communication ready');
-        _addMessageTrace('WiFi Direct socket established');
-      }
-
-      if (state['socketEstablished'] == true) {
-        final connectionInfo = Map<String, dynamic>.from(
-          state['connectionInfo'] as Map? ?? {},
-        );
-        debugPrint('✅ Socket established: $connectionInfo');
-        _handleSocketEstablished(connectionInfo);
-      }
-
-      if (state['existingConnection'] == true) {
-        final connectionInfo = Map<String, dynamic>.from(
-          state['connectionInfo'] as Map? ?? {},
-        );
-        debugPrint('🔗 Existing connection detected: $connectionInfo');
-        _handleExistingConnection(connectionInfo);
-      }
-
-      // Message handling is now done ONLY via messageStream to prevent duplicates
-      // Removed duplicate message processing from stateStream
-
-      // Handle new socket events
-      if (state['serverSocketReady'] == true) {
-        final socketInfo = Map<String, dynamic>.from(
-          state['socketInfo'] as Map? ?? {},
-        );
-        debugPrint('🔌 Server socket ready: $socketInfo');
-        _addMessageTrace('Server socket ready on port ${socketInfo['port']}');
-      }
-
-      if (state['connectionError'] == true) {
-        final error = state['error'] as String?;
-        final details = state['details'] as String?;
-        debugPrint('❌ Connection error: $error - $details');
-        _addMessageTrace('Connection error: $error');
-
-        // Try to recover from connection errors
-        _handleConnectionError(error, details);
-      }
-    });
-  }
-
-  void _updateDiscoveredPeersFromWiFiDirect(List<WiFiDirectPeer> peers) {
-    for (final peer in peers) {
-      final deviceModel = DeviceModel(
-        id: peer.deviceAddress,
-        deviceId: peer.deviceAddress,
-        userName: peer.deviceName,
-        isHost: false,
-        isOnline: true,
-        createdAt: DateTime.now(),
-        lastSeen: DateTime.now(),
-        isConnected: peer.status == WiFiDirectPeerStatus.connected,
-        discoveryMethod: 'wifi_direct',
-        deviceAddress: peer.deviceAddress,
-        messageCount: 0,
+    // Socket protocol callbacks
+    _socketProtocol.onDeviceConnected = (deviceId, userName) {
+      debugPrint(
+        '🔗 Device connected via SocketProtocol: $userName ($deviceId)',
       );
+      addConnectedDevice(deviceId, userName);
+    };
 
-      // Update or add to discovered devices
-      final existingIndex = discoveredResQLinkDevices.indexWhere(
-        (d) => d.deviceId == deviceModel.deviceId,
-      );
+    _socketProtocol.onPongReceived = (deviceId, sequence) {
+      _qualityMonitor.recordPingReceived(deviceId, sequence);
+    };
 
-      if (existingIndex >= 0) {
-        discoveredResQLinkDevices[existingIndex] = deviceModel;
-      } else {
-        discoveredResQLinkDevices.add(deviceModel);
-      }
+    // IP to MAC address resolver callback (shared by socket protocol and message handler)
+    String? resolveIpToMac(String ipAddress) {
+      try {
+        // Get all connected WiFi Direct peers from the device manager
+        final connectedPeers = _deviceManager.discoveredDevices.values
+            .where((deviceMap) {
+              final isConnected = deviceMap['isConnected'] as bool? ?? false;
+              final deviceId = deviceMap['deviceId'] as String? ?? deviceMap['deviceAddress'] as String?;
+              // Check if device is connected and has a valid UUID
+              return isConnected && deviceId != null && deviceId.isNotEmpty;
+            })
+            .toList();
 
-      if (peer.status == WiFiDirectPeerStatus.connected) {
-        debugPrint('➕ Adding connected WiFi Direct peer: ${peer.deviceName}');
-        addConnectedDevice(peer.deviceAddress, peer.deviceName);
-      }
-    }
-  }
+        debugPrint('🔍 Attempting to resolve IP $ipAddress from ${connectedPeers.length} connected WiFi Direct peers');
 
-  /// NEW METHOD: Check for newly connected peers
-  void _checkForNewConnectedPeers(List<WiFiDirectPeer> peers) {
-    for (final peer in peers) {
-      if (peer.status == WiFiDirectPeerStatus.connected) {
-        // Check if this peer is already in connected devices
-        if (!connectedDevices.containsKey(peer.deviceAddress)) {
-          debugPrint(
-            '🆕 New WiFi Direct connection detected: ${peer.deviceName}',
-          );
-          addConnectedDevice(peer.deviceAddress, peer.deviceName);
-
-          // DON'T trigger onDeviceConnected here - wait for socket/handshake completion
-          // This prevents duplicate connection notifications from WiFi Direct peer discovery
-          debugPrint(
-            '⏳ Waiting for socket connection establishment with ${peer.deviceName}',
-          );
+        // If there's exactly ONE connected WiFi Direct peer, use their MAC
+        if (connectedPeers.length == 1) {
+          final peerMac = connectedPeers.first['deviceAddress'] as String;
+          final peerName = connectedPeers.first['deviceName'] as String;
+          debugPrint('✅ Resolved IP $ipAddress to single connected peer: $peerName ($peerMac)');
+          return peerMac;
         }
-      }
-    }
-  }
 
-  /// NEW METHOD: Handle WiFi Direct connection changes
-  void _handleWiFiDirectConnectionChange(Map<String, dynamic> connectionInfo) {
-    final isConnected = connectionInfo['isConnected'] as bool? ?? false;
-    final groupFormed = connectionInfo['groupFormed'] as bool? ?? false;
-
-    debugPrint(
-      '🔄 WiFi Direct connection change: connected=$isConnected, groupFormed=$groupFormed',
-    );
-
-    if (isConnected && groupFormed) {
-      _currentConnectionMode = P2PConnectionMode.wifiDirect;
-      updateConnectionStatus(true);
-
-      // Refresh peer list to get connected devices
-      _refreshConnectedPeers();
-    } else {
-      if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
-        _currentConnectionMode = P2PConnectionMode.none;
-        updateConnectionStatus(false);
-        _clearWiFiDirectDevices();
-      }
-    }
-
-    notifyListeners();
-  }
-
-  Future<void> _refreshConnectedPeers() async {
-    try {
-      debugPrint('🔄 Refreshing connected WiFi Direct peers...');
-
-      final peers = await _wifiDirectService?.getPeerList() ?? [];
-
-      // Process connected peers
-      for (final peerData in peers) {
-        final deviceAddress = peerData['deviceAddress'] as String? ?? '';
-        final deviceName =
-            peerData['deviceName'] as String? ?? 'Unknown Device';
-        final statusValue = peerData['status'];
-        final statusInt = statusValue is int
-            ? statusValue
-            : int.tryParse(statusValue.toString()) ?? -1;
-
-        // WiFi Direct status: 0 = connected, 1 = invited, 2 = failed, 3 = available, 4 = unavailable
-        if (statusInt == 0 && deviceAddress.isNotEmpty) {
-          debugPrint('✅ Found connected peer: $deviceName ($deviceAddress)');
-
-          // Add to connected devices if not already there
-          if (!connectedDevices.containsKey(deviceAddress)) {
-            addConnectedDevice(deviceAddress, deviceName);
+        // If there are multiple peers, we can't determine which one - return null
+        if (connectedPeers.length > 1) {
+          debugPrint('⚠️ Multiple WiFi Direct peers connected - cannot determine which one is at $ipAddress');
+          for (final peer in connectedPeers) {
+            debugPrint('   - ${peer['deviceName']} (${peer['deviceAddress']})');
           }
-
-          // Update discovered devices with connected status
-          final existingIndex = discoveredResQLinkDevices.indexWhere(
-            (d) => d.deviceId == deviceAddress,
-          );
-
-          if (existingIndex >= 0) {
-            discoveredResQLinkDevices[existingIndex] =
-                discoveredResQLinkDevices[existingIndex].copyWith(
-                  isConnected: true,
-                  lastSeen: DateTime.now(),
-                );
-          } else {
-            // Add as new discovered device
-            final deviceModel = DeviceModel(
-              id: deviceAddress,
-              deviceId: deviceAddress,
-              userName: deviceName,
-              isHost: false,
-              isOnline: true,
-              createdAt: DateTime.now(),
-              lastSeen: DateTime.now(),
-              isConnected: true,
-              discoveryMethod: 'wifi_direct',
-              deviceAddress: deviceAddress,
-            );
-            discoveredResQLinkDevices.add(deviceModel);
-          }
+        } else if (connectedPeers.isEmpty) {
+          debugPrint('⚠️ No connected WiFi Direct peers found for IP resolution');
         }
-      }
 
-      // Trigger callbacks
-      _triggerDevicesDiscoveredCallback();
+        return null;
+      } catch (e) {
+        debugPrint('❌ Error resolving IP $ipAddress to MAC: $e');
+        return null;
+      }
+    }
+
+    // UUID-based system - no IP to MAC resolution needed
+    // Message handler still may use resolver for legacy support
+    _messageHandler.onResolveIpToMac = resolveIpToMac;
+
+    // WiFi Direct handler callbacks
+    _wifiDirectHandler.onMessageReceived = (message, from) {
+      _messageHandler.handleIncomingMessage(message, from);
+    };
+
+    _wifiDirectHandler.onConnectionChanged = () {
       notifyListeners();
-    } catch (e) {
-      debugPrint('❌ Error refreshing connected peers: $e');
-    }
-  }
+    };
 
-  /// NEW METHOD: Clear WiFi Direct devices on disconnection
-  void _clearWiFiDirectDevices() {
-    // Remove WiFi Direct devices from connected devices
-    final wifiDirectDevices = connectedDevices.entries
-        .where((entry) => entry.value.discoveryMethod == 'wifi_direct')
-        .map((entry) => entry.key)
-        .toList();
+    _wifiDirectHandler.onPeersUpdated = (peers) {
+      _deviceManager.triggerDevicesDiscoveredCallback();
+      notifyListeners();
+    };
 
-    for (final deviceId in wifiDirectDevices) {
-      removeConnectedDevice(deviceId);
-    }
+    _wifiDirectHandler.onDeviceRegistered = (deviceId, userName) {
+      // Delay notification to prevent UI thread issues
+      Future.microtask(() => notifyListeners());
+    };
 
-    // Update discovered devices connection status
-    for (int i = 0; i < discoveredResQLinkDevices.length; i++) {
-      final device = discoveredResQLinkDevices[i];
-      if (device.discoveryMethod == 'wifi_direct') {
-        discoveredResQLinkDevices[i] = device.copyWith(isConnected: false);
+    // Connection manager callbacks
+    _connectionManager.onConnectionStateChanged = () {
+      notifyListeners();
+    };
+
+    _connectionManager.onPeerListUpdated = () {
+      notifyListeners();
+    };
+
+    // Message handler callbacks
+    _messageHandler.onMessageProcessed = (message) {
+      notifyListeners();
+    };
+
+    // Device manager callbacks
+    _deviceManager.onDevicesDiscovered = (devices) {
+      if (onDevicesDiscovered != null) {
+        onDevicesDiscovered!(devices);
       }
-    }
+    };
 
-    debugPrint('🧹 Cleared WiFi Direct devices from connected list');
-  }
-
-  /// Handle socket establishment with proper protocol initialization
-  Future<void> _handleSocketEstablished(
-    Map<String, dynamic> connectionInfo,
-  ) async {
-    final isGroupOwner = connectionInfo['isGroupOwner'] as bool? ?? false;
-    final groupOwnerAddress =
-        connectionInfo['groupOwnerAddress'] as String? ?? '';
-
-    debugPrint(
-      '🔌 Socket established - Group Owner: $isGroupOwner, Address: $groupOwnerAddress',
-    );
-
-    try {
-      // Initialize socket protocol based on role
-      if (isGroupOwner) {
-        debugPrint('👑 Starting socket server as group owner');
-        await _socketProtocol.startServer();
-      } else if (groupOwnerAddress.isNotEmpty) {
-        // Add this check to ensure we have a valid address
-        debugPrint('📱 Connecting to socket server at: $groupOwnerAddress');
-        await _socketProtocol.connectToServer(groupOwnerAddress);
-      } else {
-        debugPrint('⚠️ Cannot connect - no group owner address provided');
-        _addMessageTrace('Socket connection failed: no group owner address');
-        return;
-      }
-
-      // Update connection mode and status
-      _currentConnectionMode = P2PConnectionMode.wifiDirect;
-      updateConnectionStatus(true);
-
-      _addMessageTrace(
-        'Socket protocol initialized (Group Owner: $isGroupOwner)',
+    // Quality monitor callbacks
+    _qualityMonitor.onQualityChanged = (deviceId, quality) {
+      debugPrint(
+        '📊 Quality changed for $deviceId: ${quality.level.name} (RTT: ${quality.rtt.toStringAsFixed(1)}ms)',
       );
+    };
 
-      debugPrint('✅ Socket protocol fully established and ready');
-    } catch (e) {
-      debugPrint('❌ Socket protocol error: $e');
-      _addMessageTrace('Socket protocol initialization failed: $e');
-    }
+    _qualityMonitor.onConnectionDegraded = (deviceId) {
+      debugPrint('⚠️ Connection degraded for $deviceId, considering reconnection');
+      // Optionally trigger reconnection for degraded connections
+    };
 
-    notifyListeners();
-  }
+    // Reconnection manager callbacks
+    _reconnectionManager.onReconnectAttempt = (deviceId, deviceInfo) async {
+      debugPrint('🔄 Attempting to reconnect to $deviceId');
+      return await connectToDevice(deviceInfo);
+    };
 
-  /// Handle existing connection detection
-  void _handleExistingConnection(Map<String, dynamic> connectionInfo) {
-    final isGroupOwner = connectionInfo['isGroupOwner'] as bool? ?? false;
-    final groupOwnerAddress =
-        connectionInfo['groupOwnerAddress'] as String? ?? '';
+    _reconnectionManager.onReconnectionSuccess = (deviceId) {
+      debugPrint('✅ Successfully reconnected to $deviceId');
+    };
 
-    debugPrint(
-      '🔗 Existing connection - Group Owner: $isGroupOwner, Address: $groupOwnerAddress',
-    );
+    _reconnectionManager.onReconnectionFailed = (deviceId) {
+      debugPrint('❌ Failed to reconnect to $deviceId after maximum attempts');
+    };
 
-    // Update connection mode and status
-    _currentConnectionMode = P2PConnectionMode.wifiDirect;
-    updateConnectionStatus(true);
+    // Timeout manager callbacks
+    _timeoutManager.onTimeout = (id, operation) {
+      debugPrint('⏰ ${operation.name} timeout: $id');
+    };
 
-    _addMessageTrace(
-      'Existing WiFi Direct connection detected (Group Owner: $isGroupOwner)',
-    );
-    notifyListeners();
-  }
-
-  /// Handle incoming WiFi Direct messages with message router integration
-  Future<void> _handleIncomingMessage(String message, String? from) async {
-    try {
-      debugPrint('📨 Processing WiFi Direct message: $message from: $from');
-
-      // Parse message to check if it's a handshake
-      try {
-        final messageData = jsonDecode(message);
-        final messageType = messageData['type'] as String?;
-
-        if (messageType == 'handshake') {
-          // Handle handshake directly to establish WiFi Direct connection
-          final deviceId = messageData['deviceId'] as String?;
-          final macAddress = messageData['macAddress'] as String?;
-          final userName = messageData['userName'] as String?;
-          final deviceName = messageData['deviceName'] as String?;
-
-          // CRITICAL: Use MAC address as the device identifier if available
-          final finalDeviceId = macAddress ?? deviceId;
-
-          if (finalDeviceId != null) {
-            // Prevent concurrent processing of the same device
-            if (_processingDevices.contains(finalDeviceId)) {
-              debugPrint(
-                '⚠️ Handshake already being processed for device $finalDeviceId',
-              );
-              return;
-            }
-
-            debugPrint(
-              '🤝 Processing WiFi Direct handshake from $userName',
-            );
-            debugPrint('📱 Device ID: $deviceId');
-            debugPrint('📍 MAC Address: $macAddress');
-            debugPrint('✅ Using identifier: $finalDeviceId');
-
-            // Register device as connected for WiFi Direct (async, don't wait)
-            _registerWiFiDirectDevice(
-              finalDeviceId,
-              userName ?? 'Unknown',
-              deviceName ?? 'Unknown Device',
-              from,
-            );
-
-            // Send handshake response (async, don't wait)
-            _sendHandshakeResponse(finalDeviceId, from);
-            return;
-          }
-        }
-
-        if (messageType == 'handshake_response') {
-          // Handle handshake response
-          final deviceId = messageData['deviceId'] as String?;
-          final macAddress = messageData['macAddress'] as String?;
-          final userName = messageData['userName'] as String?;
-          final deviceName = messageData['deviceName'] as String?;
-
-          // CRITICAL: Use MAC address as the device identifier if available
-          final finalDeviceId = macAddress ?? deviceId;
-
-          if (finalDeviceId != null) {
-            // Prevent concurrent processing of the same device
-            if (_processingDevices.contains(finalDeviceId)) {
-              debugPrint(
-                '⚠️ Handshake response already being processed for device $finalDeviceId',
-              );
-              return;
-            }
-
-            debugPrint(
-              '🤝 Processing WiFi Direct handshake response from $userName',
-            );
-            debugPrint('📱 Device ID: $deviceId');
-            debugPrint('📍 MAC Address: $macAddress');
-            debugPrint('✅ Using identifier: $finalDeviceId');
-
-            // Register device as connected (async, don't wait)
-            _registerWiFiDirectDevice(
-              finalDeviceId,
-              userName ?? 'Unknown',
-              deviceName ?? 'Unknown Device',
-              from,
-            );
-            return;
-          }
-        }
-      } catch (parseError) {
-        // If not JSON or not a handshake, continue with normal processing
-      }
-
-      // Route through MessageRouter for non-handshake messages
-      await _messageRouter.routeRawMessage(message, from ?? 'unknown');
-
-      _addMessageTrace('WiFi Direct message routed successfully');
-      debugPrint('✅ WiFi Direct message routed successfully via MessageRouter');
-    } catch (e) {
-      debugPrint('❌ Error routing message: $e');
-      _addMessageTrace('Failed to route message: $e');
-
-      // Fallback to direct processing if routing fails
-      try {
-        await _fallbackMessageProcessing(message, from);
-      } catch (fallbackError) {
-        debugPrint('❌ Fallback message processing also failed: $fallbackError');
-      }
-    }
-  }
-
-  /// Fallback message processing if router fails
-  Future<void> _fallbackMessageProcessing(String message, String? from) async {
-    final messageData = Map<String, dynamic>.from(json.decode(message));
-
-    // Extract message details
-    final messageText = messageData['message'] as String? ?? message;
-    final senderName =
-        messageData['senderName'] as String? ?? 'WiFi Direct User';
-    final messageType = MessageType.values.firstWhere(
-      (type) => type.name == messageData['messageType'],
-      orElse: () => MessageType.text,
-    );
-
-    // Create message model
-    final messageModel = MessageModel.createDirectMessage(
-      fromUser: senderName,
-      message: messageText,
-      deviceId: messageData['deviceId'] ?? 'unknown',
-      targetDeviceId: deviceId ?? 'unknown',
-      type: messageType,
-      isEmergency:
-          messageType == MessageType.emergency ||
-          messageType == MessageType.sos,
-    );
-
-    // Save to database
-    await MessageRepository.insertMessage(messageModel);
-
-    // Add to message history
-    saveMessageToHistory(messageModel);
-
-    debugPrint('✅ Fallback message processing completed');
-  }
-
-  Future<void> checkForExistingConnections() async {
-    try {
-      debugPrint('🔍 Checking for existing WiFi Direct connections...');
-
-      // Check connection info
-      final connectionInfo = await _wifiDirectService?.getConnectionInfo();
-
-      if (connectionInfo != null && connectionInfo['groupFormed'] == true) {
-        debugPrint('✅ Existing WiFi Direct connection found!');
-        debugPrint('  - Group Owner: ${connectionInfo['isGroupOwner']}');
-        debugPrint('  - Group Address: ${connectionInfo['groupOwnerAddress']}');
-
-        _currentConnectionMode = P2PConnectionMode.wifiDirect;
-        updateConnectionStatus(true);
-
-        // CRITICAL FIX: Get and process peer list
-        await _refreshConnectedPeers();
-
-        // Establish socket if needed
-        final socketEstablished = connectionInfo['socketEstablished'] ?? false;
-        if (!socketEstablished) {
-          debugPrint('🔌 Socket not established, creating now...');
-          final success =
-              await _wifiDirectService?.establishSocketConnection() ?? false;
-          if (success) {
-            debugPrint('✅ Socket connection established successfully');
-            _addMessageTrace(
-              'Socket connection established after system connection',
-            );
-          } else {
-            debugPrint('❌ Failed to establish socket connection');
-            _addMessageTrace('Socket establishment failed');
-          }
-        } else {
-          debugPrint('✅ Socket already established');
-        }
-
-        notifyListeners();
-      } else {
-        debugPrint('ℹ️ No existing WiFi Direct connection found');
-      }
-    } catch (e) {
-      debugPrint('❌ Error checking existing connections: $e');
-      _addMessageTrace('Error checking connections: $e');
-    }
-  }
-
-  /// Check for system-level WiFi Direct connections (call when returning from settings)
-  Future<void> checkForSystemConnections() async {
-    try {
-      debugPrint('🔍 Checking for system-level connections...');
-      await _wifiDirectService?.checkForSystemConnection();
-    } catch (e) {
-      debugPrint('❌ Error checking system connection: $e');
-    }
+    debugPrint('✅ Connections and callbacks setup complete');
   }
 
   /// Setup enhanced monitoring and verification
   void _setupEnhancedMonitoring() {
+    // Start connection quality monitoring
+    _qualityMonitor.startMonitoring();
+
     // Check for system connections every 15 seconds
-    Timer.periodic(Duration(seconds: 15), (_) {
+    _monitoringTimer = Timer.periodic(Duration(seconds: 15), (_) {
       checkForSystemConnections();
     });
+
+    // Send pings to connected devices every 10 seconds for RTT tracking
+    _pingTimer = Timer.periodic(Duration(seconds: 10), (_) {
+      _sendPingToConnectedDevices();
+    });
+
+    debugPrint('✅ Enhanced monitoring started');
   }
 
-  Future<bool> connectToDevice(Map<String, dynamic> device) async {
-    try {
-      debugPrint('🔗 Attempting to connect to device: ${device['deviceName']}');
-
-      final connectionType = device['connectionType'] as String?;
-
-      switch (connectionType) {
-        case 'wifi_direct':
-          return await _connectViaWifiDirect(device);
-        case 'mdns':
-        case 'mdns_enhanced':
-          return await _connectViaMDNS(device);
-        default:
-          debugPrint('⚠️ Unknown connection type: $connectionType');
-          return false;
-      }
-    } catch (e) {
-      debugPrint('❌ Device connection failed: $e');
-      return false;
+  /// Send ping messages to all connected devices for quality monitoring
+  void _sendPingToConnectedDevices() async {
+    // Don't send pings if not fully connected with socket protocol
+    if (connectedDevices.isEmpty || !_socketProtocol.isConnected) {
+      return;
     }
-  }
 
-  Future<bool> _connectViaWifiDirect(Map<String, dynamic> device) async {
-    final deviceAddress = device['deviceAddress'] as String?;
-    if (deviceAddress == null) return false;
+    for (final entry in connectedDevices.entries) {
+      final deviceId = entry.key;
 
-    try {
-      debugPrint('📡 Connecting via WiFi Direct to: $deviceAddress');
+      try {
+        final pingMessage = _qualityMonitor.generatePingMessage(deviceId);
+        _qualityMonitor.recordPingSent(deviceId);
 
-      // Use WiFiDirectService for actual connection
-      final success =
-          await _wifiDirectService?.connectToPeer(deviceAddress) ?? false;
+        // Send directly via socket protocol (not through message handler)
+        final success = await _socketProtocol.sendMessage(
+          jsonEncode(pingMessage),
+          deviceId,
+        );
 
-      if (success) {
-        // Update P2P service state
-        _currentConnectionMode = P2PConnectionMode.wifiDirect;
-        updateConnectionStatus(true);
-
-        // Add device to connected devices
-        final deviceName = device['deviceName'] as String? ?? 'Unknown Device';
-        addConnectedDevice(deviceAddress, deviceName);
-
-        // CRITICAL FIX: Initialize socket protocol after WiFi Direct connection
-        await _initializeSocketProtocolAfterConnection();
-
-        debugPrint('✅ WiFi Direct connection successful');
-        return true;
-      } else {
-        debugPrint('❌ WiFi Direct connection failed');
-        return false;
-      }
-    } catch (e) {
-      debugPrint('❌ WiFi Direct connection failed: $e');
-      return false;
-    }
-  }
-
-  Future<bool> _connectViaMDNS(Map<String, dynamic> device) async {
-    debugPrint('📡 Connecting via mDNS to: ${device['deviceName']}');
-    return true; // Placeholder
-  }
-
-  /// Force device to host role
-  Future<void> forceHostRole() async {
-    try {
-      debugPrint('👑 Forcing host role...');
-      setRole(P2PRole.host);
-      _currentConnectionMode = P2PConnectionMode.wifiDirect;
-      await discoverDevices(force: true);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('❌ Failed to force host role: $e');
-    }
-  }
-
-  /// Force device to client role
-  Future<void> forceClientRole() async {
-    try {
-      debugPrint('📱 Forcing client role...');
-      setRole(P2PRole.client);
-      await discoverDevices(force: true);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('❌ Failed to force client role: $e');
-    }
-  }
-
-  Future<void> navigateToChat(
-    BuildContext context,
-    Map<String, dynamic> device,
-  ) async {
-    await ChatNavigationHelper.navigateToDeviceChat(
-      context: context,
-      device: device,
-      p2pService: this,
-    );
-  }
-
-  /// Clear forced role
-  Future<void> clearForcedRole() async {
-    try {
-      debugPrint('🔄 Clearing forced role...');
-      setRole(P2PRole.none);
-      await discoverDevices(force: true);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('❌ Failed to clear forced role: $e');
-    }
-  }
-
-  /// Handle connection errors with recovery mechanisms
-  Future<void> _handleConnectionError(String? error, String? details) async {
-    debugPrint('🔧 Attempting to recover from connection error: $error');
-
-    try {
-      // Reset connection state
-      if (_currentConnectionMode == P2PConnectionMode.wifiDirect) {
-        _currentConnectionMode = P2PConnectionMode.none;
-        updateConnectionStatus(false);
-      }
-
-      // Wait a moment before attempting recovery
-      await Future.delayed(Duration(seconds: 2));
-
-      // Try to establish new connections
-      if (error?.contains('connect') == true ||
-          error?.contains('socket') == true) {
-        debugPrint('🔄 Retrying WiFi Direct connection...');
-        await checkForExistingConnections();
-
-        // If still not connected, try discovery
-        if (!isConnected) {
-          await discoverDevices(force: true);
+        if (!success) {
+          _qualityMonitor.recordPacketTimeout(deviceId);
         }
+      } catch (e) {
+        _qualityMonitor.recordPacketTimeout(deviceId);
+        // Don't log ping timeouts as errors - they're expected for quality monitoring
       }
-
-      // Trigger fallback mechanisms if available
-      if (!isConnected) {
-        debugPrint('🔄 Triggering connection fallback...');
-        // The fallback manager will handle alternative connection methods
-      }
-    } catch (e) {
-      debugPrint('❌ Connection recovery failed: $e');
-      _addMessageTrace('Connection recovery failed: $e');
     }
   }
+
+  // ============================================================================
+  // Public API Methods - Delegates to specialized managers/handlers
+  // ============================================================================
+
+  /// Get WiFi Direct service instance
+  WiFiDirectService? get wifiDirectService => _wifiDirectHandler.wifiDirectService;
 
   /// Get online status
-  bool get isOnline => _isOnline;
+  bool get isOnline => _connectionManager.isOnline;
 
   /// Get current connection mode
-  P2PConnectionMode get currentConnectionMode => _currentConnectionMode;
+  P2PConnectionMode get currentConnectionMode => _connectionManager.currentConnectionMode;
 
   /// Get connection type as string
-  String get connectionType {
-    switch (_currentConnectionMode) {
-      case P2PConnectionMode.wifiDirect:
-        return 'wifi_direct';
-      case P2PConnectionMode.client:
-        return 'client';
-      default:
-        return 'none';
-    }
-  }
+  String get connectionType => _connectionManager.connectionType;
 
   /// Get connecting status
-  bool get isConnecting => _isConnecting;
+  bool get isConnecting => _connectionManager.isConnecting;
 
   /// Update online status
   void updateOnlineStatus(bool online) {
-    if (_isOnline != online) {
-      _isOnline = online;
-      debugPrint('🌐 Online status changed to: $online');
-      notifyListeners();
+    _connectionManager.updateOnlineStatus(online);
+  }
+
+  /// Get discovered devices
+  Map<String, Map<String, dynamic>> get discoveredDevices {
+    return _deviceManager.discoveredDevices;
+  }
+
+  /// Get known devices
+  Map<String, DeviceModel> get knownDevices {
+    return _deviceManager.knownDevices;
+  }
+
+  /// Discover devices with timeout and prioritization
+  @override
+  Future<void> discoverDevices({bool force = false}) async {
+    try {
+      debugPrint('🔍 Starting enhanced device discovery...');
+
+      if (force) {
+        _deviceManager.clearDiscoveredDevices();
+      }
+
+      // Wrap discovery with timeout
+      await _timeoutManager.withTimeout(
+        timeoutType: TimeoutOperation.discovery,
+        operation: () async {
+          // Use WiFi Direct discovery
+          await _wifiDirectHandler.startDiscovery();
+
+          // Also use existing discovery service
+          await _discoveryService.discoverDevices(force: force);
+        },
+      );
+
+      // Trigger callback with all discovered devices
+      _deviceManager.triggerDevicesDiscoveredCallback();
+
+      debugPrint(
+        '✅ Enhanced device discovery completed - found ${discoveredDevices.length} devices',
+      );
+    } catch (e) {
+      debugPrint('❌ Device discovery failed: $e');
     }
+  }
+
+  /// Connect to a device with timeout and quality tracking
+  Future<bool> connectToDevice(Map<String, dynamic> device) async {
+    final deviceId = device['deviceId'] as String? ?? device['deviceAddress'] as String?;
+    if (deviceId == null) {
+      debugPrint('❌ Cannot connect: device ID not found');
+      return false;
+    }
+
+    try {
+      // Wrap connection with timeout
+      final success = await _timeoutManager.withTimeout(
+        timeoutType: TimeoutOperation.connection,
+        operation: () async {
+          return await _deviceManager.connectToDevice(device);
+        },
+      );
+
+      if (success) {
+        // Start tracking connection quality for this device
+        final signalLevel = device['signalLevel'] as int? ?? -70;
+        _qualityMonitor.updateSignalStrength(deviceId, signalLevel);
+        debugPrint('✅ Connected to $deviceId, monitoring quality');
+      }
+
+      return success;
+    } on TimeoutException {
+      debugPrint('⏰ Connection to $deviceId timed out');
+      return false;
+    } catch (e) {
+      debugPrint('❌ Connection to $deviceId failed: $e');
+      return false;
+    }
+  }
+
+  /// Get prioritized list of devices to connect to
+  List<String> getPrioritizedDevices() {
+    final deviceFactors = <String, DevicePriorityFactors>{};
+
+    for (final entry in discoveredDevices.entries) {
+      final device = entry.value;
+      final deviceId = entry.key;
+
+      final factors = DevicePriorityFactors(
+        isEmergency: device['isEmergency'] as bool? ?? false,
+        signalStrength: device['signalLevel'] as int? ?? -70,
+        rtt: _qualityMonitor.getAverageRtt(deviceId),
+        packetLoss: _qualityMonitor.getDeviceQuality(deviceId)?.packetLoss,
+        connectionQuality: _qualityMonitor.getDeviceQuality(deviceId)?.level,
+        lastSeen: DateTime.fromMillisecondsSinceEpoch(
+          device['lastSeen'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+        ),
+        isPreviouslyConnected: knownDevices.containsKey(deviceId),
+        messageCount: knownDevices[deviceId]?.messageCount ?? 0,
+      );
+
+      deviceFactors[deviceId] = factors;
+    }
+
+    return _devicePrioritization.prioritizeDevices(deviceFactors)
+        .map((p) => p.deviceId)
+        .toList();
+  }
+
+  /// Connect to best available device based on priority
+  Future<bool> connectToBestDevice() async {
+    final prioritized = getPrioritizedDevices();
+    if (prioritized.isEmpty) {
+      debugPrint('❌ No devices available to connect');
+      return false;
+    }
+
+    final bestDeviceId = prioritized.first;
+    final device = discoveredDevices[bestDeviceId];
+    if (device == null) {
+      debugPrint('❌ Best device not found');
+      return false;
+    }
+
+    debugPrint('🎯 Connecting to best device: $bestDeviceId');
+    return await connectToDevice(device);
+  }
+
+  /// Send a message
+  @override
+  Future<void> sendMessage({
+    required String message,
+    required MessageType type,
+    String? targetDeviceId,
+    double? latitude,
+    double? longitude,
+    String? senderName,
+    String? id,
+    int? ttl,
+    List<String>? routePath,
+  }) async {
+    await _messageHandler.sendMessage(
+      message: message,
+      type: type,
+      targetDeviceId: targetDeviceId,
+      latitude: latitude,
+      longitude: longitude,
+      senderName: senderName,
+      id: id,
+      ttl: ttl,
+      routePath: routePath,
+    );
   }
 
   /// Send emergency template message
@@ -904,22 +524,84 @@ class P2PMainService extends P2PBaseService {
     );
   }
 
+  /// Check for existing WiFi Direct connections
+  Future<void> checkForExistingConnections() async {
+    await _wifiDirectHandler.checkForExistingConnections();
+  }
+
+  /// Check for system-level WiFi Direct connections
+  Future<void> checkForSystemConnections() async {
+    await _wifiDirectHandler.checkForSystemConnections();
+  }
+
+  /// Force device to host role
+  Future<void> forceHostRole() async {
+    try {
+      debugPrint('👑 Forcing host role...');
+      setRole(P2PRole.host);
+      _connectionManager.setConnectionMode(P2PConnectionMode.wifiDirect);
+      await discoverDevices(force: true);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ Failed to force host role: $e');
+    }
+  }
+
+  /// Force device to client role
+  Future<void> forceClientRole() async {
+    try {
+      debugPrint('📱 Forcing client role...');
+      setRole(P2PRole.client);
+      await discoverDevices(force: true);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ Failed to force client role: $e');
+    }
+  }
+
+  /// Clear forced role
+  Future<void> clearForcedRole() async {
+    try {
+      debugPrint('🔄 Clearing forced role...');
+      setRole(P2PRole.none);
+      await discoverDevices(force: true);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ Failed to clear forced role: $e');
+    }
+  }
+
+  /// Navigate to chat
+  Future<void> navigateToChat(
+    BuildContext context,
+    Map<String, dynamic> device,
+  ) async {
+    await ChatNavigationHelper.navigateToDeviceChat(
+      context: context,
+      device: device,
+      p2pService: this,
+    );
+  }
+
+  /// Disconnect from all connections
   Future<void> disconnect() async {
     try {
       debugPrint('🔌 Disconnecting from all connections...');
 
+      // Stop reconnection attempts
+      _reconnectionManager.stopAll();
+
       // Stop network services
       _networkService.dispose();
 
-      // Reset state
-      _currentConnectionMode = P2PConnectionMode.none;
-      _isConnecting = false;
+      // Reset connection manager
+      _connectionManager.reset();
 
       // Clear connected devices
       connectedDevices.clear();
 
-      // Update connection status
-      updateConnectionStatus(false);
+      // Clear quality monitoring for disconnected devices
+      _qualityMonitor.clearAll();
 
       debugPrint('✅ Disconnected successfully');
     } catch (e) {
@@ -927,9 +609,31 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  /// Get connection information
+  /// Handle device disconnection with optional reconnection
+  Future<void> handleDeviceDisconnection(
+    String deviceId,
+    Map<String, dynamic>? deviceInfo,
+  ) async {
+    debugPrint('📡 Device $deviceId disconnected');
+
+    // Check if we should attempt reconnection
+    final quality = _qualityMonitor.getDeviceQuality(deviceId);
+    final wasHealthy = quality?.isHealthy ?? true;
+
+    if (wasHealthy && deviceInfo != null && !emergencyMode) {
+      // Device had good connection quality, attempt reconnection
+      debugPrint('🔄 Starting automatic reconnection for $deviceId');
+      _reconnectionManager.startReconnection(deviceId, deviceInfo);
+    } else if (emergencyMode && deviceInfo != null) {
+      // In emergency mode, always try to reconnect
+      debugPrint('🚨 Emergency mode: forcing reconnection for $deviceId');
+      _reconnectionManager.startReconnection(deviceId, deviceInfo);
+    }
+  }
+
+  /// Get connection information with quality metrics
   Map<String, dynamic> getConnectionInfo() {
-    return {
+    final baseInfo = {
       'deviceId': deviceId,
       'userName': userName,
       'role': currentRole.name,
@@ -938,9 +642,13 @@ class P2PMainService extends P2PBaseService {
       'connectedDevices': connectedDevices.length,
       'discoveredDevices': discoveredResQLinkDevices.length,
     };
+
+    final connectionInfo = _connectionManager.getConnectionInfo();
+
+    return {...baseInfo, ...connectionInfo};
   }
 
-  /// Get enhanced connection info
+  /// Get enhanced connection info with quality and reconnection stats
   Map<String, dynamic> getEnhancedConnectionInfo() {
     final networkStatus = _networkService.getNetworkStatus();
     final discoveryStatus = _discoveryService.getDiscoveryStatus();
@@ -949,453 +657,54 @@ class P2PMainService extends P2PBaseService {
       ...getConnectionInfo(),
       'networkStatus': networkStatus,
       'discoveryStatus': discoveryStatus,
-      'messageTrace': getMessageTrace(),
+      'messageTrace': _messageHandler.getMessageTrace(),
       'detailedStatus': getDetailedStatus(),
+      'deviceStats': _deviceManager.getDeviceStats(),
+      'qualityStats': _qualityMonitor.getStatistics(),
+      'reconnectionStats': _reconnectionManager.getStatistics(),
+      'timeoutStats': _timeoutManager.getStatistics(),
     };
   }
 
-  Map<String, Map<String, dynamic>> get discoveredDevices {
-    final deviceMap = <String, Map<String, dynamic>>{};
-
-    // Add WiFi Direct peers with actual signal strength and connection status
-    for (final peer in (_wifiDirectService?.discoveredPeers ?? <dynamic>[])) {
-      final isConnected = peer.status == WiFiDirectPeerStatus.connected;
-
-      // CRITICAL FIX: Use custom device name with priority:
-      // 1. Handshake name (if connected)
-      // 2. Service discovery name (DNS-SD broadcast - before connection)
-      // 3. System WiFi Direct name (fallback)
-      final connectedDevice = connectedDevices[peer.deviceAddress];
-      final customNameFromDiscovery = _wifiDirectService?.getCustomName(
-        peer.deviceAddress,
-      );
-      final displayName =
-          connectedDevice?.userName ??
-          customNameFromDiscovery ??
-          peer.deviceName;
-
-      deviceMap[peer.deviceAddress] = {
-        'deviceId': peer.deviceAddress,
-        'deviceName':
-            displayName, // Use custom name from handshake if available
-        'deviceAddress': peer.deviceAddress,
-        'connectionType': 'wifi_direct',
-        'isAvailable':
-            peer.status == WiFiDirectPeerStatus.available || isConnected,
-        'signalLevel': peer.signalLevel ?? -50,
-        'lastSeen': DateTime.now().millisecondsSinceEpoch,
-        'isConnected': isConnected,
-        'status': peer.status.toString(), // Add WiFi Direct status
-        'isEmergency':
-            displayName.toLowerCase().contains('resqlink') ||
-            displayName.toLowerCase().contains('emergency'),
-      };
-    }
-
-    // Add ResQLink devices from discovery service (don't overwrite WiFi Direct devices)
-    for (final device in discoveredResQLinkDevices) {
-      if (!deviceMap.containsKey(device.deviceId)) {
-        deviceMap[device.deviceId] = {
-          'deviceId': device.deviceId,
-          'deviceName': device.userName,
-          'deviceAddress': device.deviceAddress ?? device.deviceId,
-          'connectionType': device.discoveryMethod ?? 'unknown',
-          'isAvailable': !device.isConnected,
-          'signalLevel': _calculateSignalStrength(device),
-          'lastSeen': device.lastSeen.millisecondsSinceEpoch,
-          'isConnected': device.isConnected,
-          'isEmergency': device.userName.toLowerCase().contains('emergency'),
-        };
-      } else {
-        // Merge information if device exists in both lists
-        final existing = deviceMap[device.deviceId]!;
-        deviceMap[device.deviceId] = {
-          ...existing,
-          'isConnected': device.isConnected || existing['isConnected'],
-          'lastSeen': device.lastSeen.millisecondsSinceEpoch,
-        };
-      }
-    }
-
-    // Final step: Override device names with connected device names (real names from handshake)
-    for (final connectedDevice in connectedDevices.values) {
-      if (deviceMap.containsKey(connectedDevice.deviceId)) {
-        deviceMap[connectedDevice.deviceId] = {
-          ...deviceMap[connectedDevice.deviceId]!,
-          'deviceName': connectedDevice
-              .userName, // Use real name from connection handshake
-          'isConnected': true,
-          'isOnline': connectedDevice.isOnline,
-        };
-        debugPrint(
-          '🔄 Updated device name from connection: ${connectedDevice.userName} (${connectedDevice.deviceId})',
-        );
-      }
-    }
-
-    return deviceMap;
+  /// Get connection quality for a specific device
+  ConnectionQuality? getDeviceQuality(String deviceId) {
+    return _qualityMonitor.getDeviceQuality(deviceId);
   }
 
-  /// Calculate signal strength for non-WiFi Direct devices
-  int _calculateSignalStrength(DeviceModel device) {
-    // Base signal strength on discovery method and recency
-    final timeDiff = DateTime.now().difference(device.lastSeen).inMinutes;
-
-    switch (device.discoveryMethod) {
-      case 'mdns':
-      case 'mdns_enhanced':
-        return -45 - (timeDiff * 2); // Strong for local network
-      case 'broadcast':
-        return -55 - (timeDiff * 3); // Medium for broadcast
-
-      default:
-        return -70 - (timeDiff * 5); // Weak for unknown
-    }
+  /// Get all device qualities
+  Map<String, ConnectionQuality> getAllDeviceQualities() {
+    return _qualityMonitor.getAllQualities();
   }
 
-  /// Trigger devices discovered callback
-  void _triggerDevicesDiscoveredCallback() {
-    if (onDevicesDiscovered != null) {
-      final allDevices = discoveredDevices.values.toList();
-      onDevicesDiscovered!(allDevices);
-    }
+  /// Check if reconnecting to a device
+  bool isReconnecting(String deviceId) {
+    return _reconnectionManager.isReconnecting(deviceId);
   }
 
-  Map<String, DeviceModel> get knownDevices {
-    final knownMap = <String, DeviceModel>{};
-
-    // Add discovered devices as known devices
-    for (final device in discoveredResQLinkDevices) {
-      knownMap[device.deviceId] = device;
-    }
-
-    // Add connected devices
-    for (final device in connectedDevices.values) {
-      knownMap[device.deviceId] = device;
-    }
-
-    return knownMap;
+  /// Get list of devices currently reconnecting
+  List<String> getReconnectingDevices() {
+    return _reconnectionManager.getReconnectingDevices();
   }
 
-  @override
-  Future<void> discoverDevices({bool force = false}) async {
-    try {
-      debugPrint('🔍 Starting enhanced device discovery...');
-
-      // Clear old devices if forcing discovery
-      if (force) {
-        discoveredResQLinkDevices.clear();
-      }
-
-      // Use WiFi Direct discovery
-      await _wifiDirectService?.startDiscovery();
-
-      // Also use existing discovery service
-      await _discoveryService.discoverDevices(force: force);
-
-      // Trigger callback with all discovered devices
-      _triggerDevicesDiscoveredCallback();
-
-      debugPrint(
-        '✅ Enhanced device discovery completed - found ${discoveredDevices.length} devices',
-      );
-    } catch (e) {
-      debugPrint('❌ Device discovery failed: $e');
-    }
+  /// Manually trigger reconnection for a device
+  void triggerReconnection(String deviceId, Map<String, dynamic> deviceInfo) {
+    _reconnectionManager.startReconnection(deviceId, deviceInfo);
   }
 
-  @override
-  Future<void> sendMessage({
-    required String message,
-    required MessageType type,
-    String? targetDeviceId,
-    double? latitude,
-    double? longitude,
-    String? senderName,
-    String? id,
-    int? ttl,
-    List<String>? routePath,
-  }) async {
-    try {
-      _addMessageTrace('Sending message: $message (type: ${type.name})');
-
-      // Use actual userName from service
-      final actualSenderName = userName ?? senderName ?? 'Unknown User';
-
-      debugPrint('📤 Sending message: "$message" from: $actualSenderName');
-
-      // Create message model
-      final messageModel = targetDeviceId != null
-          ? MessageModel.createDirectMessage(
-              fromUser: actualSenderName,
-              message: message,
-              deviceId: deviceId!,
-              targetDeviceId: targetDeviceId,
-              type: type,
-              isEmergency:
-                  type == MessageType.emergency || type == MessageType.sos,
-              latitude: latitude,
-              longitude: longitude,
-            )
-          : MessageModel.createBroadcastMessage(
-              fromUser: actualSenderName,
-              message: message,
-              deviceId: deviceId!,
-              type: type,
-              isEmergency:
-                  type == MessageType.emergency || type == MessageType.sos,
-              latitude: latitude,
-              longitude: longitude,
-            );
-
-      // Save to database first
-      await MessageRepository.insertMessage(messageModel);
-
-      // Add to message history
-      saveMessageToHistory(messageModel);
-
-      // Create message JSON for network transmission
-      final messageJson = jsonEncode({
-        'type': 'message',
-        'messageId': messageModel.messageId,
-        'message': message,
-        'senderName': actualSenderName,
-        'deviceId': deviceId,
-        'targetDeviceId': targetDeviceId,
-        'messageType': type.name,
-        'timestamp': messageModel.timestamp,
-        'isEmergency': type == MessageType.emergency || type == MessageType.sos,
-        'latitude': latitude,
-        'longitude': longitude,
-        'ttl': ttl ?? P2PBaseService.maxTtl,  // Include TTL for multi-hop
-        'routePath': routePath ?? [deviceId!],  // Start route path with sender
-      });
-
-      // Send immediately - message queue functionality removed
-      if (!isConnected) {
-        debugPrint('📥 Device not connected, message will not be queued');
-
-        // Update status to failed instead of queuing
-        await MessageRepository.updateMessageStatus(
-          messageModel.messageId!,
-          MessageStatus.failed,
-        );
-
-        _addMessageTrace('Message failed - device not connected');
-        throw Exception('Device not connected');
-      }
-
-      bool success = false;
-
-      final hasConnectedDevices = connectedDevices.isNotEmpty;
-
-      if (hasConnectedDevices && _wifiDirectService != null) {
-        // Send via WiFi Direct
-        if (targetDeviceId != null) {
-          // Send to specific device
-          success = await _wifiDirectService!.sendMessage(messageJson);
-        } else {
-          // Broadcast to all WiFi Direct devices
-          success = await _wifiDirectService!.sendMessage(messageJson);
-        }
-        debugPrint('📡 Message sent via WiFi Direct: $success');
-      } else {
-        // Fallback to socket protocol
-        switch (_currentConnectionMode) {
-          case P2PConnectionMode.wifiDirect:
-            success = await _socketProtocol.sendMessage(
-              messageJson,
-              targetDeviceId,
-            );
-
-          default:
-            success = await _socketProtocol.broadcastMessage(messageJson);
-        }
-      }
-
-      if (success) {
-        await MessageRepository.updateMessageStatus(
-          messageModel.messageId!,
-          MessageStatus.sent,
-        );
-        _addMessageTrace(
-          'Message sent successfully: ${messageModel.messageId}',
-        );
-      } else {
-        debugPrint('❌ Primary send failed, message queue disabled');
-
-        // Update status to failed instead of queuing
-        await MessageRepository.updateMessageStatus(
-          messageModel.messageId!,
-          MessageStatus.failed,
-        );
-
-        _addMessageTrace('Message send failed');
-        throw Exception('Message send failed');
-      }
-
-      debugPrint('✅ Message processing completed');
-    } catch (e) {
-      _addMessageTrace('Message send failed: $e');
-      debugPrint('❌ Message send failed: $e');
-      rethrow;
-    }
+  /// Stop reconnection for a device
+  void stopReconnection(String deviceId) {
+    _reconnectionManager.stopReconnection(deviceId);
   }
 
-  /// Initialize socket protocol after successful WiFi Direct connection
-  Future<void> _initializeSocketProtocolAfterConnection() async {
-    try {
-      debugPrint(
-        '🔌 Initializing socket protocol after WiFi Direct connection...',
-      );
-
-      // Get WiFi Direct connection info to determine role
-      final connectionInfo = await _wifiDirectService?.getConnectionInfo();
-      final isGroupOwner = connectionInfo?['isGroupOwner'] ?? false;
-      final groupOwnerAddress = connectionInfo?['groupOwnerAddress'] ?? '';
-
-      if (isGroupOwner) {
-        debugPrint('👑 Starting socket server as group owner');
-        await _socketProtocol.startServer();
-      } else if (groupOwnerAddress.isNotEmpty) {
-        debugPrint('📱 Connecting to socket server at: $groupOwnerAddress');
-        await _socketProtocol.connectToServer(groupOwnerAddress);
-      } else {
-        debugPrint(
-          '⚠️ Cannot determine socket connection - trying server mode',
-        );
-        await _socketProtocol.startServer();
-      }
-
-      debugPrint('✅ Socket protocol initialized successfully');
-      _addMessageTrace(
-        'Socket protocol initialized after WiFi Direct connection',
-      );
-    } catch (e) {
-      debugPrint('❌ Socket protocol initialization failed: $e');
-      _addMessageTrace('Socket protocol initialization error: $e');
-    }
-  }
-
-  /// Clean up old message deduplication entries
-  void _cleanupMessageDeduplication() {
-    final cutoff = DateTime.now().subtract(_messageDedupWindow);
-    final toRemove = <String>[];
-
-    _messageTimestamps.forEach((messageHash, timestamp) {
-      if (timestamp.isBefore(cutoff)) {
-        toRemove.add(messageHash);
-      }
-    });
-
-    for (final messageHash in toRemove) {
-      _processedMessages.remove(messageHash);
-      _messageTimestamps.remove(messageHash);
-    }
-
-    if (toRemove.isNotEmpty) {
-      debugPrint(
-        '🧹 Cleaned up ${toRemove.length} old message entries from WiFi Direct deduplication',
-      );
-    }
-
-    // Also cleanup any stale processing entries (devices being processed for > 10 seconds)
-    _processingDevices.removeWhere((deviceId) {
-      // In practice, handshake processing should complete within seconds
-      // This is a safety cleanup for any stuck entries
-      return true; // For now, just clear old entries on each cleanup
-    });
-
-    // Clear handshake responses tracking periodically to allow re-handshaking if needed
-    if (toRemove.isNotEmpty) {
-      _handshakeResponsesSent.clear();
-    }
-  }
-
-  /// Add message trace for debugging
-  void _addMessageTrace(String trace) {
-    final timestamp = DateTime.now().toIso8601String();
-    _messageTrace.add('[$timestamp] $trace');
-
-    // Keep only last 100 entries
-    if (_messageTrace.length > 100) {
-      _messageTrace.removeAt(0);
-    }
-  }
-
-  /// Get message trace for debugging
-  List<String> getMessageTrace() => List.from(_messageTrace);
-
-  /// Register WiFi Direct device as connected
-  Future<void> _registerWiFiDirectDevice(
-    String deviceId,
-    String userName,
-    String deviceName,
-    String? from,
-  ) async {
-    try {
-      debugPrint(
-        '📱 Registering WiFi Direct device: $deviceId ($userName) from $from',
-      );
-
-      // Use the base class method to add connected device (this handles deduplication)
-      addConnectedDevice(deviceId, userName);
-
-      // Also register with socket protocol for message sending
-      if (from != null) {
-        _socketProtocol.registerWiFiDirectDevice(deviceId, from);
-      }
-
-      debugPrint(
-        '✅ Successfully registered WiFi Direct device: $deviceId ($userName)',
-      );
-      _addMessageTrace('Registered WiFi Direct device: $deviceId ($userName)');
-
-      // Delay notification to prevent UI thread issues
-      Future.microtask(() => notifyListeners());
-    } catch (e) {
-      debugPrint('❌ Error registering WiFi Direct device: $e');
-      _addMessageTrace('Error registering WiFi Direct device: $e');
-    }
-  }
-
-  /// Send handshake response via WiFi Direct
-  Future<void> _sendHandshakeResponse(
-    String targetDeviceId,
-    String? address,
-  ) async {
-    try {
-      // Get MAC address from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final macAddress = prefs.getString('wifi_direct_mac_address');
-
-      final response = jsonEncode({
-        'type': 'handshake_response',
-        'deviceId': deviceId,
-        'macAddress': macAddress ?? deviceId, // Include MAC address
-        'userName': userName,
-        'deviceName': 'ResQLink Device',
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'protocol_version': '1.0',
-      });
-
-      if (_wifiDirectService != null) {
-        _wifiDirectService!.sendMessage(
-          response,
-        ); // Don't await, send immediately
-        debugPrint('✅ Sent handshake response to $targetDeviceId');
-        _addMessageTrace('Sent handshake response to $targetDeviceId');
-      }
-    } catch (e) {
-      debugPrint('❌ Error sending handshake response: $e');
-      _addMessageTrace('Error sending handshake response: $e');
-    }
-  }
+  /// Update all device references when MAC address changes
+  // UUID-based system - device IDs never change, so this method is not needed
 
   /// Get detailed service status
   String getDetailedStatus() {
     final networkStatus = _networkService.getNetworkStatus();
     final discoveryStatus = _discoveryService.getDiscoveryStatus();
+    final connectionInfo = _connectionManager.getConnectionInfo();
+    final deviceStats = _deviceManager.getDeviceStats();
 
     return '''
 === P2P Main Service Status ===
@@ -1403,8 +712,12 @@ Device ID: $deviceId
 User Name: $userName
 Current Role: $currentRole
 Emergency Mode: $emergencyMode
-Connected Devices: ${connectedDevices.length}
-Discovered Devices: ${discoveredResQLinkDevices.length}
+
+Connection Info:
+${connectionInfo.entries.map((e) => '- ${e.key}: ${e.value}').join('\n')}
+
+Device Stats:
+${deviceStats.entries.map((e) => '- ${e.key}: ${e.value}').join('\n')}
 
 Network Status:
 - TCP Server: ${networkStatus['tcpServerActive']}
@@ -1417,134 +730,20 @@ Discovery Status:
 - WiFi Direct Available: ${discoveryStatus['wifiDirectAvailable']}
 - Discovered Devices: ${discoveryStatus['discoveredDevices']}
 
-Connection Status:
-- Mode: WiFi Direct Only
-
 Recent Message Traces:
-${_messageTrace.take(5).join('\n')}
+${_messageHandler.getMessageTrace().take(5).join('\n')}
 ''';
   }
 
-  /// Get available ResQLink networks - REMOVED
-  List<Map<String, dynamic>> get availableNetworks {
-    return [];
-  }
+  /// Get message router for external access
+  MessageRouter get messageRouter => _messageHandler.messageRouter;
 
-  @override
-  void dispose() async {
-    debugPrint('🗑️ P2P Main Service disposing...');
+  /// Get socket protocol for external access
+  SocketProtocol get socketProtocol => _socketProtocol;
 
-    _connectionStateDebounceTimer?.cancel();
-    _peerUpdateDebounceTimer?.cancel();
-
-    _networkService.dispose();
-    _discoveryService.dispose();
-    // Message queue service disposal removed
-
-    _messageTrace.clear();
-    _processedMessages.clear();
-    _messageTimestamps.clear();
-
-    super.dispose();
-  }
-
-  /// Handle global messages from message router
-  void _handleGlobalMessage(MessageModel message) {
-    // Notify UI listeners
-    onMessageReceived?.call(message);
-
-    // Save to history
-    saveMessageToHistory(message);
-
-    // MULTI-HOP: Forward message to other connected devices if applicable
-    _maybeForwardMessage(message);
-
-    notifyListeners();
-  }
-
-  /// Multi-hop message forwarding logic
-  Future<void> _maybeForwardMessage(MessageModel message) async {
-    try {
-      // Check if multi-hop is enabled
-      final settings = SettingsService.instance;
-      if (!settings.multiHopEnabled) {
-        debugPrint('🚫 Multi-hop disabled, not forwarding message');
-        return;
-      }
-
-      // Don't forward messages from ourselves
-      if (message.deviceId == deviceId) {
-        debugPrint('ℹ️ Message is from us, not forwarding');
-        return;
-      }
-
-      // Only forward emergency and broadcast messages
-      if (!message.isEmergency && message.targetDeviceId != null) {
-        debugPrint('ℹ️ Message is not emergency/broadcast, not forwarding');
-        return;
-      }
-
-      // Check TTL (time-to-live / hop count)
-      final currentTtl = message.ttl ?? P2PBaseService.maxTtl;
-      if (currentTtl <= 1) {
-        debugPrint('⏱️ Message TTL expired ($currentTtl), not forwarding');
-        return;
-      }
-
-      // Check if we've already forwarded this message (prevent loops)
-      final routePath = message.routePath ?? [];
-      if (routePath.contains(deviceId)) {
-        debugPrint('🔄 We already forwarded this message, skipping to prevent loop');
-        return;
-      }
-
-      // Get other connected devices (exclude the sender)
-      final otherDevices = connectedDevices.keys
-          .where((id) => id != message.deviceId && id != deviceId)
-          .toList();
-
-      if (otherDevices.isEmpty) {
-        debugPrint('📭 No other devices to forward to');
-        return;
-      }
-
-      debugPrint('🔁 Forwarding message to ${otherDevices.length} device(s) (TTL: $currentTtl → ${currentTtl - 1})');
-
-      // Create forwarded message with decremented TTL and updated route path
-      final updatedRoutePath = [...routePath, deviceId!];
-      final forwardedMessageJson = jsonEncode({
-        'type': 'message',
-        'messageId': message.messageId,
-        'message': message.message,
-        'senderName': message.fromUser,
-        'deviceId': message.deviceId,  // Original sender
-        'targetDeviceId': message.targetDeviceId,
-        'messageType': message.messageType.name,
-        'timestamp': message.timestamp,
-        'isEmergency': message.isEmergency,
-        'latitude': message.latitude,
-        'longitude': message.longitude,
-        'ttl': currentTtl - 1,  // Decrement TTL
-        'routePath': updatedRoutePath,  // Add ourselves to path
-      });
-
-      // Forward to all other connected devices
-      bool forwardSuccess = false;
-      if (_wifiDirectService != null) {
-        forwardSuccess = await _wifiDirectService!.sendMessage(forwardedMessageJson);
-      } else {
-        forwardSuccess = await _socketProtocol.broadcastMessage(forwardedMessageJson);
-      }
-
-      if (forwardSuccess) {
-        debugPrint('✅ Message forwarded successfully (hops: ${updatedRoutePath.length})');
-        _addMessageTrace('Forwarded message ${message.messageId} (TTL: ${currentTtl - 1})');
-      } else {
-        debugPrint('❌ Failed to forward message');
-      }
-    } catch (e) {
-      debugPrint('❌ Error forwarding message: $e');
-    }
+  /// Open WiFi Direct settings
+  Future<void> openWiFiDirectSettings() async {
+    await _wifiDirectHandler.openWiFiDirectSettings();
   }
 
   @override
@@ -1554,16 +753,41 @@ ${_messageTrace.take(5).join('\n')}
     return 'msg_${timestamp}_${deviceId.hashCode}_$random';
   }
 
-  /// Get message router for external access
-  MessageRouter get messageRouter => _messageRouter;
+  /// Get identifier resolver for external access
+  IdentifierResolver get identifierResolver => _identifierResolver;
 
-  /// Get socket protocol for external access
-  SocketProtocol get socketProtocol => _socketProtocol;
+  /// Register device with identifier resolver
+  void registerDevice(String macAddress, String displayName) {
+    _identifierResolver.registerDevice(macAddress, displayName);
+  }
 
-  Future<void> openWiFiDirectSettings() async {
-    await _wifiDirectService?.openWiFiDirectSettings();
+  @override
+  void dispose() {
+    debugPrint('🗑️ P2P Main Service disposing...');
+
+    // Cancel timers
+    _monitoringTimer?.cancel();
+    _pingTimer?.cancel();
+
+    // Dispose monitoring and management components
+    _qualityMonitor.dispose();
+    _reconnectionManager.dispose();
+    _timeoutManager.dispose();
+
+    // Dispose managers and handlers
+    _connectionManager.dispose();
+    _wifiDirectHandler.dispose();
+    _messageHandler.dispose();
+    _deviceManager.dispose();
+
+    // Dispose core services
+    _networkService.dispose();
+    _discoveryService.dispose();
+
+    super.dispose();
+
+    debugPrint('✅ P2P Main Service disposed completely');
   }
 }
 
-// Backwards compatibility typedef
 typedef P2PConnectionService = P2PMainService;

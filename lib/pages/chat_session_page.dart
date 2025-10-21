@@ -8,6 +8,7 @@ import '../features/database/repositories/message_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../services/location_state_service.dart';
 import '../utils/resqlink_theme.dart';
+import '../utils/responsive_utils.dart';
 import '../widgets/message/chat_view.dart';
 import '../widgets/message/message_input.dart';
 import '../widgets/message/loading_view.dart';
@@ -585,7 +586,18 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       backgroundColor: ResQLinkTheme.backgroundDark,
       appBar: _buildAppBar(),
       resizeToAvoidBottomInset: true, // Allow proper keyboard handling for standalone chat
-      body: _buildBody(),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return Center(
+            child: ConstrainedBox(
+              constraints: ResponsiveUtils.isDesktop(context)
+                  ? BoxConstraints(maxWidth: 1200)
+                  : BoxConstraints(),
+              child: _buildBody(),
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -753,16 +765,22 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: ResponsiveUtils.getResponsiveSpacing(context, 16),
+        vertical: ResponsiveUtils.getResponsiveSpacing(context, 8),
+      ),
       color: bannerColor.withValues(alpha: 0.1),
       child: Row(
         children: [
           Icon(bannerIcon, color: bannerColor, size: 16),
-          SizedBox(width: 8),
+          SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 8)),
           Expanded(
             child: Text(
               bannerText,
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+              ),
             ),
           ),
           if (isOffline)
@@ -770,7 +788,10 @@ class _ChatSessionPageState extends State<ChatSessionPage>
               onPressed: _reconnectToDevice,
               child: Text(
                 'RECONNECT',
-                style: TextStyle(color: bannerColor, fontSize: 12),
+                style: TextStyle(
+                  color: bannerColor,
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                ),
               ),
             ),
           if (hasQueuedMessages && _isConnected)
@@ -778,7 +799,10 @@ class _ChatSessionPageState extends State<ChatSessionPage>
               onPressed: _retryQueuedMessages,
               child: Text(
                 'RETRY',
-                style: TextStyle(color: bannerColor, fontSize: 12),
+                style: TextStyle(
+                  color: bannerColor,
+                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                ),
               ),
             ),
         ],

@@ -46,6 +46,7 @@ dependencies:
   shelf: ^1.4.2
   shelf_router: ^1.1.4
   multicast_dns: ^0.3.3
+  uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:

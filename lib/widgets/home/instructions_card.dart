@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../services/p2p/p2p_base_service.dart';
 
 class InstructionsCard extends StatelessWidget {
   const InstructionsCard({super.key});
@@ -139,7 +138,7 @@ class InstructionsCard extends StatelessWidget {
         children: [
           _buildInstructionItem(
             '1',
-            'Emergency Mode automatically discovers and connects to nearby devices using WiFi Direct (up to 200m range)',
+            'Emergency Mode automatically discovers and connects to nearby devices using WiFi Direct',
             Icons.wifi_tethering,
             Colors.blue,
             isNarrow,
@@ -147,7 +146,7 @@ class InstructionsCard extends StatelessWidget {
           SizedBox(height: 20),
           _buildInstructionItem(
             '2',
-            'Messages relay through multiple devices to reach everyone (up to ${P2PBaseService.maxTtl} hops)',
+            'Messages relay through multiple devices to reach everyone',
             Icons.hub,
             Colors.green,
             isNarrow,

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:english_words/english_words.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:resqlink/features/database/core/database_manager.dart';
+import 'package:resqlink/features/database/repositories/chat_repository.dart';
 import 'package:resqlink/pages/landing_page.dart';
 import 'package:resqlink/widgets/message/notification_service.dart';
 import 'firebase_options.dart';
@@ -75,6 +76,20 @@ Future<void> _initializeServices() async {
   } catch (e) {
     debugPrint('❌ Database initialization failed: $e');
     // If database fails, the app can still work in memory-only mode
+  }
+
+  // Clean up duplicate chat sessions on app startup
+  try {
+    debugPrint('🧹 Running session deduplication...');
+    final mergedCount = await ChatRepository.cleanupDuplicateSessions().timeout(const Duration(seconds: 15));
+    if (mergedCount > 0) {
+      debugPrint('✅ Merged $mergedCount duplicate sessions');
+    } else {
+      debugPrint('✅ No duplicate sessions found');
+    }
+  } catch (e) {
+    debugPrint('❌ Session deduplication failed: $e');
+    // Non-critical - app can still work with duplicates
   }
 
   debugPrint('🎯 Service initialization completed');
