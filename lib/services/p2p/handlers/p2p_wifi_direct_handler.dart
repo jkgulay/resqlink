@@ -234,6 +234,10 @@ class P2PWiFiDirectHandler {
     if (isConnected && groupFormed) {
       _connectionManager.setConnectionMode(P2PConnectionMode.wifiDirect);
       _refreshConnectedPeers();
+
+      // Automatically establish socket connection when group forms
+      debugPrint('🔌 Group formed, establishing socket connection...');
+      _wifiDirectService?.establishSocketConnection();
     } else {
       if (_connectionManager.currentConnectionMode == P2PConnectionMode.wifiDirect) {
         _connectionManager.setConnectionMode(P2PConnectionMode.none);

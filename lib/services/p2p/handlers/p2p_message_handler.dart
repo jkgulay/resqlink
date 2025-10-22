@@ -229,8 +229,8 @@ class P2PMessageHandler {
               longitude: longitude,
             );
 
-      // Save to database first
-      await MessageRepository.insertMessage(messageModel);
+      // Note: Database insertion is handled by the UI layer (chat_session_page)
+      // to avoid duplicate messages
       _baseService.saveMessageToHistory(messageModel);
 
       // Create message JSON for network transmission

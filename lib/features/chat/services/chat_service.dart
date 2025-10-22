@@ -244,26 +244,6 @@ class ChatService extends ChangeNotifier {
     }
   }
 
-  // Search messages
-  Future<List<MessageModel>> searchMessages(
-    String query, {
-    String? sessionId,
-    List<MessageType>? messageTypes,
-    int? limit,
-  }) async {
-    try {
-      return await MessageRepository.search(
-        query,
-        sessionId: sessionId,
-        messageTypes: messageTypes,
-        limit: limit,
-      );
-    } catch (e) {
-      debugPrint('❌ Error searching messages: $e');
-      return [];
-    }
-  }
-
   // Delete a chat session
   Future<bool> deleteSession(String sessionId) async {
     try {

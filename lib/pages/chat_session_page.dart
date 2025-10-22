@@ -397,6 +397,16 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           );
 
           await MessageRepository.updateStatus(messageId, MessageStatus.sent);
+
+          // Update the message in UI to show sent status
+          final updatedMessage = message.copyWith(status: MessageStatus.sent);
+          setState(() {
+            final index = _messages.indexWhere((m) => m.messageId == messageId);
+            if (index != -1) {
+              _messages[index] = updatedMessage;
+            }
+          });
+
           _showSnackBar('Location shared successfully', isError: false);
         } catch (e) {
           debugPrint('❌ Error sending P2P message: $e');
