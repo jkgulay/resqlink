@@ -31,6 +31,7 @@ abstract class P2PBaseService with ChangeNotifier {
   final List<DeviceModel> _discoveredResQLinkDevices = [];
   final Set<String> _processedMessageIds = {};
   final List<MessageModel> _messageHistory = [];
+  final Map<String, String> _macToUuidMapping = {}; // MAC -> UUID mapping
 
   // Timers
   Timer? _keepAliveTimer;
@@ -58,6 +59,9 @@ abstract class P2PBaseService with ChangeNotifier {
   Map<String, DeviceModel> get connectedDevices => Map.from(_connectedDevices);
   List<DeviceModel> get discoveredResQLinkDevices => List.from(_discoveredResQLinkDevices);
   List<MessageModel> get messageHistory => List.from(_messageHistory);
+
+  /// Get UUID for a given MAC address
+  String? getUuidForMac(String macAddress) => _macToUuidMapping[macAddress];
 
   // Emergency mode setter
   set emergencyMode(bool value) {
@@ -222,7 +226,7 @@ abstract class P2PBaseService with ChangeNotifier {
   }
 
   /// Add connected device with deduplication
-  void addConnectedDevice(String deviceId, String userName) {
+  void addConnectedDevice(String deviceId, String userName, {String? macAddress}) {
     final now = DateTime.now();
 
     // Check if device is already connected to prevent duplicate processing
@@ -246,6 +250,12 @@ abstract class P2PBaseService with ChangeNotifier {
     );
 
     _connectedDevices[deviceId] = device;
+
+    // Store MAC to UUID mapping if provided
+    if (macAddress != null && macAddress.isNotEmpty) {
+      _macToUuidMapping[macAddress] = deviceId;
+      debugPrint('🔗 Mapped MAC $macAddress -> UUID $deviceId');
+    }
 
     // Also update the discovered device with the correct name if it exists
     final discoveredIndex = _discoveredResQLinkDevices.indexWhere(

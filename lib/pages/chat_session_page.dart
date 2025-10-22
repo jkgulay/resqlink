@@ -12,7 +12,6 @@ import '../utils/responsive_utils.dart';
 import '../widgets/message/chat_view.dart';
 import '../widgets/message/message_input.dart';
 import '../widgets/message/loading_view.dart';
-import '../widgets/message/emergency_dialog.dart';
 import '../pages/gps_page.dart';
 
 class ChatSessionPage extends StatefulWidget {
@@ -413,88 +412,6 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     }
   }
 
-  Future<void> _sendEmergencyMessage() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => EmergencyDialog(),
-    );
-
-    if (confirmed != true || _chatSession == null) return;
-
-    // Refresh location first
-    await _locationStateService.refreshLocation();
-
-    if (_currentLocation == null) {
-      _showSnackBar('Location not available. Sending SOS without location.', isError: false);
-    }
-
-    try {
-      final sosText = _currentLocation != null
-          ? '🚨 EMERGENCY SOS\nLat: ${_currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${_currentLocation!.longitude.toStringAsFixed(6)}'
-          : '🚨 EMERGENCY SOS';
-
-      // Create message with location data
-      final messageId = MessageModel.generateMessageId(
-        widget.p2pService.deviceId ?? 'unknown',
-      );
-      final timestamp = DateTime.now();
-
-      final message = MessageModel(
-        messageId: messageId,
-        endpointId: _chatSession!.deviceId,
-        fromUser: widget.p2pService.userName ?? 'You',
-        message: sosText,
-        isMe: true,
-        isEmergency: true,
-        timestamp: timestamp.millisecondsSinceEpoch,
-        messageType: MessageType.sos,
-        type: MessageType.sos.name,
-        status: MessageStatus.pending,
-        chatSessionId: widget.sessionId,
-        connectionType: widget.p2pService.connectionType,
-        deviceId: widget.p2pService.deviceId,
-        latitude: _currentLocation?.latitude,
-        longitude: _currentLocation?.longitude,
-      );
-
-      // Save to database
-      await MessageRepository.insert(message);
-
-      // Update UI immediately
-      setState(() {
-        _messages.add(message);
-      });
-      _scrollToBottom();
-
-      // Send via P2P if connected
-      if (_isConnected) {
-        try {
-          await widget.p2pService.sendMessage(
-            id: messageId,
-            message: sosText,
-            type: MessageType.sos,
-            targetDeviceId: _chatSession!.deviceId,
-            senderName: widget.p2pService.userName ?? 'You',
-            latitude: _currentLocation?.latitude,
-            longitude: _currentLocation?.longitude,
-          );
-
-          await MessageRepository.updateStatus(messageId, MessageStatus.sent);
-          _showSnackBar('Emergency SOS sent successfully', isError: false);
-        } catch (e) {
-          debugPrint('❌ Error sending emergency SOS: $e');
-          await MessageRepository.updateStatus(messageId, MessageStatus.failed);
-          _showSnackBar('Failed to send emergency SOS', isError: true);
-        }
-      } else {
-        _showSnackBar('Emergency SOS queued (device offline)', isError: false);
-      }
-    } catch (e) {
-      debugPrint('❌ Error sending emergency message: $e');
-      _showSnackBar('Failed to send emergency SOS', isError: true);
-    }
-  }
 
   Future<void> _reconnectToDevice() async {
     if (_chatSession == null) return;
@@ -729,7 +646,6 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           controller: _messageController,
           onSendMessage: _sendMessage,
           onSendLocation: _sendLocationMessage,
-          onSendEmergency: _sendEmergencyMessage,
           onTyping: _handleTyping,
           enabled: _isConnected,
         ),

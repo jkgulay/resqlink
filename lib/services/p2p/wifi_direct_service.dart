@@ -351,15 +351,15 @@ class WiFiDirectService {
           _peersController.add(peers);
 
           final hasConnectedPeers = peers.any(
-            (p) => p.status == WiFiDirectPeerStatus.connected,
+            (p) => p.status == WiFiDirectPeerStatus.connected || p.status == WiFiDirectPeerStatus.invited,
           );
-          if (hasConnectedPeers !=
-              (_connectionState == WiFiDirectConnectionState.connected)) {
-            _updateConnectionState(
-              hasConnectedPeers
-                  ? WiFiDirectConnectionState.connected
-                  : WiFiDirectConnectionState.disconnected,
-            );
+
+          // Only update to disconnected if we're not already connected
+          // Once WiFi Direct group is formed, peer status is unreliable
+          if (_connectionState != WiFiDirectConnectionState.connected) {
+            if (hasConnectedPeers) {
+              _updateConnectionState(WiFiDirectConnectionState.connected);
+            }
           }
         }
       }
@@ -808,15 +808,20 @@ class WiFiDirectService {
     bool hasConnectedPeers = false;
 
     for (final peer in peers) {
-      if (peer.status == WiFiDirectPeerStatus.connected) {
+      if (peer.status == WiFiDirectPeerStatus.connected || peer.status == WiFiDirectPeerStatus.invited) {
         hasConnectedPeers = true;
         debugPrint(
-          '✅ Connected peer found: ${peer.deviceName} (${peer.deviceAddress})',
+          '✅ Peer found: ${peer.deviceName} (${peer.deviceAddress}) - Status: ${peer.status.name}',
         );
       }
     }
 
-    // Update connection state based on peer status
+    // Don't update connection state based on peer status if group is already formed
+    // WiFi Direct group info is more reliable than peer status
+    if (_connectionState == WiFiDirectConnectionState.connected) {
+      return;
+    }
+
     final newConnectionState = hasConnectedPeers
         ? WiFiDirectConnectionState.connected
         : WiFiDirectConnectionState.disconnected;
@@ -835,7 +840,7 @@ class WiFiDirectService {
           'isConnected': hasConnectedPeers,
           'groupFormed': hasConnectedPeers,
           'connectedPeers': peers
-              .where((p) => p.status == WiFiDirectPeerStatus.connected)
+              .where((p) => p.status == WiFiDirectPeerStatus.connected || p.status == WiFiDirectPeerStatus.invited)
               .length,
         },
       });

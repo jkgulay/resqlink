@@ -309,14 +309,33 @@ class MessageRepository {
   static Future<bool> deleteMessagesForSession(String sessionId) async {
     try {
       final db = await DatabaseManager.database;
-      await db.delete(
+      final deletedCount = await db.delete(
         _tableName,
         where: 'chatSessionId = ?',
         whereArgs: [sessionId],
       );
+      debugPrint('🗑️ Deleted $deletedCount messages for session: $sessionId');
       return true;
     } catch (e) {
       debugPrint('❌ Error deleting messages for session: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> deleteMessagesForEndpoint(String endpointId) async {
+    try {
+      final db = await DatabaseManager.database;
+      final sessionId = 'chat_${endpointId.replaceAll(':', '_')}';
+
+      final deletedCount = await db.delete(
+        _tableName,
+        where: 'chatSessionId = ? OR endpointId = ?',
+        whereArgs: [sessionId, endpointId],
+      );
+      debugPrint('🗑️ Deleted $deletedCount messages for endpoint: $endpointId (session: $sessionId)');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Error deleting messages for endpoint: $e');
       return false;
     }
   }

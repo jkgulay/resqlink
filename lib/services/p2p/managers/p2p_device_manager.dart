@@ -33,10 +33,11 @@ class P2PDeviceManager {
       final isConnected = peer.status == WiFiDirectPeerStatus.connected;
 
       // CRITICAL FIX: Use custom device name with priority:
-      // 1. Handshake name (if connected)
+      // 1. Handshake name (if connected) - lookup by UUID via MAC mapping
       // 2. Service discovery name (DNS-SD broadcast - before connection)
       // 3. System WiFi Direct name (fallback)
-      final connectedDevice = _baseService.connectedDevices[peer.deviceAddress];
+      final uuid = _baseService.getUuidForMac(peer.deviceAddress);
+      final connectedDevice = uuid != null ? _baseService.connectedDevices[uuid] : null;
       final customNameFromDiscovery = _wifiDirectService?.getCustomName(
         peer.deviceAddress,
       );

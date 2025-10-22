@@ -86,7 +86,7 @@ class P2PMainService extends P2PBaseService {
 
     // Network and discovery services
     _networkService = P2PNetworkService(this);
-    _discoveryService = P2PDiscoveryService(this, _networkService);
+    _discoveryService = P2PDiscoveryService(this);
     await _discoveryService.initialize();
 
     // Socket protocol (UUID-based)
@@ -159,50 +159,6 @@ class P2PMainService extends P2PBaseService {
     _socketProtocol.onPongReceived = (deviceId, sequence) {
       _qualityMonitor.recordPingReceived(deviceId, sequence);
     };
-
-    // IP to MAC address resolver callback (shared by socket protocol and message handler)
-    String? resolveIpToMac(String ipAddress) {
-      try {
-        // Get all connected WiFi Direct peers from the device manager
-        final connectedPeers = _deviceManager.discoveredDevices.values
-            .where((deviceMap) {
-              final isConnected = deviceMap['isConnected'] as bool? ?? false;
-              final deviceId = deviceMap['deviceId'] as String? ?? deviceMap['deviceAddress'] as String?;
-              // Check if device is connected and has a valid UUID
-              return isConnected && deviceId != null && deviceId.isNotEmpty;
-            })
-            .toList();
-
-        debugPrint('🔍 Attempting to resolve IP $ipAddress from ${connectedPeers.length} connected WiFi Direct peers');
-
-        // If there's exactly ONE connected WiFi Direct peer, use their MAC
-        if (connectedPeers.length == 1) {
-          final peerMac = connectedPeers.first['deviceAddress'] as String;
-          final peerName = connectedPeers.first['deviceName'] as String;
-          debugPrint('✅ Resolved IP $ipAddress to single connected peer: $peerName ($peerMac)');
-          return peerMac;
-        }
-
-        // If there are multiple peers, we can't determine which one - return null
-        if (connectedPeers.length > 1) {
-          debugPrint('⚠️ Multiple WiFi Direct peers connected - cannot determine which one is at $ipAddress');
-          for (final peer in connectedPeers) {
-            debugPrint('   - ${peer['deviceName']} (${peer['deviceAddress']})');
-          }
-        } else if (connectedPeers.isEmpty) {
-          debugPrint('⚠️ No connected WiFi Direct peers found for IP resolution');
-        }
-
-        return null;
-      } catch (e) {
-        debugPrint('❌ Error resolving IP $ipAddress to MAC: $e');
-        return null;
-      }
-    }
-
-    // UUID-based system - no IP to MAC resolution needed
-    // Message handler still may use resolver for legacy support
-    _messageHandler.onResolveIpToMac = resolveIpToMac;
 
     // WiFi Direct handler callbacks
     _wifiDirectHandler.onMessageReceived = (message, from) {

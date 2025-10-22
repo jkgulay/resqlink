@@ -586,7 +586,31 @@ class P2PWiFiDirectHandler {
         '📱 Registering WiFi Direct device: $deviceId ($userName) from $from',
       );
 
-      _baseService.addConnectedDevice(deviceId, userName);
+      // Try to resolve IP to MAC address from WiFi Direct peers
+      String? macAddress;
+      if (from != null && _wifiDirectService != null) {
+        final ipMatch = RegExp(r'(\d+\.\d+\.\d+\.\d+)').firstMatch(from);
+        if (ipMatch != null) {
+          final ipAddress = ipMatch.group(1)!;
+
+          // Look through WiFi Direct peers to find the one with this IP
+          final peers = _wifiDirectService!.discoveredPeers;
+          if (peers.isNotEmpty) {
+            // For simplicity, if there's only one connected peer, use that MAC
+            final connectedPeers = peers.where((p) =>
+              p.status == WiFiDirectPeerStatus.connected ||
+              p.status == WiFiDirectPeerStatus.invited
+            ).toList();
+
+            if (connectedPeers.length == 1) {
+              macAddress = connectedPeers.first.deviceAddress;
+              debugPrint('🔍 Resolved IP $ipAddress to MAC: $macAddress');
+            }
+          }
+        }
+      }
+
+      _baseService.addConnectedDevice(deviceId, userName, macAddress: macAddress);
 
       if (from != null) {
         _socketProtocol.registerWiFiDirectDevice(deviceId, from);

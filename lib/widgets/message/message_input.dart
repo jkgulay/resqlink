@@ -6,7 +6,6 @@ class MessageInput extends StatelessWidget {
   final TextEditingController controller;
   final Function(String, MessageType) onSendMessage;
   final VoidCallback onSendLocation;
-  final VoidCallback onSendEmergency;
   final Function(String) onTyping;
 
   const MessageInput({
@@ -14,7 +13,6 @@ class MessageInput extends StatelessWidget {
     required this.controller,
     required this.onSendMessage,
     required this.onSendLocation,
-    required this.onSendEmergency,
     required this.onTyping,
     required bool enabled,
   });
@@ -33,65 +31,49 @@ class MessageInput extends StatelessWidget {
           ),
         ],
       ),
-      child: SafeArea(
-        child: Column(
-          children: [
-            Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.my_location, color: Colors.blue),
-                  onPressed: onSendLocation,
-                  tooltip: 'Share GPS Location',
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(Icons.my_location, color: Colors.blue),
+            onPressed: onSendLocation,
+            tooltip: 'Share GPS Location',
+          ),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              onChanged: onTyping,
+              decoration: InputDecoration(
+                hintText: 'Type a message...',
+                hintStyle: TextStyle(color: Colors.white54),
+                filled: true,
+                fillColor: ResQLinkTheme.cardDark,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide.none,
                 ),
-                IconButton(
-                  icon: Icon(Icons.warning, color: ResQLinkTheme.primaryRed),
-                  onPressed: onSendEmergency,
-                  tooltip: 'Send Emergency SOS',
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
                 ),
-              ],
+              ),
+              style: TextStyle(color: Colors.white),
+              maxLines: null,
             ),
-            SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: controller,
-                    onChanged: onTyping,
-                    decoration: InputDecoration(
-                      hintText: 'Type a message...',
-                      hintStyle: TextStyle(color: Colors.white54),
-                      filled: true,
-                      fillColor: ResQLinkTheme.cardDark,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                    ),
-                    style: TextStyle(color: Colors.white),
-                    maxLines: null,
-                  ),
-                ),
-                SizedBox(width: 8),
-                FloatingActionButton(
-                  mini: true,
-                  backgroundColor: ResQLinkTheme.primaryRed,
-                  onPressed: () {
-                    final text = controller.text.trim();
-                    if (text.isNotEmpty) {
-                      onSendMessage(text, MessageType.text);
-                      controller.clear();
-                    }
-                  },
-                  child: Icon(Icons.send, color: Colors.white),
-                ),
-              ],
-            ),
-          ],
-        ),
+          ),
+          SizedBox(width: 8),
+          FloatingActionButton(
+            mini: true,
+            backgroundColor: ResQLinkTheme.primaryRed,
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isNotEmpty) {
+                onSendMessage(text, MessageType.text);
+                controller.clear();
+              }
+            },
+            child: Icon(Icons.send, color: Colors.white),
+          ),
+        ],
       ),
     );
   }

@@ -293,7 +293,7 @@ class MessageRouter {
         message: data['message'] ?? '',
         isMe: false, // This is an incoming message
         isEmergency: data['isEmergency'] ?? false,
-        timestamp: data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
         messageType: MessageType.values.firstWhere(
           (t) => t.name == (data['messageType'] ?? data['type'] ?? 'text'),
           orElse: () => MessageType.text,
