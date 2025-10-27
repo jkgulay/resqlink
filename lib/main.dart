@@ -27,7 +27,9 @@ Future<void> main() async {
 
     if (kDebugMode) {
       debugPrint('🔍 Running Firebase debug checks...');
-      await FirebaseDebugService.checkFirebaseSetup().timeout(const Duration(seconds: 10));
+      await FirebaseDebugService.checkFirebaseSetup().timeout(
+        const Duration(seconds: 10),
+      );
       debugPrint('✅ Firebase debug checks completed');
     }
   } catch (e) {
@@ -53,7 +55,9 @@ Future<void> _initializeServices() async {
 
   try {
     debugPrint('⚙️ Loading settings...');
-    await SettingsService.instance.loadSettings().timeout(const Duration(seconds: 10));
+    await SettingsService.instance.loadSettings().timeout(
+      const Duration(seconds: 10),
+    );
     debugPrint('✅ Settings loaded');
   } catch (e) {
     debugPrint('❌ Settings loading failed: $e');
@@ -62,7 +66,9 @@ Future<void> _initializeServices() async {
   // Initialize map service with timeout
   try {
     debugPrint('🗺️ Initializing map service...');
-    await PhilippinesMapService.instance.initialize().timeout(const Duration(seconds: 15));
+    await PhilippinesMapService.instance.initialize().timeout(
+      const Duration(seconds: 15),
+    );
     debugPrint('✅ Map service initialized in main');
   } catch (e) {
     debugPrint('❌ Map service init failed in main: $e');
@@ -81,7 +87,9 @@ Future<void> _initializeServices() async {
   // Clean up duplicate chat sessions on app startup
   try {
     debugPrint('🧹 Running session deduplication...');
-    final mergedCount = await ChatRepository.cleanupDuplicateSessions().timeout(const Duration(seconds: 15));
+    final mergedCount = await ChatRepository.cleanupDuplicateSessions().timeout(
+      const Duration(seconds: 15),
+    );
     if (mergedCount > 0) {
       debugPrint('✅ Merged $mergedCount duplicate sessions');
     } else {
@@ -114,6 +122,26 @@ class MyApp extends StatelessWidget {
           '/': (context) => const AuthWrapper(),
           '/home': (context) => HomePage(),
           '/landing': (context) => const LandingPage(),
+        },
+        onGenerateRoute: (settings) {
+          // Handle GPS page with arguments
+          if (settings.name == '/gps') {
+            final args = settings.arguments as Map<String, dynamic>?;
+            return MaterialPageRoute(
+              builder: (context) {
+                // Get P2P service from context (it's in HomePage)
+                // For now, we'll navigate back and let HomePage handle it
+                // This is a workaround - ideally P2P service should be in Provider
+                return HomePage(
+                  initialTab: 1, // GPS tab index
+                  initialGpsLatitude: args?['initialLatitude'] as double?,
+                  initialGpsLongitude: args?['initialLongitude'] as double?,
+                  senderName: args?['senderName'] as String?,
+                );
+              },
+            );
+          }
+          return null;
         },
       ),
     );

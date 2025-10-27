@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../utils/resqlink_theme.dart';
+import 'location_preview_modal.dart';
 
 class LocationMapWidget extends StatelessWidget {
   final double latitude;
@@ -54,7 +55,9 @@ class LocationMapWidget extends StatelessWidget {
                     height: 40,
                     child: Icon(
                       isEmergency ? Icons.warning : Icons.location_on,
-                      color: isEmergency ? ResQLinkTheme.primaryRed : Colors.red,
+                      color: isEmergency
+                          ? ResQLinkTheme.primaryRed
+                          : Colors.red,
                       size: 40,
                     ),
                   ),
@@ -85,10 +88,7 @@ class LocationMapWidget extends StatelessWidget {
                     ),
                   Text(
                     'Lat: ${latitude.toStringAsFixed(6)}, Lng: ${longitude.toStringAsFixed(6)}',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 10,
-                    ),
+                    style: TextStyle(color: Colors.white70, fontSize: 10),
                   ),
                 ],
               ),
@@ -131,41 +131,16 @@ class LocationMapWidget extends StatelessWidget {
   }
 
   void _openInMaps(BuildContext context) {
-    showDialog(
+    // Open inline modal with the full map preview instead of navigating
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: ResQLinkTheme.cardDark,
-        title: Text('Open Location', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Coordinates:',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            SizedBox(height: 8),
-            SelectableText(
-              '${latitude.toStringAsFixed(6)}, ${longitude.toStringAsFixed(6)}',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Copy coordinates to open in your preferred maps app',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Close', style: TextStyle(color: Colors.white70)),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => LocationPreviewModal(
+        latitude: latitude,
+        longitude: longitude,
+        senderName: senderName,
+        isEmergency: isEmergency,
       ),
     );
   }

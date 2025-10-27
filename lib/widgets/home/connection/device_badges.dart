@@ -1,15 +1,23 @@
 import 'package:flutter/material.dart';
 
 class DeviceBadges {
-  static Widget buildConnectionStatusBadge(bool isConnected, String deviceStatus) {
+  static Widget buildConnectionStatusBadge(
+    bool isConnected,
+    String deviceStatus,
+  ) {
     if (!isConnected) return SizedBox.shrink();
 
     Color badgeColor;
     String badgeText;
 
+    // FIXED: Only show CONNECTED for actually connected devices
+    // 'invited' means connection pending, not established yet
     if (deviceStatus == 'connected') {
       badgeColor = Colors.green;
       badgeText = 'CONNECTED';
+    } else if (deviceStatus == 'invited') {
+      badgeColor = Colors.orange;
+      badgeText = 'PENDING';
     } else {
       badgeColor = Colors.orange;
       badgeText = 'LINKED';
@@ -110,9 +118,12 @@ class DeviceBadges {
 
     final connectionType = device['connectionType'] as String? ?? 'unknown';
     switch (connectionType) {
-      case 'wifi_direct': return -45;
-      case 'hotspot': return -55;
-      default: return -65;
+      case 'wifi_direct':
+        return -45;
+      case 'hotspot':
+        return -55;
+      default:
+        return -65;
     }
   }
 
@@ -128,44 +139,62 @@ class DeviceBadges {
   static Color getSignalColor(int level) {
     switch (level) {
       case 5:
-      case 4: return Colors.green;
-      case 3: return Colors.amber;
+      case 4:
+        return Colors.green;
+      case 3:
+        return Colors.amber;
       case 2:
-      case 1: return Colors.orange;
-      default: return Colors.red;
+      case 1:
+        return Colors.orange;
+      default:
+        return Colors.red;
     }
   }
 
   static IconData getConnectionTypeIcon(String connectionType) {
     switch (connectionType.toLowerCase()) {
-      case 'wifi_direct': return Icons.wifi;
+      case 'wifi_direct':
+        return Icons.wifi;
       case 'hotspot':
-      case 'hotspot_enhanced': return Icons.router;
+      case 'hotspot_enhanced':
+        return Icons.router;
       case 'mdns':
-      case 'mdns_enhanced': return Icons.broadcast_on_personal;
-      default: return Icons.devices;
+      case 'mdns_enhanced':
+        return Icons.broadcast_on_personal;
+      default:
+        return Icons.devices;
     }
   }
 
   static Color getConnectionTypeColor(String connectionType) {
     switch (connectionType.toLowerCase()) {
-      case 'wifi_direct': return Colors.blue;
+      case 'wifi_direct':
+        return Colors.blue;
       case 'hotspot':
-      case 'hotspot_enhanced': return Colors.purple;
+      case 'hotspot_enhanced':
+        return Colors.purple;
       case 'mdns':
-      case 'mdns_enhanced': return Colors.orange;
-      default: return Colors.grey;
+      case 'mdns_enhanced':
+        return Colors.orange;
+      default:
+        return Colors.grey;
     }
   }
 
   static String getConnectionTypeLabel(String connectionType) {
     switch (connectionType.toLowerCase()) {
-      case 'wifi_direct': return 'WiFi Direct';
-      case 'hotspot': return 'Hotspot';
-      case 'hotspot_enhanced': return 'Hotspot+';
-      case 'mdns': return 'mDNS';
-      case 'mdns_enhanced': return 'mDNS+';
-      default: return 'Unknown';
+      case 'wifi_direct':
+        return 'WiFi Direct';
+      case 'hotspot':
+        return 'Hotspot';
+      case 'hotspot_enhanced':
+        return 'Hotspot+';
+      case 'mdns':
+        return 'mDNS';
+      case 'mdns_enhanced':
+        return 'mDNS+';
+      default:
+        return 'Unknown';
     }
   }
 }

@@ -27,6 +27,8 @@ class _DeviceItemState extends State<DeviceItem> {
   @override
   Widget build(BuildContext context) {
     final deviceStatus = widget.device['status'] as String? ?? 'unknown';
+    // FIXED: Only "connected" status (0) means truly connected
+    // "invited" status (1) means connection pending, not yet established
     final isWiFiDirectConnected = deviceStatus == 'connected';
     final isGenerallyConnected = widget.device['isConnected'] as bool? ?? false;
     final isConnected = isWiFiDirectConnected || isGenerallyConnected;
@@ -46,9 +48,11 @@ class _DeviceItemState extends State<DeviceItem> {
         ),
         boxShadow: [
           BoxShadow(
-            color: (isConnected
-                ? ResQLinkTheme.safeGreen
-                : ResQLinkTheme.offlineGray).withValues(alpha: 0.05),
+            color:
+                (isConnected
+                        ? ResQLinkTheme.safeGreen
+                        : ResQLinkTheme.offlineGray)
+                    .withValues(alpha: 0.05),
             blurRadius: 8,
             offset: Offset(0, 2),
           ),

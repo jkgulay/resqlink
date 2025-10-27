@@ -48,6 +48,9 @@ class GpsEnhancedMap extends StatefulWidget {
   final bool showTrackingPath;
   final bool showEmergencyZones;
   final bool showCriticalInfrastructure;
+  final double? peerLatitude;
+  final double? peerLongitude;
+  final String? peerName;
 
   const GpsEnhancedMap({
     super.key,
@@ -60,6 +63,9 @@ class GpsEnhancedMap extends StatefulWidget {
     this.showTrackingPath = true,
     this.showEmergencyZones = false,
     this.showCriticalInfrastructure = false,
+    this.peerLatitude,
+    this.peerLongitude,
+    this.peerName,
   });
 
   @override
@@ -90,7 +96,7 @@ class _GpsEnhancedMapState extends State<GpsEnhancedMap>
       icon: Icons.local_hospital,
       description: 'Private hospital',
     ),
-    
+
     // Fire Stations
     CriticalLocation(
       location: LatLng(14.5995, 120.9842),
@@ -100,7 +106,7 @@ class _GpsEnhancedMapState extends State<GpsEnhancedMap>
       icon: Icons.local_fire_department,
       description: 'Central fire station',
     ),
-    
+
     // Police Stations
     CriticalLocation(
       location: LatLng(14.5906, 120.9823),
@@ -110,7 +116,7 @@ class _GpsEnhancedMapState extends State<GpsEnhancedMap>
       icon: Icons.local_police,
       description: 'Main police station',
     ),
-    
+
     // Evacuation Centers
     CriticalLocation(
       location: LatLng(14.6042, 121.0017),
@@ -120,7 +126,7 @@ class _GpsEnhancedMapState extends State<GpsEnhancedMap>
       icon: Icons.location_city,
       description: 'Evacuation center',
     ),
-    
+
     // Shelters
     CriticalLocation(
       location: LatLng(14.5764, 121.0851),
@@ -162,19 +168,20 @@ class _GpsEnhancedMapState extends State<GpsEnhancedMap>
         return FlutterMap(
           mapController: widget.mapController,
           options: MapOptions(
-            initialCenter: controller.currentLocation ?? const LatLng(14.5995, 120.9842),
+            initialCenter:
+                controller.currentLocation ?? const LatLng(14.5995, 120.9842),
             initialZoom: controller.currentLocation != null ? 15.0 : 13.0,
             maxZoom: 18.0,
             minZoom: 5.0,
             onTap: (tapPosition, point) => widget.onMapTap?.call(point),
-            onLongPress: (tapPosition, point) => widget.onMapLongPress?.call(point),
+            onLongPress: (tapPosition, point) =>
+                widget.onMapLongPress?.call(point),
           ),
           children: [
             _buildTileLayer(controller),
             if (widget.showTrackingPath && controller.savedLocations.length > 1)
               _buildTrackingPath(controller),
-            if (widget.showEmergencyZones)
-              _buildEmergencyZones(),
+            if (widget.showEmergencyZones) _buildEmergencyZones(),
             if (widget.showCriticalInfrastructure)
               _buildCriticalInfrastructure(),
             _buildLocationMarkers(controller),
@@ -278,11 +285,7 @@ class _GpsEnhancedMapState extends State<GpsEnhancedMap>
                   ),
                 ],
               ),
-              child: Icon(
-                infrastructure.icon,
-                color: Colors.white,
-                size: 20,
-              ),
+              child: Icon(infrastructure.icon, color: Colors.white, size: 20),
             ),
           ),
         );
@@ -292,6 +295,85 @@ class _GpsEnhancedMapState extends State<GpsEnhancedMap>
 
   Widget _buildLocationMarkers(GpsController controller) {
     final List<Marker> markers = [];
+
+    // Add peer's shared location marker (highest priority)
+    if (widget.peerLatitude != null && widget.peerLongitude != null) {
+      markers.add(
+        Marker(
+          width: 100,
+          height: 100,
+          point: LatLng(widget.peerLatitude!, widget.peerLongitude!),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Pulsing marker
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Outer pulsing circle
+                  AnimatedBuilder(
+                    animation: _pulseAnimation,
+                    builder: (context, child) {
+                      return Transform.scale(
+                        scale: _pulseAnimation.value,
+                        child: Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.purple.withValues(alpha: 0.3),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  // Main marker
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.purple,
+                      border: Border.all(color: Colors.white, width: 3),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.purple.withValues(alpha: 0.5),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.person_pin_circle,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 4),
+              // Label below marker (properly positioned)
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.purple.withValues(alpha: 0.9),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white, width: 1),
+                ),
+                child: Text(
+                  widget.peerName ?? 'Shared Location',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     // Add current location marker
     if (widget.showCurrentLocation && controller.currentLocation != null) {
@@ -332,10 +414,11 @@ class _GpsEnhancedMapState extends State<GpsEnhancedMap>
                   border: Border.all(color: Colors.white, width: 3),
                   boxShadow: [
                     BoxShadow(
-                      color: (controller.sosMode
-                              ? ResQLinkTheme.primaryRed
-                              : Colors.blue)
-                          .withValues(alpha: 0.5),
+                      color:
+                          (controller.sosMode
+                                  ? ResQLinkTheme.primaryRed
+                                  : Colors.blue)
+                              .withValues(alpha: 0.5),
                       blurRadius: 10,
                       spreadRadius: 2,
                     ),

@@ -9,11 +9,7 @@ class DeviceList extends StatelessWidget {
   final HomeController controller;
   final Function(Map<String, dynamic>)? onDeviceChatTap;
 
-  const DeviceList({
-    super.key,
-    required this.controller,
-    this.onDeviceChatTap,
-  });
+  const DeviceList({super.key, required this.controller, this.onDeviceChatTap});
 
   @override
   Widget build(BuildContext context) {
@@ -82,17 +78,21 @@ class DeviceList extends StatelessWidget {
         Expanded(
           child: ResponsiveTextWidget(
             'Found $deviceCount device${deviceCount == 1 ? '' : 's'}',
-            styleBuilder: (context) => ResponsiveText.bodyLarge(context).copyWith(
-              color: ResQLinkTheme.safeGreen,
-              fontWeight: FontWeight.w600,
-            ),
+            styleBuilder: (context) =>
+                ResponsiveText.bodyLarge(context).copyWith(
+                  color: ResQLinkTheme.safeGreen,
+                  fontWeight: FontWeight.w600,
+                ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildDevicesList(BuildContext context, List<Map<String, dynamic>> validDevices) {
+  Widget _buildDevicesList(
+    BuildContext context,
+    List<Map<String, dynamic>> validDevices,
+  ) {
     if (ResponsiveUtils.isDesktop(context) && validDevices.length > 2) {
       return _buildDevicesGrid(context, validDevices);
     }
@@ -101,7 +101,8 @@ class DeviceList extends StatelessWidget {
       shrinkWrap: true,
       physics: NeverScrollableScrollPhysics(),
       itemCount: validDevices.length,
-      separatorBuilder: (context, index) => SizedBox(height: ResponsiveSpacing.sm(context)),
+      separatorBuilder: (context, index) =>
+          SizedBox(height: ResponsiveSpacing.sm(context)),
       itemBuilder: (context, index) {
         final device = validDevices[index];
         return DeviceItem(
@@ -113,7 +114,10 @@ class DeviceList extends StatelessWidget {
     );
   }
 
-  Widget _buildDevicesGrid(BuildContext context, List<Map<String, dynamic>> validDevices) {
+  Widget _buildDevicesGrid(
+    BuildContext context,
+    List<Map<String, dynamic>> validDevices,
+  ) {
     final crossAxisCount = ResponsiveUtils.isDesktop(context) ? 2 : 1;
     final spacing = ResponsiveSpacing.md(context);
 
@@ -140,11 +144,7 @@ class DeviceList extends StatelessWidget {
 
   Widget _buildEmptyState(BuildContext context) {
     return Container(
-      padding: ResponsiveSpacing.padding(
-        context,
-        horizontal: 32,
-        vertical: 48,
-      ),
+      padding: ResponsiveSpacing.padding(context, horizontal: 32, vertical: 48),
       decoration: BoxDecoration(
         color: ResQLinkTheme.surfaceDark.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(16),
@@ -163,20 +163,21 @@ class DeviceList extends StatelessWidget {
           SizedBox(height: ResponsiveSpacing.lg(context)),
           ResponsiveTextWidget(
             'No Devices Found',
-            styleBuilder: (context) => ResponsiveText.heading3(context).copyWith(
-              color: ResQLinkTheme.offlineGray,
-              fontWeight: FontWeight.bold,
-            ),
+            styleBuilder: (context) =>
+                ResponsiveText.heading3(context).copyWith(
+                  color: ResQLinkTheme.offlineGray,
+                  fontWeight: FontWeight.bold,
+                ),
             textAlign: TextAlign.center,
           ),
           SizedBox(height: ResponsiveSpacing.sm(context)),
           ResponsiveTextWidget(
             controller.isScanning
-                ? 'Searching for nearby WiFi Direct devices...'
-                : 'Tap "Scan for Devices" to discover nearby WiFi Direct devices',
-            styleBuilder: (context) => ResponsiveText.bodyMedium(context).copyWith(
-              color: ResQLinkTheme.offlineGray.withValues(alpha: 0.8),
-            ),
+                ? 'Searching for WiFi Direct groups...'
+                : 'Tap "Join WiFi Direct Group" to discover nearby groups',
+            styleBuilder: (context) => ResponsiveText.bodyMedium(
+              context,
+            ).copyWith(color: ResQLinkTheme.offlineGray.withValues(alpha: 0.8)),
             textAlign: TextAlign.center,
             maxLines: 3,
           ),

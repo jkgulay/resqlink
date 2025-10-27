@@ -18,19 +18,31 @@ import '../services/temporary_identity_service.dart';
 import '../features/database/repositories/chat_repository.dart';
 import '../controllers/home_controller.dart';
 import '../helpers/chat_navigation_helper.dart';
-import '../widgets/home/emergency_mode_card.dart';
 import '../widgets/home/emergency_actions_card.dart';
 import '../widgets/home/location_status_card.dart';
 import '../widgets/home/connection_discovery_card.dart';
 import '../widgets/home/instructions_card.dart';
 
 class HomePage extends StatefulWidget {
+  final int? initialTab;
+  final double? initialGpsLatitude;
+  final double? initialGpsLongitude;
+  final String? senderName;
+
+  const HomePage({
+    super.key,
+    this.initialTab,
+    this.initialGpsLatitude,
+    this.initialGpsLongitude,
+    this.senderName,
+  });
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
-  int selectedIndex = 0;
+  late int selectedIndex;
   final P2PMainService _p2pService = P2PMainService();
   String? _userId = "user_${DateTime.now().millisecondsSinceEpoch}";
   bool _isP2PInitialized = false;
@@ -53,6 +65,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Set initial tab if provided
+    selectedIndex = widget.initialTab ?? 0;
 
     _homeController = HomeController(_p2pService);
 
@@ -80,6 +95,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           userId: _userId,
           p2pService: _p2pService,
           onLocationShare: _onLocationShare,
+          initialLatitude: widget.initialGpsLatitude,
+          initialLongitude: widget.initialGpsLongitude,
+          senderName: widget.senderName,
         ),
       ),
       MessagePage(
@@ -136,13 +154,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         : BoxConstraints(),
                     child: Column(
                       children: [
-                        // Emergency Mode Card
-                        EmergencyModeCard(
-                          p2pService: _p2pService,
-                          onToggle: controller.toggleEmergencyMode,
-                        ),
-                        SizedBox(height: ResponsiveSpacing.lg(context)),
-
                         // Use responsive layout for tablet/desktop
                         if (ResponsiveUtils.isDesktop(context))
                           _buildDesktopLayout(
@@ -539,7 +550,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // CRITICAL FIX: Register device with identifier resolver
     // This maps display name to MAC address for message routing
     _p2pService.registerDevice(deviceId, userName);
-    debugPrint("📝 Registered device: Display Name='$userName', MAC='$deviceId'");
+    debugPrint(
+      "📝 Registered device: Display Name='$userName', MAC='$deviceId'",
+    );
 
     // Prevent duplicate connection processing for the same device
     if (_recentlyConnectedDevices.containsKey(deviceId)) {
@@ -560,9 +573,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (mounted) {
       // Create device map for navigation
       final device = {
-        'deviceId': deviceId,  // MAC address as identifier
-        'deviceAddress': deviceId,  // MAC address
-        'deviceName': userName,  // Display name for UI
+        'deviceId': deviceId, // MAC address as identifier
+        'deviceAddress': deviceId, // MAC address
+        'deviceName': userName, // Display name for UI
         'isConnected': true,
       };
 
@@ -612,8 +625,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  void _onLocationShare(LocationModel location) {
-    }
+  void _onLocationShare(LocationModel location) {}
 
   void _onDeviceChatTap(Map<String, dynamic> device) {
     debugPrint('🎯 HomePage: Device chat tap for ${device['deviceName']}');
@@ -722,52 +734,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   List<Widget> _buildAppBarActions(bool isNarrowScreen) {
     final actions = <Widget>[];
-
-    // Emergency Mode Indicator
-    if (_p2pService.emergencyMode) {
-      actions.add(
-        Container(
-          margin: EdgeInsets.only(right: isNarrowScreen ? 4 : 8),
-          padding: EdgeInsets.symmetric(
-            horizontal: isNarrowScreen ? 8 : 12,
-            vertical: isNarrowScreen ? 4 : 6,
-          ),
-          decoration: BoxDecoration(
-            color: Colors.red,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.red.withValues(alpha: 0.3),
-                blurRadius: 4,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.emergency,
-                size: isNarrowScreen ? 10 : 12,
-                color: Colors.white,
-              ),
-              if (!isNarrowScreen ||
-                  MediaQuery.of(context).size.width > 400) ...[
-                SizedBox(width: 3),
-                Text(
-                  isNarrowScreen ? 'SOS' : 'EMERGENCY',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: isNarrowScreen ? 10 : 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
 
     // P2P Connection Status
     actions.add(
@@ -1011,14 +977,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         '📱 Creating/updating chat session for: $deviceName (MAC: $deviceId)',
       );
 
-      final currentUserName = await TemporaryIdentityService.getTemporaryDisplayName();
+      final currentUserName =
+          await TemporaryIdentityService.getTemporaryDisplayName();
 
       // CRITICAL: Pass deviceAddress as the stable MAC address identifier
       // This ensures ONE session per device regardless of display name changes
       final sessionId = await ChatRepository.createOrUpdate(
         deviceId: deviceId, // MAC address
         deviceName: deviceName, // Current display name (can change)
-        deviceAddress: deviceId, // CRITICAL: MAC address for stable identification
+        deviceAddress:
+            deviceId, // CRITICAL: MAC address for stable identification
         currentUserId: 'local',
         currentUserName: currentUserName,
         peerUserName: deviceName,

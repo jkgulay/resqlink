@@ -9,7 +9,6 @@ class P2PDiscoveryService {
 
   // Discovery state
   bool _discoveryInProgress = false;
-  Timer? _discoveryRetryTimer;
   Timer? _discoveryTimeoutTimer;
 
   // Discovery methods
@@ -30,10 +29,10 @@ class P2PDiscoveryService {
       // Check WiFi Direct availability
       await _checkWifiDirectAvailability();
 
-      // Start periodic discovery
-      _startPeriodicDiscovery();
+      // Don't start periodic discovery automatically - only discover when user explicitly scans
+      // _startPeriodicDiscovery(); // DISABLED: User must manually scan
 
-      debugPrint('✅ P2P Discovery Service initialized');
+      debugPrint('✅ P2P Discovery Service initialized (manual scan mode)');
     } catch (e) {
       debugPrint('❌ Discovery service initialization failed: $e');
     }
@@ -114,25 +113,6 @@ class P2PDiscoveryService {
     }
   }
 
-
-
-
-  /// Start periodic discovery
-  void _startPeriodicDiscovery() {
-    _discoveryRetryTimer = Timer.periodic(Duration(seconds: 60), (_) {
-      if (!_discoveryInProgress && _baseService.connectedDevices.isEmpty) {
-        debugPrint('🔄 Starting periodic discovery...');
-        discoverDevices(force: false);
-      }
-    });
-  }
-
-  /// Stop periodic discovery
-  void _stopPeriodicDiscovery() {
-    _discoveryRetryTimer?.cancel();
-    _discoveryRetryTimer = null;
-  }
-
   /// Get discovery status
   Map<String, dynamic> getDiscoveryStatus() {
     return {
@@ -165,7 +145,6 @@ class P2PDiscoveryService {
     debugPrint('🗑️ P2P Discovery Service disposing...');
 
     _discoveryInProgress = false;
-    _stopPeriodicDiscovery();
     _discoveryTimeoutTimer?.cancel();
 
     _lastSeenDevices.clear();

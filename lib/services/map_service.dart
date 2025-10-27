@@ -46,7 +46,6 @@ class PhilippinesMapService {
   // Tile providers
   late TileLayer _onlineTileLayer;
   late TileLayer _offlineTileLayer;
-  late TileLayer _userCacheTileLayer;
 
   bool get isOnline => _isOnline;
   bool get isInitialized => _isInitialized;
@@ -117,7 +116,6 @@ class PhilippinesMapService {
     );
 
     _offlineTileLayer = _onlineTileLayer;
-    _userCacheTileLayer = _onlineTileLayer;
 
     _startConnectivityMonitoring();
     _isInitialized = true;
@@ -181,26 +179,21 @@ class PhilippinesMapService {
       ),
     );
 
-    // Offline base layer (Philippines bundled tiles) - FIXED
+    // Offline base layer - FIXED: Check BOTH user cache AND Philippines base tiles
+    // This ensures downloaded tiles AND bundled tiles work offline
     _offlineTileLayer = TileLayer(
-      urlTemplate: urlTemplate,
-      userAgentPackageName: 'com.resqlink.app',
-      maxZoom: 12,
-      tileProvider: fmtc.FMTCTileProvider(
-        stores: {_philippinesStore: fmtc.BrowseStoreStrategy.read},
-        loadingStrategy:
-            fmtc.BrowseLoadingStrategy.cacheOnly, // Changed from onlineFirst
-      ),
-    );
-
-    // User cache layer for pre-cached areas
-    _userCacheTileLayer = TileLayer(
       urlTemplate: urlTemplate,
       userAgentPackageName: 'com.resqlink.app',
       maxZoom: 19,
       tileProvider: fmtc.FMTCTileProvider(
-        stores: {_userCacheStore: fmtc.BrowseStoreStrategy.read},
-        loadingStrategy: fmtc.BrowseLoadingStrategy.cacheOnly,
+        stores: {
+          _userCacheStore: fmtc
+              .BrowseStoreStrategy
+              .read, // User-downloaded tiles (highest priority)
+          _philippinesStore:
+              fmtc.BrowseStoreStrategy.read, // Bundled base tiles (fallback)
+        },
+        loadingStrategy: fmtc.BrowseLoadingStrategy.cacheFirst,
       ),
     );
   }
@@ -400,18 +393,12 @@ class PhilippinesMapService {
         debugPrint('🌐 Using online tile layer (zoom: ${zoom ?? "unknown"})');
         return _onlineTileLayer;
       } else {
-        // IMPROVED offline logic
-        debugPrint('📱 Using offline tile layer (zoom: ${zoom ?? "unknown"})');
-
-        if (zoom != null && zoom > 12) {
-          // Try user cache first for high zoom
-          debugPrint('🔍 High zoom requested, trying user cache first');
-          return _userCacheTileLayer;
-        } else {
-          // Use Philippines base for low zoom
-          debugPrint('🗺️ Low zoom, using Philippines base tiles');
-          return _offlineTileLayer;
-        }
+        // IMPROVED offline logic - always use base tiles with cacheFirst strategy
+        // This ensures peer locations load from cached Philippines tiles
+        debugPrint(
+          '� Offline mode: using base tiles with fallback (zoom: ${zoom ?? "unknown"})',
+        );
+        return _offlineTileLayer; // Now uses cacheFirst, will work for all of Philippines
       }
     } catch (e) {
       debugPrint('❌ Error in getTileLayer: $e');

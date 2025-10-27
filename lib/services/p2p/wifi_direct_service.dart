@@ -37,6 +37,9 @@ class WiFiDirectService {
   bool _isInitialized = false;
   bool _isDiscovering = false;
   bool _isRefreshingPeers = false;
+  bool _isGroupOwner = false; // Track if this device is the group owner
+  bool _groupFormed =
+      false; // Track if a WiFi Direct group exists (host waiting or peers connected)
   List<WiFiDirectPeer> _discoveredPeers = [];
   WiFiDirectConnectionState _connectionState =
       WiFiDirectConnectionState.disconnected;
@@ -47,6 +50,9 @@ class WiFiDirectService {
 
   // Getters for discovered peers
   List<WiFiDirectPeer> get discoveredPeers => List.from(_discoveredPeers);
+  bool get isGroupOwner => _isGroupOwner;
+  bool get groupFormed =>
+      _groupFormed; // True when group exists, even if no peers connected yet
 
   /// Get custom name for a device by MAC address
   String? getCustomName(String deviceAddress) {
@@ -76,8 +82,6 @@ class WiFiDirectService {
         debugPrint('❌ WiFi Direct not supported on this device');
         return false;
       }
-
-
 
       await _requestAndStoreDeviceAddress();
 
@@ -120,15 +124,15 @@ class WiFiDirectService {
     }
   }
 
-
   Future<bool> setDeviceName(String newName) async {
     try {
       debugPrint('📝 Setting WiFi Direct device name to: $newName');
 
-      final result = await _wifiChannel.invokeMethod<bool>(
-        'setDeviceName',
-        {'deviceName': newName},
-      ) ?? false;
+      final result =
+          await _wifiChannel.invokeMethod<bool>('setDeviceName', {
+            'deviceName': newName,
+          }) ??
+          false;
 
       if (result) {
         debugPrint('✅ WiFi Direct device name set successfully');
@@ -227,7 +231,11 @@ class WiFiDirectService {
       debugPrint('📡 Starting custom name service discovery...');
 
       // Start broadcasting our custom name
-      final broadcastSuccess = await _wifiChannel.invokeMethod<bool>('startCustomServiceDiscovery') ?? false;
+      final broadcastSuccess =
+          await _wifiChannel.invokeMethod<bool>(
+            'startCustomServiceDiscovery',
+          ) ??
+          false;
       if (broadcastSuccess) {
         debugPrint('✅ Broadcasting custom device name');
       } else {
@@ -235,7 +243,11 @@ class WiFiDirectService {
       }
 
       // Start listening for other devices' custom names
-      final listenerSuccess = await _wifiChannel.invokeMethod<bool>('startServiceDiscoveryListener') ?? false;
+      final listenerSuccess =
+          await _wifiChannel.invokeMethod<bool>(
+            'startServiceDiscoveryListener',
+          ) ??
+          false;
       if (listenerSuccess) {
         debugPrint('✅ Listening for custom device names');
       } else {
@@ -243,7 +255,8 @@ class WiFiDirectService {
       }
 
       // Start service discovery
-      final discoverSuccess = await _wifiChannel.invokeMethod<bool>('discoverServices') ?? false;
+      final discoverSuccess =
+          await _wifiChannel.invokeMethod<bool>('discoverServices') ?? false;
       if (discoverSuccess) {
         debugPrint('✅ Service discovery started');
       } else {
@@ -294,6 +307,25 @@ class WiFiDirectService {
       }
 
       return _isDiscovering;
+    } on PlatformException catch (e) {
+      debugPrint('❌ WiFi Direct discovery failed: ${e.code} - ${e.message}');
+
+      // Provide user-friendly error messages
+      if (e.code == 'LOCATION_DISABLED') {
+        debugPrint(
+          '📍 SOLUTION: Please enable Location Services in your device Settings',
+        );
+        debugPrint('   Settings > Location > Turn ON');
+      } else if (e.code == 'PERMISSION_DENIED') {
+        debugPrint(
+          '🔐 SOLUTION: Please grant location permissions when prompted',
+        );
+      } else if (e.code == 'WIFI_DISABLED') {
+        debugPrint('📡 SOLUTION: Please enable WiFi in your device Settings');
+      }
+
+      _isDiscovering = false;
+      return false;
     } catch (e) {
       debugPrint('❌ WiFi Direct discovery failed: $e');
       _isDiscovering = false;
@@ -351,7 +383,9 @@ class WiFiDirectService {
           _peersController.add(peers);
 
           final hasConnectedPeers = peers.any(
-            (p) => p.status == WiFiDirectPeerStatus.connected || p.status == WiFiDirectPeerStatus.invited,
+            (p) =>
+                p.status == WiFiDirectPeerStatus.connected ||
+                p.status == WiFiDirectPeerStatus.invited,
           );
 
           // Only update to disconnected if we're not already connected
@@ -529,10 +563,20 @@ class WiFiDirectService {
     try {
       debugPrint('👑 Creating WiFi Direct group...');
 
+      // First check if a group already exists
+      if (_groupFormed) {
+        debugPrint('⚠️ Group already exists, removing it first...');
+        await removeGroup();
+        // Give it a moment to fully remove
+        await Future.delayed(Duration(milliseconds: 500));
+      }
+
       final result = await _wifiChannel.invokeMethod<bool>('createGroup');
 
       if (result == true) {
         debugPrint('✅ WiFi Direct group created');
+        _groupFormed = true;
+        _isGroupOwner = true;
       } else {
         debugPrint('❌ Failed to create WiFi Direct group');
       }
@@ -554,6 +598,10 @@ class WiFiDirectService {
         debugPrint('✅ WiFi Direct group removed');
         _connectionState = WiFiDirectConnectionState.disconnected;
         _connectionController.add(_connectionState);
+
+        // Clear group state flags
+        _groupFormed = false;
+        _isGroupOwner = false;
       }
 
       return result ?? false;
@@ -579,11 +627,13 @@ class WiFiDirectService {
 
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        debugPrint('📤 Sending message via WiFi Direct (attempt $attempt/$maxRetries): ${message.length > 100 ? '${message.substring(0, 100)}...' : message}');
+        debugPrint(
+          '📤 Sending message via WiFi Direct (attempt $attempt/$maxRetries): ${message.length > 100 ? '${message.substring(0, 100)}...' : message}',
+        );
 
-        final result = await _channel.invokeMethod('sendMessage', {
-          'message': message,
-        }).timeout(Duration(seconds: 4));
+        final result = await _channel
+            .invokeMethod('sendMessage', {'message': message})
+            .timeout(Duration(seconds: 4));
 
         if (result == true) {
           debugPrint('✅ Message sent successfully on attempt $attempt');
@@ -592,7 +642,9 @@ class WiFiDirectService {
           debugPrint('⚠️ Message send returned false on attempt $attempt');
         }
       } on PlatformException catch (e) {
-        debugPrint('❌ Platform error sending message (attempt $attempt/$maxRetries): ${e.code} - ${e.message}');
+        debugPrint(
+          '❌ Platform error sending message (attempt $attempt/$maxRetries): ${e.code} - ${e.message}',
+        );
 
         if (e.code == 'NOT_CONNECTED') {
           debugPrint('📡 Not connected, will retry...');
@@ -610,7 +662,9 @@ class WiFiDirectService {
 
         await Future.delayed(retryDelay);
       } catch (e) {
-        debugPrint('❌ General error sending message (attempt $attempt/$maxRetries): $e');
+        debugPrint(
+          '❌ General error sending message (attempt $attempt/$maxRetries): $e',
+        );
 
         if (e.toString().contains('TimeoutException')) {
           debugPrint('⏰ Dart timeout detected, will retry...');
@@ -690,7 +744,9 @@ class WiFiDirectService {
           if (deviceMAC != null) {
             _deviceMACs[deviceAddress] = deviceMAC;
           }
-          debugPrint('📝 Stored custom name for $deviceAddress: $customName (MAC: $deviceMAC)');
+          debugPrint(
+            '📝 Stored custom name for $deviceAddress: $customName (MAC: $deviceMAC)',
+          );
 
           // Trigger peer list refresh to update UI with custom names
           await _refreshPeerList();
@@ -750,7 +806,7 @@ class WiFiDirectService {
       case 'onDeviceChanged':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
         debugPrint('📱 Device info: ${args['deviceName']}');
-        // UUID-based system - no MAC storage needed
+      // UUID-based system - no MAC storage needed
 
       case 'onServerSocketReady':
         final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
@@ -771,10 +827,15 @@ class WiFiDirectService {
   Future<void> _handleConnectionChanged(Map<String, dynamic> args) async {
     final isConnected = args['isConnected'] as bool? ?? false;
     final groupFormed = args['groupFormed'] as bool? ?? false;
+    final isGroupOwner = args['isGroupOwner'] as bool? ?? false;
 
     debugPrint(
-      '🔄 WiFi Direct connection changed: connected=$isConnected, groupFormed=$groupFormed',
+      '🔄 WiFi Direct connection changed: connected=$isConnected, groupFormed=$groupFormed, isGroupOwner=$isGroupOwner',
     );
+
+    // Update group owner status and group formed status
+    _isGroupOwner = isGroupOwner;
+    _groupFormed = groupFormed; // Group exists even if no peers connected yet
 
     final newState = (isConnected && groupFormed)
         ? WiFiDirectConnectionState.connected
@@ -790,7 +851,7 @@ class WiFiDirectService {
         'connectionInfo': {
           'isConnected': isConnected,
           'groupFormed': groupFormed,
-          'isGroupOwner': args['isGroupOwner'] ?? false,
+          'isGroupOwner': isGroupOwner,
           'groupOwnerAddress': args['groupOwnerAddress'] ?? '',
         },
       });
@@ -808,7 +869,8 @@ class WiFiDirectService {
     bool hasConnectedPeers = false;
 
     for (final peer in peers) {
-      if (peer.status == WiFiDirectPeerStatus.connected || peer.status == WiFiDirectPeerStatus.invited) {
+      if (peer.status == WiFiDirectPeerStatus.connected ||
+          peer.status == WiFiDirectPeerStatus.invited) {
         hasConnectedPeers = true;
         debugPrint(
           '✅ Peer found: ${peer.deviceName} (${peer.deviceAddress}) - Status: ${peer.status.name}',
@@ -840,7 +902,11 @@ class WiFiDirectService {
           'isConnected': hasConnectedPeers,
           'groupFormed': hasConnectedPeers,
           'connectedPeers': peers
-              .where((p) => p.status == WiFiDirectPeerStatus.connected || p.status == WiFiDirectPeerStatus.invited)
+              .where(
+                (p) =>
+                    p.status == WiFiDirectPeerStatus.connected ||
+                    p.status == WiFiDirectPeerStatus.invited,
+              )
               .length,
         },
       });
@@ -961,9 +1027,14 @@ class WiFiDirectService {
       if (connectionInfo != null) {
         final isConnected = connectionInfo['isConnected'] as bool? ?? false;
         final groupFormed = connectionInfo['groupFormed'] as bool? ?? false;
+        final isGroupOwner = connectionInfo['isGroupOwner'] as bool? ?? false;
 
         if (isConnected && groupFormed) {
           debugPrint('✅ System connection found!');
+
+          // Update group state flags
+          _groupFormed = groupFormed;
+          _isGroupOwner = isGroupOwner;
 
           await _establishSocketCommunication();
 
@@ -971,8 +1042,17 @@ class WiFiDirectService {
 
           _connectionState = WiFiDirectConnectionState.connected;
           _connectionController.add(_connectionState);
+        } else if (groupFormed) {
+          // Group exists but no peers connected yet (host waiting)
+          debugPrint('ℹ️ WiFi Direct group exists (host waiting for peers)');
+          _groupFormed = true;
+          _isGroupOwner = isGroupOwner;
+          _connectionState = WiFiDirectConnectionState.disconnected;
+          _connectionController.add(_connectionState);
         } else {
           debugPrint('ℹ️ No active WiFi Direct connection found');
+          _groupFormed = false;
+          _isGroupOwner = false;
         }
       }
     } catch (e) {
@@ -1113,4 +1193,22 @@ enum WiFiDirectPeerStatus {
   available,
   unavailable,
   unknown,
+}
+
+// Helper function to convert status enum to string
+String wifiDirectPeerStatusToString(WiFiDirectPeerStatus status) {
+  switch (status) {
+    case WiFiDirectPeerStatus.connected:
+      return 'connected';
+    case WiFiDirectPeerStatus.invited:
+      return 'invited';
+    case WiFiDirectPeerStatus.failed:
+      return 'failed';
+    case WiFiDirectPeerStatus.available:
+      return 'available';
+    case WiFiDirectPeerStatus.unavailable:
+      return 'unavailable';
+    case WiFiDirectPeerStatus.unknown:
+      return 'unknown';
+  }
 }

@@ -43,9 +43,25 @@ class ConnectionHeader extends StatelessWidget {
     final iconSize = ResponsiveUtils.isMobile(context) ? 24.0 : 28.0;
     final iconPadding = ResponsiveSpacing.sm(context);
 
-    final statusColor = controller.isConnected
+    final isGroupOwner =
+        controller.p2pService.wifiDirectService?.isGroupOwner ?? false;
+    final isConnected = controller.isConnected;
+
+    final statusColor = isConnected
         ? ResQLinkTheme.safeGreen
         : ResQLinkTheme.primaryBlue;
+
+    // Choose icon based on role
+    IconData icon;
+    if (isConnected) {
+      icon = isGroupOwner
+          ? Icons.router
+          : Icons.devices; // Router for host, devices for client
+    } else if (controller.isScanning) {
+      icon = Icons.radar;
+    } else {
+      icon = Icons.wifi;
+    }
 
     return Container(
       padding: EdgeInsets.all(iconPadding),
@@ -57,55 +73,68 @@ class ConnectionHeader extends StatelessWidget {
           width: 1.5,
         ),
       ),
-      child: Icon(
-        Icons.wifi,
-        color: statusColor,
-        size: iconSize,
-      ),
+      child: Icon(icon, color: statusColor, size: iconSize),
     );
   }
 
   Widget _buildStatusText(BuildContext context) {
+    final isGroupOwner =
+        controller.p2pService.wifiDirectService?.isGroupOwner ?? false;
+    final isConnected =
+        controller.p2pService.wifiDirectService?.connectionState ==
+        WiFiDirectConnectionState.connected;
+
+    // Show role in title when connected
+    String title = 'WiFi Direct Connection';
+    if (isConnected) {
+      title = isGroupOwner ? 'WiFi Direct - Host' : 'WiFi Direct - Client';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ResponsiveTextWidget(
-          'WiFi Direct Connection',
+          title,
           styleBuilder: (context) => ResponsiveText.heading3(context).copyWith(
             color: Colors.white,
+            fontWeight: isConnected ? FontWeight.bold : FontWeight.normal,
           ),
         ),
         SizedBox(height: ResponsiveSpacing.xs(context)),
         ResponsiveTextWidget(
           _getConnectionStatusText(),
-          styleBuilder: (context) => ResponsiveText.bodyMedium(context).copyWith(
-            color: Colors.white70,
-          ),
+          styleBuilder: (context) => ResponsiveText.bodyMedium(
+            context,
+          ).copyWith(color: Colors.white70),
         ),
       ],
     );
   }
 
   String _getConnectionStatusText() {
-    // Pure WiFi Direct implementation - no hotspot references
+    final isGroupOwner =
+        controller.p2pService.wifiDirectService?.isGroupOwner ?? false;
+
+    // Show role when connected
     if (controller.p2pService.wifiDirectService?.connectionState ==
         WiFiDirectConnectionState.connected) {
       final deviceCount = controller.p2pService.connectedDevices.length;
-      return 'WiFi Direct active • $deviceCount device${deviceCount == 1 ? '' : 's'} connected';
+      final role = isGroupOwner ? '👑 Host' : '📱 Client';
+      return '$role • $deviceCount device${deviceCount == 1 ? '' : 's'} connected';
     }
 
     if (controller.isConnected) {
       final deviceCount = controller.p2pService.connectedDevices.length;
-      return 'Connected to $deviceCount device${deviceCount == 1 ? '' : 's'}';
+      final role = isGroupOwner ? '👑 Host' : '📱 Client';
+      return '$role • Connected to $deviceCount device${deviceCount == 1 ? '' : 's'}';
     }
 
     if (controller.isScanning) {
-      return 'Scanning for nearby devices...';
+      return '🔍 Scanning for groups (Client mode)...';
     }
 
-    return 'Ready to discover and connect';
+    return 'Ready to host or join a group';
   }
-
 
   Widget _buildWiFiDirectSettingsButton(BuildContext context) {
     return Container(
