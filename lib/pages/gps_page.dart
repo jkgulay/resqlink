@@ -625,12 +625,18 @@ class GpsPage extends StatefulWidget {
   final String? userId;
   final Function(LocationModel)? onLocationShare;
   final P2PConnectionService p2pService;
+  final double? initialLatitude;
+  final double? initialLongitude;
+  final String? senderName;
 
   const GpsPage({
     super.key,
     this.userId,
     this.onLocationShare,
     required this.p2pService,
+    this.initialLatitude,
+    this.initialLongitude,
+    this.senderName,
   });
 
   @override
@@ -645,6 +651,32 @@ class _GpsPageState extends State<GpsPage> {
   void initState() {
     super.initState();
     _initializeController();
+
+    // Move map to shared location if provided
+    if (widget.initialLatitude != null && widget.initialLongitude != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _mapController.move(
+            LatLng(widget.initialLatitude!, widget.initialLongitude!),
+            16.0, // Zoom level
+          );
+
+          // Show a snackbar indicating whose location this is
+          if (widget.senderName != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '📍 Showing ${widget.senderName}\'s shared location',
+                  style: TextStyle(color: Colors.white),
+                ),
+                backgroundColor: Colors.blue.withValues(alpha: 0.9),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      });
+    }
   }
 
   void _initializeController() {
@@ -808,6 +840,9 @@ class _GpsPageState extends State<GpsPage> {
                     showEmergencyZones: controller.showEmergencyZones,
                     showCriticalInfrastructure:
                         controller.showCriticalInfrastructure,
+                    peerLatitude: widget.initialLatitude,
+                    peerLongitude: widget.initialLongitude,
+                    peerName: widget.senderName,
                   ),
 
                   const GpsStatsPanel(),

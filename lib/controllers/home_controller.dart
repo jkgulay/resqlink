@@ -76,7 +76,9 @@ class HomeController extends ChangeNotifier {
 
     debugPrint('📱 Devices discovered: ${deviceList.length} devices');
     for (final device in deviceList) {
-      debugPrint('  - ${device['deviceName']} (${device['connectionType']}) - Signal: ${device['signalLevel']} dBm');
+      debugPrint(
+        '  - ${device['deviceName']} (${device['connectionType']}) - Signal: ${device['signalLevel']} dBm',
+      );
     }
 
     notifyListeners();
@@ -157,7 +159,9 @@ class HomeController extends ChangeNotifier {
       Timer(Duration(seconds: 2), () {
         final deviceList = p2pService.discoveredDevices.values.toList();
         _discoveredDevices = deviceList;
-        debugPrint("🔄 Force updating discovered devices: ${deviceList.length} devices");
+        debugPrint(
+          "🔄 Force updating discovered devices: ${deviceList.length} devices",
+        );
         notifyListeners();
       });
 
@@ -173,8 +177,12 @@ class HomeController extends ChangeNotifier {
 
           if (_discoveredDevices.isEmpty) {
             debugPrint("📭 No devices found during scan");
-            debugPrint("🔍 Available WiFi Direct peers: ${p2pService.wifiDirectService?.discoveredPeers.length ?? 0}");
-            debugPrint("🔍 ResQLink devices: ${p2pService.discoveredResQLinkDevices.length}");
+            debugPrint(
+              "🔍 Available WiFi Direct peers: ${p2pService.wifiDirectService?.discoveredPeers.length ?? 0}",
+            );
+            debugPrint(
+              "🔍 ResQLink devices: ${p2pService.discoveredResQLinkDevices.length}",
+            );
           } else {
             debugPrint(
               "✅ Scan completed - found ${_discoveredDevices.length} devices",
@@ -187,6 +195,40 @@ class HomeController extends ChangeNotifier {
     } catch (e) {
       debugPrint("❌ Scan error: $e");
       _isScanning = false;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  void stopScan() {
+    if (_isScanning) {
+      _isScanning = false;
+      debugPrint("⏹️ Scan cancelled by user");
+      notifyListeners();
+    }
+  }
+
+  Future<void> createGroup() async {
+    try {
+      debugPrint("📡 Creating WiFi Direct group (host mode)...");
+
+      // Check permissions first
+      await p2pService.checkAndRequestPermissions();
+
+      // Create WiFi Direct group
+      final success =
+          await p2pService.wifiDirectService?.createGroup() ?? false;
+
+      if (success) {
+        debugPrint("✅ WiFi Direct group created successfully");
+      } else {
+        debugPrint("❌ Failed to create WiFi Direct group");
+        throw Exception("Failed to create WiFi Direct group");
+      }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint("❌ Create group error: $e");
       notifyListeners();
       rethrow;
     }
@@ -214,7 +256,8 @@ class HomeController extends ChangeNotifier {
     }
 
     final senderName = p2pService.userName ?? 'Unknown User';
-    final locationMessage = '📍 Shared location\nLat: ${_currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${_currentLocation!.longitude.toStringAsFixed(6)}';
+    final locationMessage =
+        '📍 Shared location\nLat: ${_currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${_currentLocation!.longitude.toStringAsFixed(6)}';
 
     // Send location to all connected devices
     for (final deviceId in connectedDevices.keys) {

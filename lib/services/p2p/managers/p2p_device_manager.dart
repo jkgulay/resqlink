@@ -14,10 +14,7 @@ class P2PDeviceManager {
   // Callbacks
   void Function(List<Map<String, dynamic>>)? onDevicesDiscovered;
 
-  P2PDeviceManager(
-    this._baseService,
-    this._connectionManager,
-  );
+  P2PDeviceManager(this._baseService, this._connectionManager);
 
   /// Set WiFi Direct service
   void setWiFiDirectService(WiFiDirectService? service) {
@@ -30,13 +27,18 @@ class P2PDeviceManager {
 
     // Add WiFi Direct peers with actual signal strength and connection status
     for (final peer in (_wifiDirectService?.discoveredPeers ?? <dynamic>[])) {
+      // FIXED: Only status 0 (connected) means truly connected
+      // Status 1 (invited) means pending, not yet connected
       final isConnected = peer.status == WiFiDirectPeerStatus.connected;
 
       // CRITICAL FIX: Use custom device name with priority:
-      // 1. Handshake name (if connected)
+      // 1. Handshake name (if connected) - lookup by UUID via MAC mapping
       // 2. Service discovery name (DNS-SD broadcast - before connection)
       // 3. System WiFi Direct name (fallback)
-      final connectedDevice = _baseService.connectedDevices[peer.deviceAddress];
+      final uuid = _baseService.getUuidForMac(peer.deviceAddress);
+      final connectedDevice = uuid != null
+          ? _baseService.connectedDevices[uuid]
+          : null;
       final customNameFromDiscovery = _wifiDirectService?.getCustomName(
         peer.deviceAddress,
       );
@@ -55,7 +57,9 @@ class P2PDeviceManager {
         'signalLevel': peer.signalLevel ?? -50,
         'lastSeen': DateTime.now().millisecondsSinceEpoch,
         'isConnected': isConnected,
-        'status': peer.status.toString(),
+        'status': wifiDirectPeerStatusToString(
+          peer.status,
+        ), // Use helper function instead of .name
         'isEmergency':
             displayName.toLowerCase().contains('resqlink') ||
             displayName.toLowerCase().contains('emergency'),

@@ -257,10 +257,26 @@ class MainActivity : FlutterActivity() {
             return
         }
 
+        // CRITICAL: Check if location services are enabled (required for WiFi Direct on Android 10+)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val locationManager = getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+            val isLocationEnabled = locationManager.isLocationEnabled
+            android.util.Log.d("WiFiDirect", "Location services enabled: $isLocationEnabled")
+            
+            if (!isLocationEnabled) {
+                android.util.Log.e("WiFiDirect", "❌ Location services are DISABLED - WiFi Direct requires location to be enabled on Android 10+")
+                result.error("LOCATION_DISABLED", "Please enable location services in Settings for WiFi Direct to work", null)
+                return
+            }
+        }
+
         // Check all required permissions
         if (!permissionHelper.hasAllWifiDirectPermissions()) {
             android.util.Log.e("WiFiDirect", "WiFi Direct permissions not granted")
-            result.error("PERMISSION_DENIED", "All WiFi Direct permissions required", null)
+            // Automatically request permissions instead of just failing
+            android.util.Log.d("WiFiDirect", "Requesting WiFi Direct permissions...")
+            permissionHelper.requestWifiDirectPermissions()
+            result.error("PERMISSION_DENIED", "Requesting WiFi Direct permissions - please grant and try again", null)
             return
         }
 
@@ -860,14 +876,58 @@ private fun establishSocketConnection(result: MethodChannel.Result) {  // Remove
         if (deviceAddress == null) {
             result.error("INVALID_ARGUMENT", "Device address is null", null); return
         }
+        
+        android.util.Log.d("WiFiDirect", "=== Connecting to WiFi Direct Peer ===")
+        android.util.Log.d("WiFiDirect", "Target device: $deviceAddress")
+        
         channel?.let { ch ->
             val config = android.net.wifi.p2p.WifiP2pConfig().apply {
                 this.deviceAddress = deviceAddress
+                
+                // CRITICAL: Set Group Owner Intent for automatic role negotiation
+                // Value 0-15: Higher value = more likely to become group owner
+                // Use device address hash to ensure deterministic but fair negotiation
+                val myMacHash = try {
+                    wifiP2pManager.requestDeviceInfo(ch) { device ->
+                        device?.deviceAddress?.hashCode() ?: 0
+                    }
+                    android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.ANDROID_ID).hashCode()
+                } catch (e: Exception) {
+                    System.currentTimeMillis().toInt()
+                }
+                
+                val peerMacHash = deviceAddress.hashCode()
+                
+                // Deterministic role selection: device with higher hash becomes group owner
+                this.groupOwnerIntent = if (myMacHash > peerMacHash) {
+                    android.util.Log.d("WiFiDirect", "📱 Setting high GO intent (likely to become group owner)")
+                    15 // High probability of becoming group owner
+                } else {
+                    android.util.Log.d("WiFiDirect", "📱 Setting low GO intent (likely to become client)")
+                    0  // Low probability - will become client
+                }
+                
+                android.util.Log.d("WiFiDirect", "Group Owner Intent set to: ${this.groupOwnerIntent}")
             }
+            
+            android.util.Log.d("WiFiDirect", "Initiating connection with automatic role negotiation...")
+            
             wifiP2pManager.connect(ch, config, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() = result.success(true)
-                override fun onFailure(reason: Int) =
-                    result.error("CONNECTION_FAILED", "Error code $reason", null)
+                override fun onSuccess() {
+                    android.util.Log.d("WiFiDirect", "✅ Connection initiated successfully")
+                    android.util.Log.d("WiFiDirect", "⏳ Waiting for role negotiation (owner/client assignment)...")
+                    result.success(true)
+                }
+                override fun onFailure(reason: Int) {
+                    val errorMsg = when (reason) {
+                        WifiP2pManager.P2P_UNSUPPORTED -> "P2P unsupported"
+                        WifiP2pManager.ERROR -> "Internal error"
+                        WifiP2pManager.BUSY -> "System busy"
+                        else -> "Unknown error $reason"
+                    }
+                    android.util.Log.e("WiFiDirect", "❌ Connection failed: $errorMsg")
+                    result.error("CONNECTION_FAILED", errorMsg, null)
+                }
             })
         } ?: result.error("NOT_INITIALIZED", "WiFi P2P not initialized", null)
     }

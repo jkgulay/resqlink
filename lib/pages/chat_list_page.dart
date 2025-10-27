@@ -30,8 +30,6 @@ class _ChatListPageState extends State<ChatListPage>
   List<ChatSessionSummary> _chatSessions = [];
   bool _isLoading = true;
   Timer? _refreshTimer;
-  final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
 
   @override
   void initState() {
@@ -39,15 +37,12 @@ class _ChatListPageState extends State<ChatListPage>
     WidgetsBinding.instance.addObserver(this);
     _loadChatSessions();
     _startPeriodicRefresh();
-    _searchController.addListener(_onSearchChanged);
     _setupMessageRouterListener();
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
-    _searchController.removeListener(_onSearchChanged);
-    _searchController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -60,12 +55,6 @@ class _ChatListPageState extends State<ChatListPage>
     } else if (state == AppLifecycleState.paused) {
       _refreshTimer?.cancel();
     }
-  }
-
-  void _onSearchChanged() {
-    setState(() {
-      _searchQuery = _searchController.text.toLowerCase();
-    });
   }
 
   void _setupMessageRouterListener() {
@@ -121,15 +110,6 @@ class _ChatListPageState extends State<ChatListPage>
     }
   }
 
-  List<ChatSessionSummary> get _filteredSessions {
-    if (_searchQuery.isEmpty) return _chatSessions;
-
-    return _chatSessions.where((session) {
-      return session.deviceName.toLowerCase().contains(_searchQuery) ||
-          session.deviceId.toLowerCase().contains(_searchQuery) ||
-          (session.lastMessage?.toLowerCase().contains(_searchQuery) ?? false);
-    }).toList();
-  }
 
   Future<void> _openChat(ChatSessionSummary session) async {
     if (widget.onChatSelected != null) {
@@ -286,26 +266,6 @@ class _ChatListPageState extends State<ChatListPage>
         elevation: 0,
         iconTheme: IconThemeData(color: Colors.white),
         actions: [
-          IconButton(
-            icon: Icon(Icons.search),
-            onPressed: () {
-              // Focus on the search bar
-              FocusScope.of(context).requestFocus(FocusNode());
-              // Scroll to search bar if needed
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (_searchController.text.isEmpty) {
-                  // Give a visual hint
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Use the search bar below to filter chats'),
-                      duration: Duration(seconds: 2),
-                      backgroundColor: ResQLinkTheme.cardDark,
-                    ),
-                  );
-                }
-              });
-            },
-          ),
           IconButton(icon: Icon(Icons.refresh), onPressed: _loadChatSessions),
         ],
       ),
@@ -317,7 +277,6 @@ class _ChatListPageState extends State<ChatListPage>
                 : BoxConstraints(),
             child: Column(
               children: [
-                _buildSearchBar(),
                 _buildConnectionStatus(),
                 Expanded(child: _buildChatList()),
               ],
@@ -326,32 +285,6 @@ class _ChatListPageState extends State<ChatListPage>
         },
       ),
       floatingActionButton: _buildFloatingActionButton(),
-    );
-  }
-
-  Widget _buildSearchBar() {
-    return Container(
-      padding: ResponsiveHelper.getCardPadding(context),
-      margin: ResponsiveHelper.getCardMargins(context),
-      child: TextField(
-        controller: _searchController,
-        style: TextStyle(color: Colors.white),
-        decoration: InputDecoration(
-          hintText: 'Search chats...',
-          hintStyle: TextStyle(color: Colors.white60),
-          prefixIcon: Icon(Icons.search, color: Colors.white60),
-          filled: true,
-          fillColor: ResQLinkTheme.cardDark,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding: EdgeInsets.symmetric(
-            horizontal: ResponsiveUtils.getResponsiveSpacing(context, 16),
-            vertical: ResponsiveUtils.getResponsiveSpacing(context, 12)
-          ),
-        ),
-      ),
     );
   }
 
@@ -398,24 +331,20 @@ class _ChatListPageState extends State<ChatListPage>
       return LoadingView();
     }
 
-    final filteredSessions = _filteredSessions;
-
-    if (filteredSessions.isEmpty) {
-      return _searchQuery.isNotEmpty
-          ? _buildNoSearchResults()
-          : EmptyChatView(p2pService: widget.p2pService);
+    if (_chatSessions.isEmpty) {
+      return EmptyChatView(p2pService: widget.p2pService);
     }
 
     return RefreshIndicator(
       onRefresh: _loadChatSessions,
       color: ResQLinkTheme.primaryRed,
       child: ResponsiveUtils.isDesktop(context)
-          ? _buildDesktopChatList(filteredSessions)
+          ? _buildDesktopChatList(_chatSessions)
           : ListView.builder(
               padding: ResponsiveHelper.getCardMargins(context),
-              itemCount: filteredSessions.length,
+              itemCount: _chatSessions.length,
               itemBuilder: (context, index) {
-                final session = filteredSessions[index];
+                final session = _chatSessions[index];
                 return _buildChatListItem(session);
               },
             ),
@@ -437,31 +366,6 @@ class _ChatListPageState extends State<ChatListPage>
           final session = sessions[index];
           return _buildChatListItem(session);
         },
-      ),
-    );
-  }
-
-  Widget _buildNoSearchResults() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.search_off, size: 64, color: Colors.white30),
-          SizedBox(height: 16),
-          Text(
-            'No chats found',
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'Try searching with different keywords',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-        ],
       ),
     );
   }

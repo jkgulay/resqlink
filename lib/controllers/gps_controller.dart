@@ -549,10 +549,13 @@ class GpsController extends ChangeNotifier {
 
     try {
       await getCurrentLocation();
-      final distanceFilter = _batteryLevel < 20 ? 20 : 10;
+      final distanceFilter = _batteryLevel < 20
+          ? 20
+          : 5; // Reduced from 10 to 5 for better accuracy
       final accuracy = _batteryLevel < 20
           ? LocationAccuracy.medium
-          : LocationAccuracy.high;
+          : LocationAccuracy
+                .bestForNavigation; // Changed from high to bestForNavigation
       final locationSettings = LocationSettings(
         accuracy: accuracy,
         distanceFilter: distanceFilter,
@@ -598,8 +601,11 @@ class GpsController extends ChangeNotifier {
     final settings = LocationSettings(
       accuracy: _batteryLevel < 20
           ? LocationAccuracy.medium
-          : LocationAccuracy.high,
-      distanceFilter: _isMoving ? 5 : 20,
+          : LocationAccuracy
+                .bestForNavigation, // Changed from high to bestForNavigation
+      distanceFilter: _isMoving
+          ? 3
+          : 10, // Reduced for better accuracy (was 5 : 20)
       timeLimit: Duration(seconds: 10),
     );
 
@@ -641,8 +647,11 @@ class GpsController extends ChangeNotifier {
       final locationSettings = LocationSettings(
         accuracy: _batteryLevel < 20
             ? LocationAccuracy.medium
-            : LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 5),
+            : LocationAccuracy
+                  .bestForNavigation, // Changed from high to bestForNavigation
+        timeLimit: const Duration(
+          seconds: 10,
+        ), // Increased from 5 to 10 seconds for better accuracy
       );
 
       Position position;

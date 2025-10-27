@@ -221,16 +221,36 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
   }
 
   Widget _buildStatsGrid(GpsController controller, bool isSmallScreen) {
+    // Determine accuracy quality and color
+    final accuracy = controller.lastKnownLocation?.accuracy;
+    Color accuracyColor;
+    String accuracyLabel;
+
+    if (accuracy == null) {
+      accuracyColor = Colors.grey;
+      accuracyLabel = 'Unknown';
+    } else if (accuracy < 5) {
+      accuracyColor = Colors.green; // Excellent
+      accuracyLabel = '±${accuracy.toStringAsFixed(1)}m';
+    } else if (accuracy < 15) {
+      accuracyColor = Colors.lightGreen; // Good
+      accuracyLabel = '±${accuracy.toStringAsFixed(1)}m';
+    } else if (accuracy < 30) {
+      accuracyColor = Colors.orange; // Fair
+      accuracyLabel = '±${accuracy.toStringAsFixed(1)}m';
+    } else {
+      accuracyColor = Colors.red; // Poor
+      accuracyLabel = '±${accuracy.toStringAsFixed(0)}m';
+    }
+
     return Row(
       children: [
         Expanded(
           child: _buildStatItem(
             'Accuracy',
-            controller.lastKnownLocation?.accuracy != null
-                ? '±${controller.lastKnownLocation!.accuracy!.toStringAsFixed(1)}m'
-                : 'Unknown',
+            accuracyLabel,
             Icons.gps_fixed,
-            controller.isLocationServiceEnabled ? Colors.green : Colors.red,
+            accuracyColor,
             isSmallScreen,
           ),
         ),

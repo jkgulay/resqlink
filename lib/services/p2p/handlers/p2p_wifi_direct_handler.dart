@@ -64,7 +64,8 @@ class P2PWiFiDirectHandler {
           _connectionManager.setConnectionMode(P2PConnectionMode.wifiDirect);
           _refreshConnectedPeers();
         } else if (connectionState == WiFiDirectConnectionState.disconnected) {
-          if (_connectionManager.currentConnectionMode == P2PConnectionMode.wifiDirect) {
+          if (_connectionManager.currentConnectionMode ==
+              P2PConnectionMode.wifiDirect) {
             _connectionManager.setConnectionMode(P2PConnectionMode.none);
             _clearWiFiDirectDevices();
           }
@@ -138,21 +139,23 @@ class P2PWiFiDirectHandler {
 
   /// Setup message stream (deduplication handled here)
   void _setupMessageStream() {
-    _wifiDirectService?.messageStream.listen((messageData) {
-      debugPrint('📨 WiFi Direct message stream received: $messageData');
+    _wifiDirectService?.messageStream
+        .listen((messageData) {
+          debugPrint('📨 WiFi Direct message stream received: $messageData');
 
-      final messageType = messageData['type'] as String?;
-      if (messageType == 'message_received') {
-        final message = messageData['message'] as String?;
-        final from = messageData['from'] as String?;
+          final messageType = messageData['type'] as String?;
+          if (messageType == 'message_received') {
+            final message = messageData['message'] as String?;
+            final from = messageData['from'] as String?;
 
-        if (message != null && from != null) {
-          onMessageReceived?.call(message, from);
-        }
-      }
-    }).onError((error) {
-      debugPrint('❌ WiFi Direct message stream error: $error');
-    });
+            if (message != null && from != null) {
+              onMessageReceived?.call(message, from);
+            }
+          }
+        })
+        .onError((error) {
+          debugPrint('❌ WiFi Direct message stream error: $error');
+        });
 
     debugPrint('✅ WiFi Direct message stream listener setup complete');
   }
@@ -167,7 +170,7 @@ class P2PWiFiDirectHandler {
       final deviceModel = DeviceModel(
         id: peer.deviceAddress,
         deviceId: peer.deviceAddress,
-        userName: displayName,  // Use custom name if available
+        userName: displayName, // Use custom name if available
         isHost: false,
         isOnline: true,
         createdAt: DateTime.now(),
@@ -193,7 +196,9 @@ class P2PWiFiDirectHandler {
       // Wait for socket handshake to exchange UUIDs first
       // The handshake handler will call addConnectedDevice() with the UUID
       if (peer.status == WiFiDirectPeerStatus.connected) {
-        debugPrint('🔌 WiFi Direct peer connected: $displayName (${peer.deviceAddress})');
+        debugPrint(
+          '🔌 WiFi Direct peer connected: $displayName (${peer.deviceAddress})',
+        );
         debugPrint('⏳ Waiting for socket handshake to exchange UUIDs...');
       }
     }
@@ -202,22 +207,34 @@ class P2PWiFiDirectHandler {
   /// Check for newly connected peers
   void _checkForNewConnectedPeers(List<WiFiDirectPeer> peers) {
     for (final peer in peers) {
+      // FIXED: Only WiFiDirectPeerStatus.connected (0) is truly connected
+      // WiFiDirectPeerStatus.invited (1) means pending, not connected
       if (peer.status == WiFiDirectPeerStatus.connected) {
         // UUID-based system: Don't register with MAC address
         // Let the socket handshake exchange UUIDs first
-        final customName = _wifiDirectService?.getCustomName(peer.deviceAddress);
+        final customName = _wifiDirectService?.getCustomName(
+          peer.deviceAddress,
+        );
         final displayName = customName ?? peer.deviceName;
 
         if (!_baseService.connectedDevices.containsKey(peer.deviceAddress)) {
-          debugPrint('🆕 New WiFi Direct connection: $displayName (${peer.deviceAddress})');
+          debugPrint(
+            '🆕 New WiFi Direct connection: $displayName (${peer.deviceAddress})',
+          );
 
           // Wait for socket/handshake completion
           debugPrint(
             '⏳ Waiting for socket connection establishment with ${peer.deviceName}',
           );
         } else {
-          debugPrint('ℹ️ WiFi Direct peer already connected, preserving existing name: ${_baseService.connectedDevices[peer.deviceAddress]?.userName}');
+          debugPrint(
+            'ℹ️ WiFi Direct peer already connected, preserving existing name: ${_baseService.connectedDevices[peer.deviceAddress]?.userName}',
+          );
         }
+      } else if (peer.status == WiFiDirectPeerStatus.invited) {
+        debugPrint(
+          'ℹ️ Peer ${peer.deviceName} is INVITED (pending connection) - not showing as connected yet',
+        );
       }
     }
   }
@@ -234,8 +251,13 @@ class P2PWiFiDirectHandler {
     if (isConnected && groupFormed) {
       _connectionManager.setConnectionMode(P2PConnectionMode.wifiDirect);
       _refreshConnectedPeers();
+
+      // Automatically establish socket connection when group forms
+      debugPrint('🔌 Group formed, establishing socket connection...');
+      _wifiDirectService?.establishSocketConnection();
     } else {
-      if (_connectionManager.currentConnectionMode == P2PConnectionMode.wifiDirect) {
+      if (_connectionManager.currentConnectionMode ==
+          P2PConnectionMode.wifiDirect) {
         _connectionManager.setConnectionMode(P2PConnectionMode.none);
         _clearWiFiDirectDevices();
       }
@@ -260,26 +282,30 @@ class P2PWiFiDirectHandler {
             ? statusValue
             : int.tryParse(statusValue.toString()) ?? -1;
 
-        // WiFi Direct status: 0 = connected
-        if (statusInt == 0 && deviceAddress.isNotEmpty) {
+        // FIXED: Only treat status 0 (CONNECTED) as truly connected
+        // Status 1 (INVITED) means connection is pending but not established
+        final isActuallyConnected = (statusInt == 0);
+
+        if (isActuallyConnected && deviceAddress.isNotEmpty) {
           // Use custom display name if available
           final customName = _wifiDirectService?.getCustomName(deviceAddress);
           final displayName = customName ?? deviceName;
 
-          debugPrint('✅ Found connected peer: $displayName ($deviceAddress)');
-          debugPrint('⏳ UUID-based system: Waiting for handshake to register device...');
-
-          // Update discovered devices with connected status
-          final existingIndex = _baseService.discoveredResQLinkDevices.indexWhere(
-            (d) => d.deviceId == deviceAddress,
+          debugPrint(
+            '✅ Found ACTUALLY connected peer: $displayName ($deviceAddress) - status: connected',
+          );
+          debugPrint(
+            '⏳ UUID-based system: Waiting for handshake to register device...',
           );
 
+          // Update discovered devices with connected status
+          final existingIndex = _baseService.discoveredResQLinkDevices
+              .indexWhere((d) => d.deviceId == deviceAddress);
+
           if (existingIndex >= 0) {
-            _baseService.discoveredResQLinkDevices[existingIndex] =
-                _baseService.discoveredResQLinkDevices[existingIndex].copyWith(
-                  isConnected: true,
-                  lastSeen: DateTime.now(),
-                );
+            _baseService.discoveredResQLinkDevices[existingIndex] = _baseService
+                .discoveredResQLinkDevices[existingIndex]
+                .copyWith(isConnected: true, lastSeen: DateTime.now());
           } else {
             final deviceModel = DeviceModel(
               id: deviceAddress,
@@ -295,6 +321,10 @@ class P2PWiFiDirectHandler {
             );
             _baseService.discoveredResQLinkDevices.add(deviceModel);
           }
+        } else if (statusInt == 1) {
+          debugPrint(
+            'ℹ️ Peer is INVITED but not yet connected: $deviceName ($deviceAddress)',
+          );
         }
       }
 
@@ -318,7 +348,9 @@ class P2PWiFiDirectHandler {
     for (int i = 0; i < _baseService.discoveredResQLinkDevices.length; i++) {
       final device = _baseService.discoveredResQLinkDevices[i];
       if (device.discoveryMethod == 'wifi_direct') {
-        _baseService.discoveredResQLinkDevices[i] = device.copyWith(isConnected: false);
+        _baseService.discoveredResQLinkDevices[i] = device.copyWith(
+          isConnected: false,
+        );
       }
     }
 
@@ -386,7 +418,8 @@ class P2PWiFiDirectHandler {
   void _handleConnectionError(String? error, String? details) {
     debugPrint('🔧 Handling connection error: $error - $details');
 
-    if (_connectionManager.currentConnectionMode == P2PConnectionMode.wifiDirect) {
+    if (_connectionManager.currentConnectionMode ==
+        P2PConnectionMode.wifiDirect) {
       _connectionManager.setConnectionMode(P2PConnectionMode.none);
     }
   }
@@ -475,7 +508,9 @@ class P2PWiFiDirectHandler {
       debugPrint('📋 Connection Info Received:');
       debugPrint('  - Full Info: $connectionInfo');
       debugPrint('  - Is Group Owner: ${connectionInfo?['isGroupOwner']}');
-      debugPrint('  - Group Owner Address: ${connectionInfo?['groupOwnerAddress']}');
+      debugPrint(
+        '  - Group Owner Address: ${connectionInfo?['groupOwnerAddress']}',
+      );
 
       final isGroupOwner = connectionInfo?['isGroupOwner'] ?? false;
       final groupOwnerAddress = connectionInfo?['groupOwnerAddress'] ?? '';
@@ -484,12 +519,12 @@ class P2PWiFiDirectHandler {
         debugPrint('👑 I am the GROUP OWNER - Starting socket SERVER');
         await _socketProtocol.startServer();
       } else if (groupOwnerAddress.isNotEmpty) {
-        debugPrint('📱 I am the CLIENT - Connecting to server at: $groupOwnerAddress');
+        debugPrint(
+          '📱 I am the CLIENT - Connecting to server at: $groupOwnerAddress',
+        );
         await _socketProtocol.connectToServer(groupOwnerAddress);
       } else {
-        debugPrint(
-          '⚠️ WARNING: Cannot determine group owner info!',
-        );
+        debugPrint('⚠️ WARNING: Cannot determine group owner info!');
         debugPrint('  - isGroupOwner: $isGroupOwner');
         debugPrint('  - groupOwnerAddress: "$groupOwnerAddress"');
         debugPrint('  - Defaulting to SERVER mode (may cause conflicts)');
@@ -501,7 +536,9 @@ class P2PWiFiDirectHandler {
       debugPrint('✅ Socket protocol initialized successfully');
     } catch (e) {
       debugPrint('❌ Socket protocol initialization failed: $e');
-      debugPrint('🔄 Reverting connection mode due to socket initialization failure');
+      debugPrint(
+        '🔄 Reverting connection mode due to socket initialization failure',
+      );
 
       // Revert connection state on socket protocol failure
       _connectionManager.setConnectionMode(P2PConnectionMode.none);
@@ -555,8 +592,7 @@ class P2PWiFiDirectHandler {
         'displayName': ourUserName,
         'peerDeviceId': targetDeviceId,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'protocol_version': '3.0',  // v3.0 = UUID-based
-
+        'protocol_version': '3.0', // v3.0 = UUID-based
         // Legacy fields for backward compatibility
         'macAddress': ourDeviceId,
         'peerMacAddress': targetDeviceId,
@@ -586,7 +622,38 @@ class P2PWiFiDirectHandler {
         '📱 Registering WiFi Direct device: $deviceId ($userName) from $from',
       );
 
-      _baseService.addConnectedDevice(deviceId, userName);
+      // Try to resolve IP to MAC address from WiFi Direct peers
+      String? macAddress;
+      if (from != null && _wifiDirectService != null) {
+        final ipMatch = RegExp(r'(\d+\.\d+\.\d+\.\d+)').firstMatch(from);
+        if (ipMatch != null) {
+          final ipAddress = ipMatch.group(1)!;
+
+          // Look through WiFi Direct peers to find the one with this IP
+          final peers = _wifiDirectService!.discoveredPeers;
+          if (peers.isNotEmpty) {
+            // For simplicity, if there's only one connected peer, use that MAC
+            final connectedPeers = peers
+                .where(
+                  (p) =>
+                      p.status == WiFiDirectPeerStatus.connected ||
+                      p.status == WiFiDirectPeerStatus.invited,
+                )
+                .toList();
+
+            if (connectedPeers.length == 1) {
+              macAddress = connectedPeers.first.deviceAddress;
+              debugPrint('🔍 Resolved IP $ipAddress to MAC: $macAddress');
+            }
+          }
+        }
+      }
+
+      _baseService.addConnectedDevice(
+        deviceId,
+        userName,
+        macAddress: macAddress,
+      );
 
       if (from != null) {
         _socketProtocol.registerWiFiDirectDevice(deviceId, from);

@@ -8,6 +8,7 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.net.wifi.p2p.WifiP2pDeviceList
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pDevice
+import android.net.wifi.p2p.WifiP2pConfig
 import android.util.Log
 
 class WifiDirectBroadcastReceiver(
@@ -76,6 +77,45 @@ class WifiDirectBroadcastReceiver(
                         Log.d("WifiDirectReceiver", "✅ Found ${peersList.size} peers:")
                         peersList.forEach { peer ->
                             Log.d("WifiDirectReceiver", "  📱 ${peer["deviceName"]} (${peer["deviceAddress"]}) - ${peer["status"]}")
+                        }
+
+                        // CRITICAL: Auto-accept invitation if we're the client (lower intent device)
+                        // This fixes the "stuck at invited" issue when both devices connect simultaneously
+                        peers.deviceList.forEach { device ->
+                            if (device.status == WifiP2pDevice.INVITED) {
+                                Log.d("WifiDirectReceiver", "📨 Received invitation from ${device.deviceName}")
+                                
+                                // Check if we should accept (we're the client, not the owner)
+                                val myDeviceAddress = activity.getSharedPreferences("resqlink_prefs", android.content.Context.MODE_PRIVATE)
+                                    .getString("wifi_direct_mac_address", "") ?: ""
+                                val peerAddress = device.deviceAddress ?: ""
+                                
+                                if (myDeviceAddress.isNotEmpty() && peerAddress.isNotEmpty()) {
+                                    val shouldBeClient = myDeviceAddress.hashCode() < peerAddress.hashCode()
+                                    
+                                    if (shouldBeClient) {
+                                        Log.d("WifiDirectReceiver", "🤝 Auto-accepting invitation from ${device.deviceName} (we are client)")
+                                        
+                                        // Create connection config with low group owner intent (we want to be client)
+                                        val config = WifiP2pConfig().apply {
+                                            deviceAddress = device.deviceAddress
+                                            groupOwnerIntent = 0 // We want to be client
+                                        }
+                                        
+                                        // Connect to accept the invitation
+                                        manager.connect(ch, config, object : WifiP2pManager.ActionListener {
+                                            override fun onSuccess() {
+                                                Log.d("WifiDirectReceiver", "✅ Successfully accepted invitation from ${device.deviceName}")
+                                            }
+                                            override fun onFailure(reason: Int) {
+                                                Log.e("WifiDirectReceiver", "❌ Failed to accept invitation: $reason")
+                                            }
+                                        })
+                                    } else {
+                                        Log.d("WifiDirectReceiver", "👑 We are group owner, waiting for ${device.deviceName} to join")
+                                    }
+                                }
+                            }
                         }
 
                         // Send peer list to Flutter
@@ -209,6 +249,15 @@ class WifiDirectBroadcastReceiver(
         // Always request peer list when connection changes
         channel?.let { ch ->
             manager.requestPeers(ch) { peers ->
+                // CRITICAL: Check if there's actually a connected peer (status: CONNECTED = 0)
+                val hasConnectedPeer = peers.deviceList.any { it.status == WifiP2pDevice.CONNECTED }
+                
+                android.util.Log.d("WifiDirectReceiver", "Group formed: ${wifiP2pInfo.groupFormed}, Has connected peer: $hasConnectedPeer")
+                
+                // Update connection info with actual peer connection status
+                connectionInfo["isConnected"] = wifiP2pInfo.groupFormed && hasConnectedPeer
+                connectionInfo["hasConnectedPeer"] = hasConnectedPeer
+                
                 val peersList = peers.deviceList.map { device ->
                     mapOf(
                         "deviceName" to (device.deviceName ?: "Unknown Device"),
@@ -232,9 +281,9 @@ class WifiDirectBroadcastReceiver(
                 // Send peer list update
                 activity.sendToFlutter("wifi_direct", "onPeersUpdated", mapOf("peers" to peersList))
 
-                // If this is a system-level connection, send special notification
-                if (wifiP2pInfo.groupFormed) {
-                    android.util.Log.d("WifiDirectReceiver", "System-level WiFi Direct connection detected!")
+                // If this is a system-level connection WITH an actual connected peer, send special notification
+                if (wifiP2pInfo.groupFormed && hasConnectedPeer) {
+                    android.util.Log.d("WifiDirectReceiver", "✅ System-level WiFi Direct connection with connected peer!")
 
                     val systemConnectionData = mapOf(
                         "systemConnection" to true,
@@ -243,12 +292,14 @@ class WifiDirectBroadcastReceiver(
                     )
 
                     activity.sendToFlutter("wifi_direct", "onSystemConnectionDetected", systemConnectionData)
+                } else if (wifiP2pInfo.groupFormed && !hasConnectedPeer) {
+                    android.util.Log.d("WifiDirectReceiver", "⏳ Group formed but no peer connected yet (all peers are invited/available)")
                 }
+                
+                // Send standard connection changed event with updated status
+                activity.sendToFlutter("wifi_direct", "onConnectionChanged", connectionInfo)
             }
         }
-
-        // Send standard connection changed event
-        activity.sendToFlutter("wifi_direct", "onConnectionChanged", connectionInfo)
     } else {
         // Handle disconnection
         val disconnectionInfo = mapOf<String, Any>(

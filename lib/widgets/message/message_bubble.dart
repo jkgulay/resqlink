@@ -2,14 +2,12 @@ import 'package:flutter/material.dart';
 import '../../models/message_model.dart';
 import '../../utils/resqlink_theme.dart';
 import 'location_map_widget.dart';
+import 'location_preview_modal.dart';
 
 class MessageBubble extends StatelessWidget {
   final MessageModel message;
 
-  const MessageBubble({
-    super.key,
-    required this.message,
-  });
+  const MessageBubble({super.key, required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -184,30 +182,16 @@ class MessageBubble extends StatelessWidget {
   void _showLocationDetails(BuildContext context, MessageModel message) {
     if (message.latitude == null || message.longitude == null) return;
 
-    showDialog(
+    // Open modal with full map preview instead of navigating to GPS page
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: ResQLinkTheme.cardDark,
-        title: Text('Location Details', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Latitude: ${message.latitude!.toStringAsFixed(6)}',
-              style: TextStyle(color: Colors.white70),
-            ),
-            Text(
-              'Longitude: ${message.longitude!.toStringAsFixed(6)}',
-              style: TextStyle(color: Colors.white70),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Close', style: TextStyle(color: Colors.white70)),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => LocationPreviewModal(
+        latitude: message.latitude!,
+        longitude: message.longitude!,
+        senderName: message.fromUser,
+        isEmergency: message.isEmergency,
       ),
     );
   }

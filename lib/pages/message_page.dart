@@ -14,8 +14,8 @@ import '../widgets/message/chat_view.dart';
 import '../widgets/message/message_input.dart';
 import '../widgets/message/loading_view.dart';
 import '../widgets/message/empty_chat_view.dart';
-import '../widgets/message/emergency_dialog.dart';
 import '../widgets/message/connection_banner.dart';
+import '../widgets/message/emergency_dialog.dart';
 import 'dart:async';
 
 class MessagePage extends StatefulWidget {
@@ -31,7 +31,11 @@ class MessagePage extends StatefulWidget {
   @override
   State<MessagePage> createState() => _MessagePageState();
 
-  static void selectDeviceFor(GlobalKey key, String deviceId, String deviceName) {
+  static void selectDeviceFor(
+    GlobalKey key,
+    String deviceId,
+    String deviceName,
+  ) {
     final state = key.currentState;
     if (state != null && state is _MessagePageState) {
       state.selectDevice(deviceId, deviceName);
@@ -105,7 +109,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     // Unregister MessageRouter listener
     if (_selectedEndpointId != null) {
-      widget.p2pService.messageRouter.unregisterDeviceListener(_selectedEndpointId!);
+      widget.p2pService.messageRouter.unregisterDeviceListener(
+        _selectedEndpointId!,
+      );
     }
 
     try {
@@ -171,24 +177,33 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         // Check if this message is for the currently selected conversation
         if (message.endpointId == _selectedEndpointId) {
           // Enhanced duplicate check with multiple criteria
-          final alreadyExists = _selectedConversationMessages.any((m) =>
-            m.messageId == message.messageId ||
-            (m.timestamp == message.timestamp &&
-             m.fromUser == message.fromUser &&
-             m.message == message.message &&
-             m.endpointId == message.endpointId)
+          final alreadyExists = _selectedConversationMessages.any(
+            (m) =>
+                m.messageId == message.messageId ||
+                (m.timestamp == message.timestamp &&
+                    m.fromUser == message.fromUser &&
+                    m.message == message.message &&
+                    m.endpointId == message.endpointId),
           );
 
           if (!alreadyExists) {
             setState(() {
               _selectedConversationMessages.add(message);
               // Sort by timestamp to maintain chronological order (oldest first, newest at bottom)
-              _selectedConversationMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-              debugPrint('📨 Added incoming message to conversation. Total messages: ${_selectedConversationMessages.length}');
-              debugPrint('🕙 Last message timestamp: ${_selectedConversationMessages.last.timestamp}');
+              _selectedConversationMessages.sort(
+                (a, b) => a.timestamp.compareTo(b.timestamp),
+              );
+              debugPrint(
+                '📨 Added incoming message to conversation. Total messages: ${_selectedConversationMessages.length}',
+              );
+              debugPrint(
+                '🕙 Last message timestamp: ${_selectedConversationMessages.last.timestamp}',
+              );
             });
             _scrollToBottom();
-            debugPrint('✅ Added message to conversation without database reload');
+            debugPrint(
+              '✅ Added message to conversation without database reload',
+            );
           } else {
             debugPrint('⚠️ Duplicate message blocked in conversation view');
           }
@@ -244,13 +259,17 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     for (var device in devices) {
       final deviceId = device['deviceAddress'];
       final deviceName = device['deviceName'] ?? 'Unknown Device';
-      final isConnected = widget.p2pService.connectedDevices.containsKey(deviceId);
+      final isConnected = widget.p2pService.connectedDevices.containsKey(
+        deviceId,
+      );
 
       // Only create UI conversation placeholder if connected
       if (isConnected && !_processedDeviceIds.contains(deviceId)) {
         _processedDeviceIds.add(deviceId);
         _createConversationForDevice(deviceId, deviceName);
-        debugPrint('✅ Created UI conversation placeholder for $deviceName ($deviceId)');
+        debugPrint(
+          '✅ Created UI conversation placeholder for $deviceName ($deviceId)',
+        );
       }
     }
   }
@@ -258,7 +277,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void _createConversationForDevice(String deviceId, String deviceName) {
     if (!mounted) return;
 
-    final existingConversation = _conversations.any((conv) => conv.endpointId == deviceId);
+    final existingConversation = _conversations.any(
+      (conv) => conv.endpointId == deviceId,
+    );
 
     if (!existingConversation) {
       final newConversation = MessageSummary(
@@ -285,9 +306,12 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     // Increased debounce to reduce database calls
     _loadConversationsDebounce?.cancel();
-    _loadConversationsDebounce = Timer(const Duration(milliseconds: 1000), () async {
-      await _loadConversationsInternal();
-    });
+    _loadConversationsDebounce = Timer(
+      const Duration(milliseconds: 1000),
+      () async {
+        await _loadConversationsInternal();
+      },
+    );
   }
 
   Future<void> _loadConversationsInternal() async {
@@ -297,8 +321,12 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     try {
       // Use smaller limits and shorter timeouts to prevent database locks
-      final messages = await MessageRepository.getAllMessages(limit: 500).timeout(Duration(seconds: 2));
-      final chatSessions = await ChatRepository.getAllSessions().timeout(Duration(seconds: 2));
+      final messages = await MessageRepository.getAllMessages(
+        limit: 500,
+      ).timeout(Duration(seconds: 2));
+      final chatSessions = await ChatRepository.getAllSessions().timeout(
+        Duration(seconds: 2),
+      );
       if (!mounted) return;
 
       final connectedDevices = widget.p2pService.connectedDevices;
@@ -326,7 +354,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               unreadCount: 0,
               isConnected: connectedDevices.containsKey(endpointId),
             );
-            debugPrint('🔄 Updated session name: $deviceName (was: ${existing.deviceName})');
+            debugPrint(
+              '🔄 Updated session name: $deviceName (was: ${existing.deviceName})',
+            );
           }
         } else {
           conversationMap[endpointId] = MessageSummary(
@@ -337,7 +367,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             unreadCount: 0,
             isConnected: connectedDevices.containsKey(endpointId),
           );
-          debugPrint('🗄️ Loaded persistent session: $deviceName ($endpointId)');
+          debugPrint(
+            '🗄️ Loaded persistent session: $deviceName ($endpointId)',
+          );
         }
       }
 
@@ -363,8 +395,12 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         }
 
         if (!conversationMap.containsKey(endpointId)) {
-          final endpointMessages = messages.where((m) => m.endpointId == endpointId).toList();
-          final unreadCount = endpointMessages.where((m) => !m.synced && !m.isMe).length;
+          final endpointMessages = messages
+              .where((m) => m.endpointId == endpointId)
+              .toList();
+          final unreadCount = endpointMessages
+              .where((m) => !m.synced && !m.isMe)
+              .length;
 
           conversationMap[endpointId] = MessageSummary(
             endpointId: endpointId,
@@ -376,28 +412,43 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           );
         } else {
           final currentSummary = conversationMap[endpointId]!;
-          final endpointMessages = messages.where((m) => m.endpointId == endpointId).toList();
-          final unreadCount = endpointMessages.where((m) => !m.synced && !m.isMe).length;
+          final endpointMessages = messages
+              .where((m) => m.endpointId == endpointId)
+              .toList();
+          final unreadCount = endpointMessages
+              .where((m) => !m.synced && !m.isMe)
+              .length;
 
           // Check if we should update the conversation based on message time or better device name
-          final shouldUpdateTime = message.dateTime.isAfter(currentSummary.lastMessage?.dateTime ?? DateTime(0));
-          final shouldUpdateName = _isDisplayNameBetter(deviceName, currentSummary.deviceName);
+          final shouldUpdateTime = message.dateTime.isAfter(
+            currentSummary.lastMessage?.dateTime ?? DateTime(0),
+          );
+          final shouldUpdateName = _isDisplayNameBetter(
+            deviceName,
+            currentSummary.deviceName,
+          );
 
           if (shouldUpdateTime || shouldUpdateName) {
             // Use the better device name if updating due to name priority
-            final bestDeviceName = shouldUpdateName ? deviceName : currentSummary.deviceName;
+            final bestDeviceName = shouldUpdateName
+                ? deviceName
+                : currentSummary.deviceName;
 
             conversationMap[endpointId] = MessageSummary(
               endpointId: endpointId,
               deviceName: bestDeviceName,
-              lastMessage: shouldUpdateTime ? message : currentSummary.lastMessage,
+              lastMessage: shouldUpdateTime
+                  ? message
+                  : currentSummary.lastMessage,
               messageCount: endpointMessages.length,
               unreadCount: unreadCount,
               isConnected: connectedDevices.containsKey(endpointId),
             );
 
             if (shouldUpdateName) {
-              debugPrint('🔄 Updated conversation name: $bestDeviceName (was: ${currentSummary.deviceName})');
+              debugPrint(
+                '🔄 Updated conversation name: $bestDeviceName (was: ${currentSummary.deviceName})',
+              );
             }
           }
         }
@@ -405,8 +456,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
       if (mounted) {
         final newConversations = conversationMap.values.toList()
-          ..sort((a, b) => (b.lastMessage?.dateTime ?? DateTime(0))
-              .compareTo(a.lastMessage?.dateTime ?? DateTime(0)));
+          ..sort(
+            (a, b) => (b.lastMessage?.dateTime ?? DateTime(0)).compareTo(
+              a.lastMessage?.dateTime ?? DateTime(0),
+            ),
+          );
 
         // Only update state if data actually changed to prevent unnecessary rebuilds
         if (_conversations.length != newConversations.length ||
@@ -415,7 +469,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             _conversations = newConversations;
             _isLoading = false;
           });
-          debugPrint('✅ Updated ${_conversations.length} conversations (${connectedDevices.length} connected)');
+          debugPrint(
+            '✅ Updated ${_conversations.length} conversations (${connectedDevices.length} connected)',
+          );
         } else {
           setState(() => _isLoading = false);
         }
@@ -443,7 +499,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       setState(() {
         // Ensure messages are sorted chronologically (oldest first, newest at bottom)
         _selectedConversationMessages = messages;
-        _selectedConversationMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        _selectedConversationMessages.sort(
+          (a, b) => a.timestamp.compareTo(b.timestamp),
+        );
       });
 
       // Scroll to bottom to show latest messages
@@ -483,8 +541,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
   }
 
-
-
   /// Get the quality score of a display name (higher is better)
   /// Priority: Real names > Device names > Generic device IDs > Empty
   int _getNameScore(String name) {
@@ -496,8 +552,10 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     }
 
     // Device model names (often contain brand/model info)
-    if (name.contains('HONOR') || name.contains('Samsung') ||
-        name.toLowerCase().contains('phone') || name.toLowerCase().contains('tablet')) {
+    if (name.contains('HONOR') ||
+        name.contains('Samsung') ||
+        name.toLowerCase().contains('phone') ||
+        name.toLowerCase().contains('tablet')) {
       return 2;
     }
 
@@ -547,10 +605,16 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       final senderName = widget.p2pService.userName ?? 'Unknown User';
 
       // Check connection status
-      final isConnected = widget.p2pService.connectedDevices.containsKey(_selectedEndpointId);
-      final connectionInfo = isConnected ? 'connected' : 'disconnected (will queue)';
+      final isConnected = widget.p2pService.connectedDevices.containsKey(
+        _selectedEndpointId,
+      );
+      final connectionInfo = isConnected
+          ? 'connected'
+          : 'disconnected (will queue)';
 
-      debugPrint('📤 Sending message to $_selectedEndpointId ($connectionInfo): "$messageText"');
+      debugPrint(
+        '📤 Sending message to $_selectedEndpointId ($connectionInfo): "$messageText"',
+      );
 
       // Create local database entry for sent message FIRST (for immediate UI update)
       final dbMessage = MessageModel(
@@ -576,9 +640,15 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       setState(() {
         _selectedConversationMessages.add(dbMessage);
         // Sort by timestamp to maintain chronological order
-        _selectedConversationMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-        debugPrint('💬 Added sent message to conversation. Total messages: ${_selectedConversationMessages.length}');
-        debugPrint('🕙 Last message timestamp: ${_selectedConversationMessages.last.timestamp}');
+        _selectedConversationMessages.sort(
+          (a, b) => a.timestamp.compareTo(b.timestamp),
+        );
+        debugPrint(
+          '💬 Added sent message to conversation. Total messages: ${_selectedConversationMessages.length}',
+        );
+        debugPrint(
+          '🕙 Last message timestamp: ${_selectedConversationMessages.last.timestamp}',
+        );
       });
       // Immediate scroll for sent messages
       _scrollToBottomImmediate();
@@ -588,7 +658,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         id: messageId,
         message: messageText,
         type: type,
-        targetDeviceId: _selectedEndpointId, // CRITICAL: Include target device ID
+        targetDeviceId:
+            _selectedEndpointId, // CRITICAL: Include target device ID
         latitude: _currentLocation?.latitude,
         longitude: _currentLocation?.longitude,
         senderName: senderName, // CRITICAL: Include actual sender name
@@ -601,7 +672,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         debugPrint('📥 Message queued for later delivery');
         _showSuccessMessage('Message queued (device offline)');
       }
-
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
       _showErrorMessage('Failed to send message: ${e.toString()}');
@@ -677,61 +747,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       debugPrint('❌ Error sending location: $e');
       if (mounted) {
         _showErrorMessage('Failed to share location');
-      }
-    }
-  }
-
-  Future<void> _sendEmergencyMessage() async {
-    if (_selectedEndpointId == null || !mounted) return;
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => EmergencyDialog(),
-    );
-
-    if (confirm == true && mounted && _selectedEndpointId != null) {
-      if (widget.currentLocation?.latitude == null || widget.currentLocation?.longitude == null) {
-        if (mounted) {
-          _showErrorMessage('Location not available. Please enable GPS.');
-        }
-        return;
-      }
-
-      try {
-        final sosText =
-            '🚨 EMERGENCY SOS\nLat: ${widget.currentLocation!.latitude.toStringAsFixed(6)}\nLng: ${widget.currentLocation!.longitude.toStringAsFixed(6)}';
-
-        final locationModel = LocationModel(
-          latitude: widget.currentLocation!.latitude,
-          longitude: widget.currentLocation!.longitude,
-          timestamp: DateTime.now(),
-          userId: widget.p2pService.deviceId,
-          type: LocationType.sos,
-          message: 'Emergency SOS',
-        );
-
-        await LocationService.insertLocation(locationModel);
-
-        // Send emergency SOS with location via P2P
-        await widget.p2pService.sendMessage(
-          message: sosText,
-          type: MessageType.sos,
-          targetDeviceId: _selectedEndpointId!,
-          latitude: widget.currentLocation!.latitude,
-          longitude: widget.currentLocation!.longitude,
-          senderName: widget.p2pService.userName ?? 'Unknown',
-        );
-
-        if (mounted) {
-          await _loadMessagesForDevice(_selectedEndpointId!);
-          _showSuccessMessage('Emergency SOS sent to ${_selectedDeviceName ?? 'device'}');
-        }
-      } catch (e) {
-        debugPrint('❌ Error sending emergency message: $e');
-        if (mounted) {
-          _showErrorMessage('Failed to send emergency SOS');
-        }
       }
     }
   }
@@ -864,18 +879,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     if (!mounted) return;
 
     switch (action) {
-      case 'scan':
-        try {
-          await widget.p2pService.discoverDevices(force: true);
-          if (mounted) {
-            _showSuccessMessage('Scanning for nearby devices...');
-          }
-        } catch (e) {
-          if (mounted) {
-            _showErrorMessage('Failed to start scan');
-          }
-        }
-
       case 'clear_chat':
         if (_selectedEndpointId != null && mounted) {
           final confirm = await showDialog<bool>(
@@ -884,8 +887,20 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           );
 
           if (confirm == true && _selectedEndpointId != null) {
-            await _loadMessagesForDevice(_selectedEndpointId!);
-            _showSuccessMessage('Chat history cleared');
+            try {
+              await MessageRepository.deleteMessagesForEndpoint(_selectedEndpointId!);
+
+              if (mounted) {
+                setState(() {
+                  _selectedConversationMessages.clear();
+                });
+                _showSuccessMessage('Chat history cleared');
+              }
+            } catch (e) {
+              if (mounted) {
+                _showErrorMessage('Failed to clear chat history: $e');
+              }
+            }
           }
         }
     }
@@ -905,7 +920,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         targetDevice = devices[deviceId];
       } else {
         for (final deviceData in devices.values) {
-          if (deviceData['deviceId'] == deviceId || deviceData['endpointId'] == deviceId) {
+          if (deviceData['deviceId'] == deviceId ||
+              deviceData['endpointId'] == deviceId) {
             targetDevice = deviceData;
             break;
           }
@@ -917,10 +933,14 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         if (success) {
           _showSuccessMessage('Reconnected successfully!');
         } else {
-          _showErrorMessage('Failed to reconnect. Try creating a new connection.');
+          _showErrorMessage(
+            'Failed to reconnect. Try creating a new connection.',
+          );
         }
       } else {
-        _showErrorMessage('Device not found. Try scanning again or create a new connection.');
+        _showErrorMessage(
+          'Device not found. Try scanning again or create a new connection.',
+        );
       }
     } catch (e) {
       debugPrint('❌ Reconnection failed: $e');
@@ -946,8 +966,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             _selectedConversationMessages.clear();
           }),
           onMenuAction: _handleMenuAction,
-          onReconnect: () => _selectedEndpointId != null 
-              ? _reconnectToDevice(_selectedEndpointId!) 
+          onReconnect: () => _selectedEndpointId != null
+              ? _reconnectToDevice(_selectedEndpointId!)
               : null,
         ),
         body: LayoutBuilder(
@@ -972,31 +992,30 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     return Column(
       children: [
-        if (!widget.p2pService.isConnected) 
+        if (!widget.p2pService.isConnected)
           ConnectionBanner(
             onScanPressed: () => widget.p2pService.discoverDevices(force: true),
           ),
         Expanded(
-          child: _isChatView 
+          child: _isChatView
               ? ChatView(
                   messages: _selectedConversationMessages,
                   scrollController: _scrollController,
                 )
               : _conversations.isEmpty
-                  ? EmptyChatView(p2pService: widget.p2pService)
-                  : ConversationList(
-                      conversations: _conversations,
-                      p2pService: widget.p2pService,
-                      onConversationTap: _openConversation,
-                      onRefresh: _loadConversations,
-                    ),
+              ? EmptyChatView(p2pService: widget.p2pService)
+              : ConversationList(
+                  conversations: _conversations,
+                  p2pService: widget.p2pService,
+                  onConversationTap: _openConversation,
+                  onRefresh: _loadConversations,
+                ),
         ),
-        if (_isChatView) 
+        if (_isChatView)
           MessageInput(
             controller: _messageController,
             onSendMessage: _sendMessage,
             onSendLocation: _sendLocationMessage,
-            onSendEmergency: _sendEmergencyMessage,
             onTyping: _handleTyping,
             enabled: true,
           ),
@@ -1018,7 +1037,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               }
             },
       child: Icon(
-        widget.p2pService.isDiscovering ? Icons.hourglass_empty : Icons.wifi_tethering,
+        widget.p2pService.isDiscovering
+            ? Icons.hourglass_empty
+            : Icons.wifi_tethering,
         color: Colors.white,
       ),
     );

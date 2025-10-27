@@ -18,7 +18,8 @@ class ChatService extends ChangeNotifier {
   // State
   final Map<String, ChatSession> _sessions = {};
   final Map<String, List<MessageModel>> _sessionMessages = {};
-  final Map<String, StreamController<MessageModel>> _messageStreamControllers = {};
+  final Map<String, StreamController<MessageModel>> _messageStreamControllers =
+      {};
 
   ChatSession? _currentSession;
   bool _isLoading = false;
@@ -153,7 +154,8 @@ class ChatService extends ChangeNotifier {
   // Set current active session
   Future<void> setCurrentSession(String sessionId) async {
     try {
-      final session = _sessions[sessionId] ?? await ChatRepository.getSession(sessionId);
+      final session =
+          _sessions[sessionId] ?? await ChatRepository.getSession(sessionId);
 
       if (session != null) {
         _currentSession = session;
@@ -233,6 +235,13 @@ class ChatService extends ChangeNotifier {
         // Update session summary
         await loadSessions();
 
+        // 🚀 Emit send status event so local UI updates to 'sent' immediately
+        final eventBus = P2PEventBus();
+        eventBus.emitMessageSendStatus(
+          messageId: messageId,
+          status: MessageStatus.sent,
+        );
+
         notifyListeners();
         return true;
       }
@@ -244,27 +253,6 @@ class ChatService extends ChangeNotifier {
     }
   }
 
-  // Search messages
-  Future<List<MessageModel>> searchMessages(
-    String query, {
-    String? sessionId,
-    List<MessageType>? messageTypes,
-    int? limit,
-  }) async {
-    try {
-      return await MessageRepository.search(
-        query,
-        sessionId: sessionId,
-        messageTypes: messageTypes,
-        limit: limit,
-      );
-    } catch (e) {
-      debugPrint('❌ Error searching messages: $e');
-      return [];
-    }
-  }
-
-  // Delete a chat session
   Future<bool> deleteSession(String sessionId) async {
     try {
       final success = await ChatRepository.delete(sessionId);
@@ -350,7 +338,8 @@ class ChatService extends ChangeNotifier {
       deviceName: event.deviceName, // Display name for UI
       deviceAddress: event.deviceId, // Use deviceId as the stable MAC address
       currentUserId: 'local', // This should come from user service
-      currentUserName: event.currentUserName, // From landing page (display name)
+      currentUserName:
+          event.currentUserName, // From landing page (display name)
       peerUserName: event.deviceName, // Peer's display name (for UI)
     );
 
@@ -394,15 +383,21 @@ class ChatService extends ChangeNotifier {
       sessionId = message.chatSessionId!;
     } else {
       // Find existing session for this device OR create new session ID
-      final existingSession = await ChatRepository.getSessionByDeviceId(event.fromDeviceId);
+      final existingSession = await ChatRepository.getSessionByDeviceId(
+        event.fromDeviceId,
+      );
 
       if (existingSession != null) {
         sessionId = existingSession.id;
-        debugPrint('📍 Found existing session: $sessionId for device (MAC): ${event.fromDeviceId}');
+        debugPrint(
+          '📍 Found existing session: $sessionId for device (MAC): ${event.fromDeviceId}',
+        );
       } else {
         // Create MAC-based session ID for new conversation
         sessionId = 'chat_${event.fromDeviceId.replaceAll(':', '_')}';
-        debugPrint('📍 Creating new session: $sessionId for device (MAC): ${event.fromDeviceId}');
+        debugPrint(
+          '📍 Creating new session: $sessionId for device (MAC): ${event.fromDeviceId}',
+        );
 
         // Create the session
         await createOrGetSession(
@@ -432,16 +427,22 @@ class ChatService extends ChangeNotifier {
 
   // Handle message send status events
   void _handleMessageSendStatus(MessageSendStatusEvent event) async {
-    debugPrint('📤 Message status update: ${event.messageId} -> ${event.status}');
+    debugPrint(
+      '📤 Message status update: ${event.messageId} -> ${event.status}',
+    );
 
     // Update message status in database
     await MessageRepository.updateStatus(event.messageId, event.status);
 
     // Update local cache
     for (final messages in _sessionMessages.values) {
-      final messageIndex = messages.indexWhere((m) => m.messageId == event.messageId);
+      final messageIndex = messages.indexWhere(
+        (m) => m.messageId == event.messageId,
+      );
       if (messageIndex != -1) {
-        final updatedMessage = messages[messageIndex].copyWith(status: event.status);
+        final updatedMessage = messages[messageIndex].copyWith(
+          status: event.status,
+        );
         messages[messageIndex] = updatedMessage;
         break;
       }

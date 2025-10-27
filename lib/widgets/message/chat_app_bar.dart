@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import '../../services/p2p/p2p_main_service.dart';
 import '../../services/p2p/p2p_base_service.dart';
 import '../../utils/resqlink_theme.dart';
-import 'chat_search_delegate.dart';
 
 
 class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
@@ -131,25 +130,6 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   List<Widget> _buildActions(BuildContext context) {
     final actions = <Widget>[];
-
-    // Add search button for chat view
-    if (isChatView) {
-      actions.add(
-        IconButton(
-          icon: Icon(Icons.search, color: Colors.white),
-          onPressed: () async {
-            final result = await showSearch(
-              context: context,
-              delegate: ChatSearchDelegate(sessionId: selectedEndpointId),
-            );
-            if (result != null) {
-              // Handle search result if needed
-              debugPrint('Search result: ${result.message}');
-            }
-          },
-        ),
-      );
-    }
 
     if (isChatView && selectedEndpointId != null &&
         !p2pService.connectedDevices.containsKey(selectedEndpointId)) {
