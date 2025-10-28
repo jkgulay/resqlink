@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import '../../services/p2p/p2p_main_service.dart';
-import '../../services/p2p/p2p_base_service.dart';
-import '../../services/location_state_service.dart';
+import 'package:resqlink/features/chat/services/chat_service.dart';
+
 import '../../controllers/gps_controller.dart';
-import '../../utils/responsive_helper.dart';
-import '../../utils/resqlink_theme.dart';
 import '../../models/message_model.dart';
 import '../../pages/gps_page.dart';
+import '../../services/location_state_service.dart';
+import '../../services/p2p/p2p_base_service.dart';
+import '../../services/p2p/p2p_main_service.dart';
+import '../../utils/responsive_helper.dart';
+import '../../utils/resqlink_theme.dart';
 
 class EmergencyActionsCard extends StatefulWidget {
   final P2PMainService p2pService;
@@ -62,7 +64,9 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
         return Card(
           elevation: 8,
           margin: ResponsiveHelper.getCardMargins(context),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Container(
             constraints: ResponsiveHelper.getCardConstraints(context),
             decoration: _buildCardDecoration(),
@@ -152,7 +156,9 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
             height: 20,
             child: CircularProgressIndicator(
               strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(ResQLinkTheme.emergencyOrange),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                ResQLinkTheme.emergencyOrange,
+              ),
             ),
           ),
       ],
@@ -215,7 +221,9 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
       animation: _pulseAnimation,
       builder: (context, child) {
         return Transform.scale(
-          scale: priority && _pulseController.isAnimating ? _pulseAnimation.value : 1.0,
+          scale: priority && _pulseController.isAnimating
+              ? _pulseAnimation.value
+              : 1.0,
           child: Material(
             elevation: 4,
             borderRadius: BorderRadius.circular(16),
@@ -290,7 +298,9 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
         children: [
           Icon(
             isConnected ? Icons.wifi : Icons.wifi_off,
-            color: isConnected ? ResQLinkTheme.safeGreen : ResQLinkTheme.offlineGray,
+            color: isConnected
+                ? ResQLinkTheme.safeGreen
+                : ResQLinkTheme.offlineGray,
             size: 16,
           ),
           SizedBox(width: 8),
@@ -300,7 +310,9 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
                   ? 'Ready to send to $connectedDevices connected device${connectedDevices == 1 ? '' : 's'}'
                   : 'No connections - messages will be queued',
               style: TextStyle(
-                color: isConnected ? ResQLinkTheme.safeGreen : ResQLinkTheme.offlineGray,
+                color: isConnected
+                    ? ResQLinkTheme.safeGreen
+                    : ResQLinkTheme.offlineGray,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),
@@ -350,7 +362,6 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
           }
         });
       }
-
     } catch (e) {
       debugPrint('❌ Emergency message failed: $e');
       _showErrorSnackBar('Failed to send emergency message');
@@ -375,11 +386,15 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
         : MessageType.emergency;
 
     final connectedDevices = widget.p2pService.connectedDevices;
+    final chatService = ChatService();
     final senderName = widget.p2pService.userName ?? 'Emergency User';
 
     // Get current GPS coordinates from GPS controller (primary) or location state (fallback)
-    double? latitude = gpsController.lastKnownLocation?.latitude ?? _currentLocation?.latitude;
-    double? longitude = gpsController.lastKnownLocation?.longitude ?? _currentLocation?.longitude;
+    double? latitude =
+        gpsController.lastKnownLocation?.latitude ?? _currentLocation?.latitude;
+    double? longitude =
+        gpsController.lastKnownLocation?.longitude ??
+        _currentLocation?.longitude;
 
     debugPrint('🚨 Sending emergency message: $messageText');
     debugPrint('📱 Connected devices: ${connectedDevices.keys.toList()}');
@@ -391,7 +406,9 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
 
     // CRITICAL FIX: Always try to send as broadcast if no specific devices
     if (connectedDevices.isEmpty) {
-      debugPrint('⚠️ No connected devices - broadcasting emergency message anyway');
+      debugPrint(
+        '⚠️ No connected devices - broadcasting emergency message anyway',
+      );
       try {
         await widget.p2pService.sendMessage(
           message: messageText,
@@ -409,11 +426,46 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
     }
 
     // Send to all connected devices individually AND broadcast
-    debugPrint('📢 Broadcasting emergency message to ${connectedDevices.length} connected devices');
+    debugPrint(
+      '📢 Broadcasting emergency message to ${connectedDevices.length} connected devices',
+    );
 
     // First, send targeted messages
-    for (final deviceId in connectedDevices.keys) {
+    for (final entry in connectedDevices.entries) {
+      final deviceId = entry.key;
+      final device = entry.value;
+      final resolvedName = device.userName.isNotEmpty
+          ? device.userName
+          : (device.deviceInfo?['deviceName'] as String?)?.trim();
+      final deviceName = (resolvedName == null || resolvedName.isEmpty)
+          ? 'Unknown Device'
+          : resolvedName;
+
       try {
+        final sessionId = await chatService.createOrGetSession(
+          deviceId: deviceId,
+          deviceName: deviceName,
+          deviceAddress: deviceId,
+          currentUserId: 'local',
+          currentUserName: senderName,
+          peerUserName: deviceName,
+        );
+
+        if (sessionId != null) {
+          final saved = await chatService.sendMessage(
+            sessionId: sessionId,
+            message: messageText,
+            type: messageType,
+            fromUser: senderName,
+            targetDeviceId: deviceId,
+            latitude: latitude,
+            longitude: longitude,
+          );
+          if (!saved) {
+            debugPrint('⚠️ Failed to persist emergency message for $deviceId');
+          }
+        }
+
         await widget.p2pService.sendMessage(
           message: messageText,
           type: messageType,
@@ -446,12 +498,16 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
   String _getEmergencyMessage(EmergencyTemplate template) {
     // Get location to append to message
     final gpsController = context.read<GpsController>();
-    final latitude = gpsController.lastKnownLocation?.latitude ?? _currentLocation?.latitude;
-    final longitude = gpsController.lastKnownLocation?.longitude ?? _currentLocation?.longitude;
+    final latitude =
+        gpsController.lastKnownLocation?.latitude ?? _currentLocation?.latitude;
+    final longitude =
+        gpsController.lastKnownLocation?.longitude ??
+        _currentLocation?.longitude;
 
     String locationText = '';
     if (latitude != null && longitude != null) {
-      locationText = '\n📍 Location: ${latitude.toStringAsFixed(6)}, ${longitude.toStringAsFixed(6)}';
+      locationText =
+          '\n📍 Location: ${latitude.toStringAsFixed(6)}, ${longitude.toStringAsFixed(6)}';
     }
 
     switch (template) {

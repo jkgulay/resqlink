@@ -374,6 +374,19 @@ class GpsController extends ChangeNotifier {
   }
 
   Future<void> shareLocation(LocationModel location) async {
+    try {
+      _locationStateService.updateCurrentLocation(location);
+
+      if (location.type == LocationType.sos ||
+          location.type == LocationType.emergency) {
+        await _locationStateService.broadcastLocationToAll();
+      } else {
+        await _locationStateService.shareLocation();
+      }
+    } catch (e) {
+      debugPrint('❌ Error sharing location from GPS controller: $e');
+    }
+
     if (onLocationShare != null) {
       onLocationShare!(location);
     }
@@ -786,11 +799,10 @@ class GpsController extends ChangeNotifier {
 
     try {
       debugPrint('📡 Broadcasting SOS via P2P...');
-      if (onLocationShare != null) {
-        onLocationShare!(sosLocation);
-      }
+      _locationStateService.updateCurrentLocation(sosLocation);
+      await _locationStateService.broadcastLocationToAll();
     } catch (e) {
-      debugPrint('❌ P2P broadcast failed: $e');
+      debugPrint('❌ SOS broadcast failed: $e');
     }
 
     await _loadSavedLocations();

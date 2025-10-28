@@ -377,6 +377,13 @@ class ConnectionStats extends StatelessWidget {
                       try {
                         await controller.p2pService.wifiDirectService
                             ?.removeGroup();
+
+                        // Clear discovered devices list when leaving/disbanding group
+                        controller.clearDiscoveredDevices();
+
+                        // Clear role when leaving/disbanding group
+                        await controller.p2pService.clearForcedRole();
+
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(

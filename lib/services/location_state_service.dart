@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:resqlink/models/message_model.dart';
+import 'package:resqlink/features/chat/services/chat_service.dart';
 import '../pages/gps_page.dart';
 import 'p2p/p2p_main_service.dart';
 
@@ -82,13 +83,55 @@ class LocationStateService extends ChangeNotifier {
 
       // 2. Share via P2P if service is available and connected
       if (_p2pService != null && _p2pService!.connectedDevices.isNotEmpty) {
+        final locationMessage = _getLocationShareMessage();
+        final messageType =
+            _currentLocation!.type == LocationType.emergency ||
+                _currentLocation!.type == LocationType.sos
+            ? MessageType.emergency
+            : MessageType.location;
+
+        // Send to each connected device and save locally
+        for (final deviceEntry in _p2pService!.connectedDevices.entries) {
+          final deviceId = deviceEntry.key;
+          final device = deviceEntry.value;
+          final resolvedName = device.userName.isNotEmpty
+              ? device.userName
+              : (device.deviceInfo?['deviceName'] as String?)?.trim();
+          final deviceName = (resolvedName == null || resolvedName.isEmpty)
+              ? 'Unknown Device'
+              : resolvedName;
+
+          debugPrint('📤 Sharing location with $deviceName ($deviceId)');
+
+          // Create or get chat session for this device
+          final chatService = ChatService();
+          final sessionId = await chatService.createOrGetSession(
+            deviceId: deviceId,
+            deviceName: deviceName,
+            deviceAddress: deviceId,
+            currentUserId: 'local',
+            currentUserName: _p2pService!.userName ?? 'Me',
+            peerUserName: deviceName,
+          );
+
+          if (sessionId != null) {
+            // Save location message to chat session so sender can see it
+            await chatService.sendMessage(
+              sessionId: sessionId,
+              message: locationMessage,
+              type: messageType,
+              fromUser: _p2pService!.userName ?? 'Me',
+              targetDeviceId: deviceId,
+              latitude: _currentLocation!.latitude,
+              longitude: _currentLocation!.longitude,
+            );
+          }
+        }
+
+        // Also send via P2P for actual transmission
         await _p2pService!.sendMessage(
-          message: _getLocationShareMessage(),
-          type:
-              _currentLocation!.type == LocationType.emergency ||
-                  _currentLocation!.type == LocationType.sos
-              ? MessageType.emergency
-              : MessageType.location,
+          message: locationMessage,
+          type: messageType,
           senderName: _p2pService!.userName ?? 'Unknown User',
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           ttl: 3600,
@@ -98,7 +141,7 @@ class LocationStateService extends ChangeNotifier {
         );
 
         debugPrint(
-          '📡 Location shared via P2P to ${_p2pService!.connectedDevices.length} devices',
+          '✅ Location shared and saved to ${_p2pService!.connectedDevices.length} chat sessions',
         );
       }
 
@@ -142,14 +185,55 @@ class LocationStateService extends ChangeNotifier {
     }
 
     try {
-      // Fix: Use named parameters for sendMessage call
+      final locationMessage = _getLocationShareMessage();
+      final messageType =
+          _currentLocation!.type == LocationType.emergency ||
+              _currentLocation!.type == LocationType.sos
+          ? MessageType.emergency
+          : MessageType.location;
+
+      // Save to each connected device's chat session
+      for (final deviceEntry in _p2pService!.connectedDevices.entries) {
+        final deviceId = deviceEntry.key;
+        final device = deviceEntry.value;
+        final resolvedName = device.userName.isNotEmpty
+            ? device.userName
+            : (device.deviceInfo?['deviceName'] as String?)?.trim();
+        final deviceName = (resolvedName == null || resolvedName.isEmpty)
+            ? 'Unknown Device'
+            : resolvedName;
+
+        debugPrint('📡 Broadcasting location to $deviceName ($deviceId)');
+
+        // Create or get chat session for this device
+        final chatService = ChatService();
+        final sessionId = await chatService.createOrGetSession(
+          deviceId: deviceId,
+          deviceName: deviceName,
+          deviceAddress: deviceId,
+          currentUserId: 'local',
+          currentUserName: _p2pService!.userName ?? 'Me',
+          peerUserName: deviceName,
+        );
+
+        if (sessionId != null) {
+          // Save location message to chat session so sender can see it
+          await chatService.sendMessage(
+            sessionId: sessionId,
+            message: locationMessage,
+            type: messageType,
+            fromUser: _p2pService!.userName ?? 'Me',
+            targetDeviceId: deviceId,
+            latitude: _currentLocation!.latitude,
+            longitude: _currentLocation!.longitude,
+          );
+        }
+      }
+
+      // Also send via P2P for actual transmission
       await _p2pService!.sendMessage(
-        message: _getLocationShareMessage(),
-        type:
-            _currentLocation!.type == LocationType.emergency ||
-                _currentLocation!.type == LocationType.sos
-            ? MessageType.emergency
-            : MessageType.location,
+        message: locationMessage,
+        type: messageType,
         senderName: _p2pService!.userName ?? 'Emergency User',
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         ttl: 7200, // 2 hours for emergency messages
@@ -159,7 +243,7 @@ class LocationStateService extends ChangeNotifier {
       );
 
       debugPrint(
-        '✅ Location broadcast completed to ${_p2pService!.connectedDevices.length} devices',
+        '✅ Location broadcast completed and saved to ${_p2pService!.connectedDevices.length} chat sessions',
       );
     } catch (e) {
       debugPrint('❌ Error broadcasting location: $e');

@@ -625,7 +625,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  void _onLocationShare(LocationModel location) {}
+  void _onLocationShare(LocationModel location) {
+    // Keep shared location state in sync for UI cards, but avoid
+    // triggering additional broadcasts. Actual sending logic
+    // lives in GPS controller and LocationStateService.
+    LocationStateService().updateCurrentLocation(location);
+  }
 
   void _onDeviceChatTap(Map<String, dynamic> device) {
     debugPrint('🎯 HomePage: Device chat tap for ${device['deviceName']}');
@@ -768,7 +773,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               size: isNarrowScreen ? 12 : 16,
               color: Colors.white,
             ),
-            if (!isNarrowScreen || MediaQuery.of(context).size.width > 360) ...[
+            if (!isNarrowScreen) ...[
               SizedBox(width: 3),
               Text(
                 _p2pService.currentRole == P2PRole.host

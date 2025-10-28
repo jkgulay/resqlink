@@ -26,7 +26,7 @@ class _DeviceActionsState extends State<DeviceActions> {
 
   @override
   Widget build(BuildContext context) {
-    return widget.isConnected 
+    return widget.isConnected
         ? _buildConnectedActions()
         : _buildDisconnectedActions();
   }
@@ -52,14 +52,20 @@ class _DeviceActionsState extends State<DeviceActions> {
               backgroundColor: isAvailable ? Colors.blue : Colors.grey,
               foregroundColor: Colors.white,
               padding: padding,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
         ),
         SizedBox(width: spacing),
         IconButton(
           onPressed: _showDetails,
-          icon: Icon(Icons.info_outline, color: Colors.blue, size: iconSize + 2),
+          icon: Icon(
+            Icons.info_outline,
+            color: Colors.blue,
+            size: iconSize + 2,
+          ),
           tooltip: 'Device Details',
         ),
       ],
@@ -72,13 +78,24 @@ class _DeviceActionsState extends State<DeviceActions> {
     final padding = _getButtonPadding();
     final spacing = ResponsiveHelper.getContentSpacing(context) * 0.5;
 
-    if (ResponsiveHelper.isDesktop(context) || ResponsiveHelper.isTablet(context)) {
-      return _buildDesktopConnectedActions(iconSize, fontSize, padding, spacing);
+    if (ResponsiveHelper.isDesktop(context) ||
+        ResponsiveHelper.isTablet(context)) {
+      return _buildDesktopConnectedActions(
+        iconSize,
+        fontSize,
+        padding,
+        spacing,
+      );
     }
     return _buildMobileConnectedActions(iconSize, fontSize, padding, spacing);
   }
 
-  Widget _buildDesktopConnectedActions(double iconSize, double fontSize, EdgeInsets padding, double spacing) {
+  Widget _buildDesktopConnectedActions(
+    double iconSize,
+    double fontSize,
+    EdgeInsets padding,
+    double spacing,
+  ) {
     return Wrap(
       spacing: spacing,
       runSpacing: spacing / 2,
@@ -93,7 +110,9 @@ class _DeviceActionsState extends State<DeviceActions> {
               backgroundColor: Colors.green,
               foregroundColor: Colors.white,
               padding: padding,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
         ),
@@ -103,20 +122,24 @@ class _DeviceActionsState extends State<DeviceActions> {
           tooltip: 'Send Test Message',
         ),
         IconButton(
-          onPressed: _disconnect,
-          icon: Icon(Icons.link_off, color: Colors.red, size: iconSize + 2),
-          tooltip: 'Disconnect',
-        ),
-        IconButton(
           onPressed: _showDetails,
-          icon: Icon(Icons.info_outline, color: Colors.grey, size: iconSize + 2),
+          icon: Icon(
+            Icons.info_outline,
+            color: Colors.grey,
+            size: iconSize + 2,
+          ),
           tooltip: 'Device Details',
         ),
       ],
     );
   }
 
-  Widget _buildMobileConnectedActions(double iconSize, double fontSize, EdgeInsets padding, double spacing) {
+  Widget _buildMobileConnectedActions(
+    double iconSize,
+    double fontSize,
+    EdgeInsets padding,
+    double spacing,
+  ) {
     return Column(
       children: [
         SizedBox(
@@ -129,7 +152,9 @@ class _DeviceActionsState extends State<DeviceActions> {
               backgroundColor: Colors.green,
               foregroundColor: Colors.white,
               padding: padding,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
         ),
@@ -143,13 +168,12 @@ class _DeviceActionsState extends State<DeviceActions> {
               tooltip: 'Send Test Message',
             ),
             IconButton(
-              onPressed: _disconnect,
-              icon: Icon(Icons.link_off, color: Colors.red, size: iconSize + 2),
-              tooltip: 'Disconnect',
-            ),
-            IconButton(
               onPressed: _showDetails,
-              icon: Icon(Icons.info_outline, color: Colors.grey, size: iconSize + 2),
+              icon: Icon(
+                Icons.info_outline,
+                color: Colors.grey,
+                size: iconSize + 2,
+              ),
               tooltip: 'Device Details',
             ),
           ],
@@ -169,21 +193,28 @@ class _DeviceActionsState extends State<DeviceActions> {
 
   Future<void> _connect() async {
     if (!mounted) return;
-    await _connectionManager.connectToDevice(widget.device, context, widget.controller);
-  }
-
-  Future<void> _disconnect() async {
-    if (!mounted) return;
-    await _connectionManager.disconnectDevice(widget.device, context, widget.controller);
+    await _connectionManager.connectToDevice(
+      widget.device,
+      context,
+      widget.controller,
+    );
   }
 
   Future<void> _sendTest() async {
     if (!mounted) return;
-    await _connectionManager.sendTestMessage(widget.device, context, widget.controller);
+    await _connectionManager.sendTestMessage(
+      widget.device,
+      context,
+      widget.controller,
+    );
   }
 
   void _openChat() {
-    _connectionManager.navigateToChat(context, widget.device, widget.onDeviceChatTap);
+    _connectionManager.navigateToChat(
+      context,
+      widget.device,
+      widget.onDeviceChatTap,
+    );
   }
 
   void _showDetails() {

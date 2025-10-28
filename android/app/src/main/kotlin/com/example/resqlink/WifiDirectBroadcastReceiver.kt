@@ -90,8 +90,14 @@ class WifiDirectBroadcastReceiver(
                                     .getString("wifi_direct_mac_address", "") ?: ""
                                 val peerAddress = device.deviceAddress ?: ""
                                 
+                                Log.d("WifiDirectReceiver", "🔍 Auto-accept check: myMAC=$myDeviceAddress, peerMAC=$peerAddress")
+                                
                                 if (myDeviceAddress.isNotEmpty() && peerAddress.isNotEmpty()) {
-                                    val shouldBeClient = myDeviceAddress.hashCode() < peerAddress.hashCode()
+                                    val myHash = myDeviceAddress.hashCode()
+                                    val peerHash = peerAddress.hashCode()
+                                    val shouldBeClient = myHash < peerHash
+                                    
+                                    Log.d("WifiDirectReceiver", "🔢 Hash comparison: myHash=$myHash, peerHash=$peerHash, shouldBeClient=$shouldBeClient")
                                     
                                     if (shouldBeClient) {
                                         Log.d("WifiDirectReceiver", "🤝 Auto-accepting invitation from ${device.deviceName} (we are client)")
@@ -114,6 +120,8 @@ class WifiDirectBroadcastReceiver(
                                     } else {
                                         Log.d("WifiDirectReceiver", "👑 We are group owner, waiting for ${device.deviceName} to join")
                                     }
+                                } else {
+                                    Log.w("WifiDirectReceiver", "⚠️ Cannot auto-accept: myMAC or peerMAC is empty")
                                 }
                             }
                         }
