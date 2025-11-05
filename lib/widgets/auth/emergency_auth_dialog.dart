@@ -17,7 +17,7 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
   final displayNameController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
-  
+
   bool _isOnline = false;
   bool _showOnlineLogin = false;
   bool _isLoading = false;
@@ -46,13 +46,13 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
     }
   }
 
-  void _toggleOnlineLogin() {
-    setState(() {
-      _showOnlineLogin = !_showOnlineLogin;
-      emailController.clear();
-      passwordController.clear();
-    });
-  }
+  //void _toggleOnlineLogin() {
+  //  setState(() {
+  //  _showOnlineLogin = !_showOnlineLogin;
+  //  emailController.clear();
+  //  passwordController.clear();
+  // });
+  // }
 
   void _toggleLoginMode() {
     setState(() {
@@ -64,7 +64,7 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
 
   Future<void> _handleEmergencyStart() async {
     final displayName = displayNameController.text.trim();
-    
+
     if (displayName.isEmpty) {
       _showSnackBar('Please enter your display name');
       return;
@@ -72,14 +72,16 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
 
     if (displayName.length < 2) {
       _showSnackBar('Display name must be at least 2 characters');
-      return; 
+      return;
     }
 
     setState(() => _isLoading = true);
 
     try {
       // Create temporary identity for emergency use
-      final tempUser = await TemporaryIdentityService.createTemporaryIdentity(displayName);
+      final tempUser = await TemporaryIdentityService.createTemporaryIdentity(
+        displayName,
+      );
 
       if (tempUser != null) {
         // IMPORTANT: Set WiFi Direct device name to match display name
@@ -98,9 +100,9 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
 
         if (mounted) {
           Navigator.of(context).pop();
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => HomePage())
-          );
+          Navigator.of(
+            context,
+          ).pushReplacement(MaterialPageRoute(builder: (_) => HomePage()));
         }
       } else {
         _showSnackBar('Failed to create emergency identity');
@@ -153,17 +155,17 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
         }
 
         _showSnackBar(
-          '${_isLogin ? 'Login' : 'Registration'} successful', 
-          Colors.green
+          '${_isLogin ? 'Login' : 'Registration'} successful',
+          Colors.green,
         );
-        
+
         await Future.delayed(Duration(milliseconds: 500));
-        
+
         if (mounted) {
           Navigator.of(context).pop();
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => HomePage())
-          );
+          Navigator.of(
+            context,
+          ).pushReplacement(MaterialPageRoute(builder: (_) => HomePage()));
         }
       } else {
         _showSnackBar(result.errorMessage ?? 'Authentication failed');
@@ -208,15 +210,19 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildHeader(),
-              SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 20)),
-              
+              SizedBox(
+                height: ResponsiveUtils.getResponsiveSpacing(context, 20),
+              ),
+
               if (!_showOnlineLogin) ...[
                 _buildEmergencySection(),
               ] else ...[
                 _buildOnlineSection(),
               ],
-              
-              SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 16)),
+
+              SizedBox(
+                height: ResponsiveUtils.getResponsiveSpacing(context, 16),
+              ),
               _buildModeToggle(),
             ],
           ),
@@ -230,9 +236,9 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
-          _showOnlineLogin 
-            ? (_isLogin ? "Account Login" : "Create Account")
-            : "Emergency Access",
+          _showOnlineLogin
+              ? (_isLogin ? "Account Login" : "Create Account")
+              : "Emergency Access",
           style: TextStyle(
             fontSize: ResponsiveUtils.getResponsiveFontSize(context, 24),
             fontWeight: FontWeight.bold,
@@ -246,9 +252,7 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
                 ? Colors.green.withValues(alpha: 0.1)
                 : Colors.orange.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: _isOnline ? Colors.green : Colors.orange,
-            ),
+            border: Border.all(color: _isOnline ? Colors.green : Colors.orange),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -279,7 +283,9 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          padding: EdgeInsets.all(ResponsiveUtils.getResponsiveSpacing(context, 12)),
+          padding: EdgeInsets.all(
+            ResponsiveUtils.getResponsiveSpacing(context, 12),
+          ),
           decoration: BoxDecoration(
             color: Colors.orange.withAlpha((0.1 * 255).round()),
             borderRadius: BorderRadius.circular(8),
@@ -291,22 +297,25 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  _isOnline 
-                    ? 'Quick emergency access - no account required'
-                    : 'Offline emergency mode - ready to use',
+                  _isOnline
+                      ? 'Quick emergency access - no account required'
+                      : 'Offline emergency mode - ready to use',
                   style: TextStyle(
                     color: Colors.orange,
                     fontWeight: FontWeight.bold,
-                    fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                    fontSize: ResponsiveUtils.getResponsiveFontSize(
+                      context,
+                      12,
+                    ),
                   ),
                 ),
               ),
             ],
           ),
         ),
-        
+
         SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 20)),
-        
+
         Text(
           'Enter your display name to start:',
           style: TextStyle(
@@ -315,9 +324,9 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
             fontWeight: FontWeight.w500,
           ),
         ),
-        
+
         SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 12)),
-        
+
         TextField(
           controller: displayNameController,
           style: TextStyle(
@@ -342,9 +351,9 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
             ),
           ),
         ),
-        
+
         SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 20)),
-        
+
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
@@ -359,16 +368,16 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
               ),
             ),
             onPressed: _isLoading ? null : _handleEmergencyStart,
-            icon: _isLoading 
-              ? SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                )
-              : Icon(Icons.emergency),
+            icon: _isLoading
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Icon(Icons.emergency),
             label: Text(
               'Start Emergency Chat',
               style: TextStyle(
@@ -386,7 +395,9 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
     return Column(
       children: [
         Container(
-          padding: EdgeInsets.all(ResponsiveUtils.getResponsiveSpacing(context, 12)),
+          padding: EdgeInsets.all(
+            ResponsiveUtils.getResponsiveSpacing(context, 12),
+          ),
           decoration: BoxDecoration(
             color: Colors.blue.withAlpha((0.1 * 255).round()),
             borderRadius: BorderRadius.circular(8),
@@ -402,16 +413,19 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
                   style: TextStyle(
                     color: Colors.blue,
                     fontWeight: FontWeight.bold,
-                    fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
+                    fontSize: ResponsiveUtils.getResponsiveFontSize(
+                      context,
+                      12,
+                    ),
                   ),
                 ),
               ),
             ],
           ),
         ),
-        
+
         SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 20)),
-        
+
         TextField(
           controller: emailController,
           keyboardType: TextInputType.emailAddress,
@@ -437,9 +451,9 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
             ),
           ),
         ),
-        
+
         SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 12)),
-        
+
         TextField(
           controller: passwordController,
           obscureText: true,
@@ -465,9 +479,9 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
             ),
           ),
         ),
-        
+
         SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 20)),
-        
+
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -493,14 +507,17 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
                 : Text(
                     _isLogin ? "Login" : "Create Account",
                     style: TextStyle(
-                      fontSize: ResponsiveUtils.getResponsiveFontSize(context, 16),
+                      fontSize: ResponsiveUtils.getResponsiveFontSize(
+                        context,
+                        16,
+                      ),
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
                     ),
                   ),
           ),
         ),
-        
+
         if (_showOnlineLogin) ...[
           SizedBox(height: ResponsiveUtils.getResponsiveSpacing(context, 12)),
           TextButton(
@@ -521,20 +538,24 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
   }
 
   Widget _buildModeToggle() {
-    if (!_isOnline) return SizedBox.shrink();
-    
-    return TextButton(
-      onPressed: _isLoading ? null : _toggleOnlineLogin,
-      child: Text(
-        _showOnlineLogin 
-          ? "← Back to Emergency Mode"
-          : "Have an account? Login instead",
-        style: TextStyle(
-          color: Colors.white70,
-          fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
-          decoration: TextDecoration.underline,
-        ),
-      ),
-    );
+    // Disabled: User requested to hide this option
+    return SizedBox.shrink();
+
+    // Original code commented out:
+    // if (!_isOnline) return SizedBox.shrink();
+    //
+    // return TextButton(
+    //   onPressed: _isLoading ? null : _toggleOnlineLogin,
+    //   child: Text(
+    //     _showOnlineLogin
+    //       ? "← Back to Emergency Mode"
+    //       : "Have an account? Login instead",
+    //     style: TextStyle(
+    //       color: Colors.white70,
+    //       fontSize: ResponsiveUtils.getResponsiveFontSize(context, 14),
+    //       decoration: TextDecoration.underline,
+    //     ),
+    //   ),
+    // );
   }
 }

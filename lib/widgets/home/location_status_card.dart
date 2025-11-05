@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../pages/gps_page.dart';
+import '../../utils/responsive_helper.dart';
 
 class LocationStatusCard extends StatelessWidget {
   final LocationModel? location;
@@ -21,12 +22,12 @@ class LocationStatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     // Show empty state only when no location AND not loading
     if (location == null && !isLoading) {
-      return _buildEmptyState();
+      return _buildEmptyState(context);
     }
 
     return Card(
       elevation: 8,
-      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: ResponsiveHelper.getCardMargins(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Container(
         decoration: BoxDecoration(
@@ -45,10 +46,10 @@ class LocationStatusCard extends StatelessWidget {
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: ResponsiveHelper.getCardPadding(context),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final isNarrow = constraints.maxWidth < 400;
+              final isNarrow = ResponsiveHelper.isNarrow(constraints);
               return _buildLocationContent(context, isNarrow);
             },
           ),
@@ -57,10 +58,10 @@ class LocationStatusCard extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(BuildContext context) {
     return Card(
       elevation: 8,
-      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: ResponsiveHelper.getCardMargins(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Container(
         decoration: BoxDecoration(
@@ -79,7 +80,7 @@ class LocationStatusCard extends StatelessWidget {
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: ResponsiveHelper.getCardPadding(context),
           child: Column(
             children: [
               Icon(Icons.location_off, size: 48, color: Colors.grey),
@@ -106,18 +107,19 @@ class LocationStatusCard extends StatelessWidget {
   }
 
   Widget _buildLocationContent(BuildContext context, bool isNarrow) {
+    final spacing = ResponsiveHelper.getContentSpacing(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Header with loading indicator if needed
-        _buildLocationHeader(isNarrow),
-        SizedBox(height: 24),
+        _buildLocationHeader(context, isNarrow),
+        SizedBox(height: spacing),
 
         // Location details - show loading or actual data
         isLoading
             ? _buildLoadingDetails(isNarrow)
             : _buildLocationDetails(isNarrow),
-        SizedBox(height: 24),
+        SizedBox(height: spacing),
 
         // Action buttons - disable during loading
         _buildActionButtons(context, isNarrow),
@@ -125,9 +127,26 @@ class LocationStatusCard extends StatelessWidget {
     );
   }
 
-  Widget _buildLocationHeader(bool isNarrow) {
+  Widget _buildLocationHeader(BuildContext context, bool isNarrow) {
+    final itemPadding = ResponsiveHelper.getItemPadding(
+      context,
+      narrow: isNarrow ? 18 : null,
+    );
+    final iconSize = ResponsiveHelper.getIconSize(
+      context,
+      narrow: isNarrow ? 26 : null,
+    );
+    final titleSize = ResponsiveHelper.getTitleSize(
+      context,
+      narrow: isNarrow ? 18 : null,
+    );
+    final subtitleSize = ResponsiveHelper.getSubtitleSize(
+      context,
+      narrow: isNarrow ? 13 : null,
+    );
+
     return Container(
-      padding: EdgeInsets.all(isNarrow ? 18 : 22),
+      padding: EdgeInsets.all(itemPadding),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(18),
@@ -139,7 +158,7 @@ class LocationStatusCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            padding: EdgeInsets.all(isNarrow ? 14 : 16),
+            padding: EdgeInsets.all(iconSize * 0.5),
             decoration: BoxDecoration(
               color: isLoading
                   ? Colors.grey.withValues(alpha: 0.15)
@@ -174,8 +193,8 @@ class LocationStatusCard extends StatelessWidget {
             ),
             child: isLoading
                 ? SizedBox(
-                    width: isNarrow ? 26 : 30,
-                    height: isNarrow ? 26 : 30,
+                    width: iconSize,
+                    height: iconSize,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       valueColor: AlwaysStoppedAnimation<Color>(Colors.grey),
@@ -191,10 +210,10 @@ class LocationStatusCard extends StatelessWidget {
                             location?.type == LocationType.sos
                         ? Colors.red
                         : Colors.blue,
-                    size: isNarrow ? 26 : 30,
+                    size: iconSize,
                   ),
           ),
-          SizedBox(width: isNarrow ? 14 : 18),
+          SizedBox(width: itemPadding * 0.7),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -203,7 +222,7 @@ class LocationStatusCard extends StatelessWidget {
                   isLoading ? 'Refreshing Location...' : 'Last Known Location',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
-                    fontSize: isNarrow ? 18 : 20,
+                    fontSize: titleSize,
                     color: Color.fromARGB(255, 252, 254, 255),
                     letterSpacing: -0.5,
                   ),
@@ -256,7 +275,7 @@ class LocationStatusCard extends StatelessWidget {
                                     location?.type == LocationType.sos)
                               ? Colors.red
                               : Colors.green,
-                          fontSize: isNarrow ? 13 : 15,
+                          fontSize: subtitleSize,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -291,17 +310,17 @@ class LocationStatusCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _buildLoadingRow(Icons.my_location, "Latitude", isNarrow),
+          _buildShimmerRow(Icons.my_location, "Latitude", isNarrow),
           SizedBox(height: 16),
-          _buildLoadingRow(Icons.my_location, "Longitude", isNarrow),
+          _buildShimmerRow(Icons.my_location, "Longitude", isNarrow),
           SizedBox(height: 16),
-          _buildLoadingRow(Icons.schedule, "Timestamp", isNarrow),
+          _buildShimmerRow(Icons.schedule, "Timestamp", isNarrow),
         ],
       ),
     );
   }
 
-  Widget _buildLoadingRow(IconData icon, String label, bool isNarrow) {
+  Widget _buildShimmerRow(IconData icon, String label, bool isNarrow) {
     return Row(
       children: [
         Container(
@@ -326,23 +345,7 @@ class LocationStatusCard extends StatelessWidget {
                 ),
               ),
               SizedBox(height: 4),
-              Container(
-                height: isNarrow ? 14 : 15,
-                width: 120,
-                decoration: BoxDecoration(
-                  color: Colors.grey.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    backgroundColor: Colors.transparent,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Colors.orange.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ),
-              ),
+              _ShimmerLoading(width: 120, height: isNarrow ? 14 : 15),
             ],
           ),
         ),
@@ -707,5 +710,72 @@ class LocationStatusCard extends StatelessWidget {
     } else {
       return dateTime.toString().substring(0, 19);
     }
+  }
+}
+
+// Shimmer loading widget for smooth skeleton effect
+class _ShimmerLoading extends StatefulWidget {
+  final double width;
+  final double height;
+
+  const _ShimmerLoading({required this.width, required this.height});
+
+  @override
+  State<_ShimmerLoading> createState() => _ShimmerLoadingState();
+}
+
+class _ShimmerLoadingState extends State<_ShimmerLoading>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 1500),
+    )..repeat();
+
+    _animation = Tween<double>(
+      begin: -1.0,
+      end: 2.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                Colors.grey.withValues(alpha: 0.3),
+                Colors.grey.withValues(alpha: 0.5),
+                Colors.grey.withValues(alpha: 0.3),
+              ],
+              stops: [
+                _animation.value - 0.3,
+                _animation.value,
+                _animation.value + 0.3,
+              ].map((stop) => stop.clamp(0.0, 1.0)).toList(),
+            ),
+          ),
+        );
+      },
+    );
   }
 }

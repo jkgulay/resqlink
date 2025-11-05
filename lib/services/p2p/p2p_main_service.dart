@@ -43,8 +43,6 @@ class P2PMainService extends P2PBaseService {
   Timer? _monitoringTimer;
   Timer? _pingTimer;
 
-  bool _isClientScanning = false;
-
   @override
   Future<bool> initialize(String userName, {String? preferredRole}) async {
     debugPrint('🚀 P2P Main Service initializing with userName: $userName');
@@ -502,7 +500,6 @@ class P2PMainService extends P2PBaseService {
     try {
       debugPrint('👑 Forcing host role...');
       setRole(P2PRole.host);
-      _isClientScanning = false; // Re-enable system connection checks for host
       _connectionManager.setConnectionMode(P2PConnectionMode.wifiDirect);
       notifyListeners();
     } catch (e) {
@@ -515,7 +512,6 @@ class P2PMainService extends P2PBaseService {
     try {
       debugPrint('📱 Forcing client role...');
       setRole(P2PRole.client);
-      _isClientScanning = true; // Prevent system connection checks
       // Don't call discoverDevices here - let startScan handle it
       notifyListeners();
     } catch (e) {
@@ -528,7 +524,6 @@ class P2PMainService extends P2PBaseService {
     try {
       debugPrint('🔄 Clearing forced role...');
       setRole(P2PRole.none);
-      _isClientScanning = false; // Re-enable system connection checks
       // Don't call discoverDevices here
       notifyListeners();
     } catch (e) {

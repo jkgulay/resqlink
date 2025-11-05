@@ -16,6 +16,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
 
 class SettingsPage extends StatefulWidget {
   final P2PMainService? p2pService;
@@ -30,7 +31,6 @@ class SettingsPage extends StatefulWidget {
 class SettingsPageState extends State<SettingsPage> {
   // Statistics
   int _totalMessages = 0;
-  int _pendingMessages = 0;
   int _totalSessions = 0;
   int _totalLocations = 0;
   int _activeConnections = 0;
@@ -48,7 +48,6 @@ class SettingsPageState extends State<SettingsPage> {
     try {
       // Get message counts
       final allMessages = await MessageRepository.getAllMessages();
-      final pendingMessages = await MessageRepository.getPendingMessages();
 
       // Get chat session count
       final allSessions = await ChatRepository.getAllSessions();
@@ -57,41 +56,59 @@ class SettingsPageState extends State<SettingsPage> {
       final locationStats = await LocationRepository.getLocationStats();
       final totalLocations = locationStats['totalLocations'] as int? ?? 0;
 
-      // Get actual database file size
+      // Calculate total storage (Database + FMTC offline maps)
+      double totalStorage = 0;
+
+      // 1. Get database file size
       final dbPath = await getDatabasesPath();
       final dbFile = File(path.join(dbPath, 'resqlink_enhanced.db'));
       final dbSize = await dbFile.exists() ? await dbFile.length() : 0;
+      totalStorage += dbSize.toDouble();
+
+      // 2. Get FMTC offline map storage
+      try {
+        // Get Philippines base tiles storage
+        final philippinesStore = FMTCStore('philippines_tiles');
+        final philippinesSize = await philippinesStore.stats.size;
+        totalStorage += philippinesSize;
+
+        // Get user cache storage
+        final userCacheStore = FMTCStore('user_cache');
+        final userCacheSize = await userCacheStore.stats.size;
+        totalStorage += userCacheSize;
+
+        debugPrint('📊 Storage breakdown:');
+        debugPrint(
+          '  Database: ${(dbSize / (1024 * 1024)).toStringAsFixed(2)} MB',
+        );
+        debugPrint(
+          '  Philippines tiles: ${(philippinesSize / (1024 * 1024)).toStringAsFixed(2)} MB',
+        );
+        debugPrint(
+          '  User cache: ${(userCacheSize / (1024 * 1024)).toStringAsFixed(2)} MB',
+        );
+        debugPrint(
+          '  Total: ${(totalStorage / (1024 * 1024)).toStringAsFixed(2)} MB',
+        );
+      } catch (e) {
+        debugPrint('⚠️ Error getting FMTC storage: $e');
+      }
 
       // Get active P2P connections
       final connectedDevices = widget.p2pService?.connectedDevices.length ?? 0;
 
       setState(() {
         _totalMessages = allMessages.length;
-        _pendingMessages = pendingMessages.length;
         _totalSessions = allSessions.length;
         _totalLocations = totalLocations;
         _activeConnections = connectedDevices;
-        // Calculate actual storage
-        _storageUsed = "${(dbSize / (1024 * 1024)).toStringAsFixed(2)} MB";
+        // Calculate actual storage including offline maps
+        _storageUsed =
+            "${(totalStorage / (1024 * 1024)).toStringAsFixed(2)} MB";
       });
     } catch (e) {
       debugPrint('Error loading statistics: $e');
     }
-  }
-
-  Future<void> _toggleOfflineMode(bool value) async {
-    if (!mounted) return; // Add mounted check
-
-    await context.read<SettingsService>().setOfflineMode(value);
-
-    if (!mounted) return; // Check again after async operation
-
-    _showMessage(
-      value
-          ? 'Offline mode enabled - App will work purely with SQLite and P2P'
-          : 'Online mode enabled - Firebase sync restored',
-      isSuccess: true,
-    );
   }
 
   Future<void> _toggleLocationSharing(bool value) async {
@@ -197,31 +214,6 @@ class SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _resyncAllMessages() async {
-    if (!mounted) return;
-    final settings = context.read<SettingsService>();
-
-    if (settings.offlineMode) {
-      _showMessage('Cannot sync in offline mode', isWarning: true);
-      return;
-    }
-
-    try {
-      _showMessage('Syncing pending messages...', isSuccess: false);
-
-      if (widget.syncService != null) {
-        await widget.syncService!.syncPendingMessages();
-      }
-
-      await _loadStatistics();
-      if (!mounted) return;
-      _showMessage('All pending messages synced successfully', isSuccess: true);
-    } catch (e) {
-      if (!mounted) return;
-      _showMessage('Sync failed: $e', isDanger: true);
-    }
-  }
-
   Future<bool?> _showConfirmationDialog({
     required String title,
     required String content,
@@ -310,11 +302,9 @@ class SettingsPageState extends State<SettingsPage> {
 
   Future<void> _logout(bool clearOfflineCredentials) async {
     final confirm = await _showConfirmationDialog(
-      title: clearOfflineCredentials ? 'Full Logout & Clear Data' : 'Logout',
-      content: clearOfflineCredentials
-          ? 'This will sign you out and remove all offline login capabilities. You will need an internet connection to sign in again.'
-          : 'This will sign you out but preserve your ability to login offline with the same credentials.',
-      confirmText: clearOfflineCredentials ? 'Clear All Data' : 'Logout',
+      title: 'Logout',
+      content: 'This will sign you out from the application.',
+      confirmText: 'Logout',
       isDangerous: clearOfflineCredentials,
     );
 
@@ -372,9 +362,6 @@ class SettingsPageState extends State<SettingsPage> {
                         delegate: SliverChildListDelegate([
                           // Your existing content...
                           _buildStatisticsCard(),
-                          SizedBox(height: 24),
-                          _buildSectionHeader('Messaging'),
-                          _buildMessagingSection(settings),
                           SizedBox(height: 24),
                           _buildSectionHeader('Connectivity'),
                           _buildConnectivitySection(settings),
@@ -492,15 +479,10 @@ class SettingsPageState extends State<SettingsPage> {
             SizedBox(height: ResponsiveSpacing.md(context)),
             Divider(color: Colors.white24, height: 1),
             SizedBox(height: ResponsiveSpacing.md(context)),
-            // Row 2: Sync status and storage
+            // Row 2: Connections and storage
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildStatItem(
-                  'Pending Sync',
-                  '$_pendingMessages',
-                  Icons.sync_problem,
-                ),
                 _buildStatItem(
                   'Connections',
                   '$_activeConnections',
@@ -534,71 +516,6 @@ class SettingsPageState extends State<SettingsPage> {
           maxLines: 2,
         ),
       ],
-    );
-  }
-
-  Widget _buildMessagingSection(SettingsService settings) {
-    return Card(
-      color: ResQLinkTheme.cardDark,
-      elevation: 2,
-      child: Column(
-        children: [
-          SwitchListTile(
-            title: Text('Offline Mode', style: TextStyle(color: Colors.white)),
-            subtitle: Text(
-              'Force app to work purely with SQLite and P2P',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            value: settings.offlineMode,
-            onChanged: _toggleOfflineMode,
-            secondary: Icon(
-              settings.offlineMode ? Icons.cloud_off : Icons.cloud_done,
-              color: settings.offlineMode
-                  ? ResQLinkTheme.warningYellow
-                  : ResQLinkTheme.safeGreen,
-            ),
-            activeColor: ResQLinkTheme.orange,
-          ),
-          Divider(color: Colors.white24, height: 1),
-          SwitchListTile(
-            title: Text('Auto Sync', style: TextStyle(color: Colors.white)),
-            subtitle: Text(
-              'Automatically sync messages when online',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            value: settings.autoSync && !settings.offlineMode,
-            onChanged: settings.offlineMode
-                ? null
-                : (value) async {
-                    await settings.setAutoSync(value);
-                  },
-            secondary: Icon(
-              Icons.sync,
-              color: (settings.autoSync && !settings.offlineMode)
-                  ? ResQLinkTheme.safeGreen
-                  : Colors.grey,
-            ),
-            activeColor: ResQLinkTheme.orange,
-          ),
-          Divider(color: Colors.white24, height: 1),
-          ListTile(
-            title: Text(
-              'Re-sync All Messages',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: Text(
-              'Force sync all pending messages to Firebase',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            leading: Icon(
-              Icons.cloud_upload,
-              color: settings.offlineMode ? Colors.grey : ResQLinkTheme.orange,
-            ),
-            trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: settings.offlineMode ? null : _resyncAllMessages,
-          ),
-        ],
-      ),
     );
   }
 
@@ -864,34 +781,14 @@ class SettingsPageState extends State<SettingsPage> {
           ),
           Divider(color: Colors.white24, height: 1),
           ListTile(
-            title: Text(
-              'Logout (Keep Offline Access)',
-              style: TextStyle(color: Colors.white),
-            ),
+            title: Text('Logout', style: TextStyle(color: Colors.white)),
             subtitle: Text(
-              'Sign out but allow offline login later',
+              'Sign out from the application',
               style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
             leading: Icon(Icons.logout, color: ResQLinkTheme.orange),
             trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: () => _logout(false), // Don't clear offline credentials
-          ),
-          Divider(color: Colors.white24, height: 1),
-          ListTile(
-            title: Text(
-              'Full Logout & Clear Data',
-              style: TextStyle(color: ResQLinkTheme.primaryRed),
-            ),
-            subtitle: Text(
-              'Sign out and remove all offline access',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            leading: Icon(
-              Icons.delete_forever,
-              color: ResQLinkTheme.primaryRed,
-            ),
-            trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: () => _logout(true), // Clear everything
+            onTap: () => _logout(false),
           ),
         ],
       ),
