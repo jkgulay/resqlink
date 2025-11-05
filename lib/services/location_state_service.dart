@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:resqlink/models/message_model.dart';
-import 'package:resqlink/features/chat/services/chat_service.dart';
+// ChatService import removed - no longer needed after fixing duplicate send issue
 import '../pages/gps_page.dart';
 import 'p2p/p2p_main_service.dart';
 
@@ -90,45 +90,15 @@ class LocationStateService extends ChangeNotifier {
             ? MessageType.emergency
             : MessageType.location;
 
-        // Send to each connected device and save locally
-        for (final deviceEntry in _p2pService!.connectedDevices.entries) {
-          final deviceId = deviceEntry.key;
-          final device = deviceEntry.value;
-          final resolvedName = device.userName.isNotEmpty
-              ? device.userName
-              : (device.deviceInfo?['deviceName'] as String?)?.trim();
-          final deviceName = (resolvedName == null || resolvedName.isEmpty)
-              ? 'Unknown Device'
-              : resolvedName;
+        // CRITICAL FIX: Only send via P2P, let MessageRouter handle DB saving
+        // Removed duplicate chatService.sendMessage() loop that created race conditions
 
-          debugPrint('📤 Sharing location with $deviceName ($deviceId)');
+        debugPrint(
+          '📤 Sharing location via P2P to ${_p2pService!.connectedDevices.length} device(s)',
+        );
 
-          // Create or get chat session for this device
-          final chatService = ChatService();
-          final sessionId = await chatService.createOrGetSession(
-            deviceId: deviceId,
-            deviceName: deviceName,
-            deviceAddress: deviceId,
-            currentUserId: 'local',
-            currentUserName: _p2pService!.userName ?? 'Me',
-            peerUserName: deviceName,
-          );
-
-          if (sessionId != null) {
-            // Save location message to chat session so sender can see it
-            await chatService.sendMessage(
-              sessionId: sessionId,
-              message: locationMessage,
-              type: messageType,
-              fromUser: _p2pService!.userName ?? 'Me',
-              targetDeviceId: deviceId,
-              latitude: _currentLocation!.latitude,
-              longitude: _currentLocation!.longitude,
-            );
-          }
-        }
-
-        // Also send via P2P for actual transmission
+        // Send via P2P for actual transmission
+        // MessageRouter will handle saving to DB when message is routed
         await _p2pService!.sendMessage(
           message: locationMessage,
           type: messageType,
@@ -140,9 +110,7 @@ class LocationStateService extends ChangeNotifier {
           longitude: _currentLocation!.longitude,
         );
 
-        debugPrint(
-          '✅ Location shared and saved to ${_p2pService!.connectedDevices.length} chat sessions',
-        );
+        debugPrint('✅ Location shared via P2P successfully');
       }
 
       // 3. REAL Firebase sync
@@ -192,59 +160,28 @@ class LocationStateService extends ChangeNotifier {
           ? MessageType.emergency
           : MessageType.location;
 
-      // Save to each connected device's chat session
-      for (final deviceEntry in _p2pService!.connectedDevices.entries) {
-        final deviceId = deviceEntry.key;
-        final device = deviceEntry.value;
-        final resolvedName = device.userName.isNotEmpty
-            ? device.userName
-            : (device.deviceInfo?['deviceName'] as String?)?.trim();
-        final deviceName = (resolvedName == null || resolvedName.isEmpty)
-            ? 'Unknown Device'
-            : resolvedName;
+      // CRITICAL FIX: Only send via P2P broadcast, let MessageRouter handle DB saving
+      // Removed duplicate chatService.sendMessage() loop that created race conditions
 
-        debugPrint('📡 Broadcasting location to $deviceName ($deviceId)');
+      debugPrint(
+        '📡 Broadcasting emergency location to ${_p2pService!.connectedDevices.length} device(s)',
+      );
 
-        // Create or get chat session for this device
-        final chatService = ChatService();
-        final sessionId = await chatService.createOrGetSession(
-          deviceId: deviceId,
-          deviceName: deviceName,
-          deviceAddress: deviceId,
-          currentUserId: 'local',
-          currentUserName: _p2pService!.userName ?? 'Me',
-          peerUserName: deviceName,
-        );
-
-        if (sessionId != null) {
-          // Save location message to chat session so sender can see it
-          await chatService.sendMessage(
-            sessionId: sessionId,
-            message: locationMessage,
-            type: messageType,
-            fromUser: _p2pService!.userName ?? 'Me',
-            targetDeviceId: deviceId,
-            latitude: _currentLocation!.latitude,
-            longitude: _currentLocation!.longitude,
-          );
-        }
-      }
-
-      // Also send via P2P for actual transmission
+      // Send via P2P for actual transmission
+      // MessageRouter will handle saving to DB when message is routed
       await _p2pService!.sendMessage(
         message: locationMessage,
         type: messageType,
         senderName: _p2pService!.userName ?? 'Emergency User',
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        ttl: 7200, // 2 hours for emergency messages
+        ttl: 5, // 5 hops max for multi-hop mesh forwarding (emergency only)
         routePath: [_p2pService!.deviceId ?? 'emergency_device'],
         latitude: _currentLocation!.latitude,
         longitude: _currentLocation!.longitude,
+        // targetDeviceId: null (omitted = broadcast mode for multi-hop)
       );
 
-      debugPrint(
-        '✅ Location broadcast completed and saved to ${_p2pService!.connectedDevices.length} chat sessions',
-      );
+      debugPrint('✅ Emergency location broadcast completed via P2P');
     } catch (e) {
       debugPrint('❌ Error broadcasting location: $e');
       rethrow;

@@ -114,7 +114,9 @@ class LocationStatusCard extends StatelessWidget {
         SizedBox(height: 24),
 
         // Location details - show loading or actual data
-        isLoading ? _buildLoadingDetails(isNarrow) : _buildLocationDetails(isNarrow),
+        isLoading
+            ? _buildLoadingDetails(isNarrow)
+            : _buildLocationDetails(isNarrow),
         SizedBox(height: 24),
 
         // Action buttons - disable during loading
@@ -142,7 +144,7 @@ class LocationStatusCard extends StatelessWidget {
               color: isLoading
                   ? Colors.grey.withValues(alpha: 0.15)
                   : (location?.type == LocationType.emergency ||
-                      location?.type == LocationType.sos)
+                        location?.type == LocationType.sos)
                   ? Colors.red.withValues(alpha: 0.15)
                   : Colors.blue.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(16),
@@ -150,20 +152,21 @@ class LocationStatusCard extends StatelessWidget {
                 color: isLoading
                     ? Colors.grey
                     : (location?.type == LocationType.emergency ||
-                        location?.type == LocationType.sos)
+                          location?.type == LocationType.sos)
                     ? Colors.red
                     : Colors.blue,
                 width: 2.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: (isLoading
-                          ? Colors.grey
-                          : (location?.type == LocationType.emergency ||
-                                  location?.type == LocationType.sos)
+                  color:
+                      (isLoading
+                              ? Colors.grey
+                              : (location?.type == LocationType.emergency ||
+                                    location?.type == LocationType.sos)
                               ? Colors.red
                               : Colors.blue)
-                      .withValues(alpha: 0.2),
+                          .withValues(alpha: 0.2),
                   blurRadius: 8,
                   spreadRadius: 1,
                 ),
@@ -183,7 +186,8 @@ class LocationStatusCard extends StatelessWidget {
                             location?.type == LocationType.sos
                         ? Icons.emergency_share
                         : Icons.location_on,
-                    color: location?.type == LocationType.emergency ||
+                    color:
+                        location?.type == LocationType.emergency ||
                             location?.type == LocationType.sos
                         ? Colors.red
                         : Colors.blue,
@@ -214,19 +218,22 @@ class LocationStatusCard extends StatelessWidget {
                         color: isLoading
                             ? Colors.orange
                             : (location?.type == LocationType.emergency ||
-                                location?.type == LocationType.sos)
+                                  location?.type == LocationType.sos)
                             ? Colors.red
                             : Colors.green,
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: (isLoading
-                                    ? Colors.orange
-                                    : (location?.type == LocationType.emergency ||
-                                            location?.type == LocationType.sos)
+                            color:
+                                (isLoading
+                                        ? Colors.orange
+                                        : (location?.type ==
+                                                  LocationType.emergency ||
+                                              location?.type ==
+                                                  LocationType.sos)
                                         ? Colors.red
                                         : Colors.green)
-                                .withValues(alpha: 0.4),
+                                    .withValues(alpha: 0.4),
                             blurRadius: 6,
                             spreadRadius: 1,
                           ),
@@ -239,14 +246,14 @@ class LocationStatusCard extends StatelessWidget {
                         isLoading
                             ? 'Updating location data...'
                             : (location?.type == LocationType.emergency ||
-                                location?.type == LocationType.sos)
+                                  location?.type == LocationType.sos)
                             ? 'Emergency Location Active'
                             : 'Location Available',
                         style: TextStyle(
                           color: isLoading
                               ? Colors.orange
                               : (location?.type == LocationType.emergency ||
-                                  location?.type == LocationType.sos)
+                                    location?.type == LocationType.sos)
                               ? Colors.red
                               : Colors.green,
                           fontSize: isNarrow ? 13 : 15,
@@ -259,34 +266,6 @@ class LocationStatusCard extends StatelessWidget {
               ],
             ),
           ),
-          if (unsyncedCount > 0 && !isLoading)
-            Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: isNarrow ? 10 : 12,
-                vertical: isNarrow ? 6 : 8,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.orange.withValues(alpha: 0.2),
-                    blurRadius: 6,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Text(
-                '$unsyncedCount unsynced',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontSize: isNarrow ? 11 : 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3,
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -386,10 +365,7 @@ class LocationStatusCard extends StatelessWidget {
         child: Center(
           child: Text(
             'No location data available',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: isNarrow ? 14 : 16,
-            ),
+            style: TextStyle(color: Colors.grey, fontSize: isNarrow ? 14 : 16),
           ),
         ),
       );
@@ -552,10 +528,11 @@ class LocationStatusCard extends StatelessWidget {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: (isLoading || location == null
-                          ? Colors.grey
-                          : Color(0xFFFF6500))
-                      .withValues(alpha: 0.4),
+                  color:
+                      (isLoading || location == null
+                              ? Colors.grey
+                              : Color(0xFFFF6500))
+                          .withValues(alpha: 0.4),
                   blurRadius: 10,
                   offset: Offset(0, 3),
                 ),
@@ -579,127 +556,135 @@ class LocationStatusCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              onPressed: (isLoading || location == null) ? null : () async {
-                try {
-                  // Show loading indicator
-                  showDialog(
-                    context: context,
-                    barrierDismissible: false,
-                    builder: (context) => AlertDialog(
-                      content: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(),
-                          SizedBox(width: 16),
-                          Text('Sharing location...'),
-                        ],
-                      ),
-                    ),
-                  );
+              onPressed: (isLoading || location == null)
+                  ? null
+                  : () async {
+                      try {
+                        // Show loading indicator
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (context) => AlertDialog(
+                            content: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CircularProgressIndicator(),
+                                SizedBox(width: 16),
+                                Text('Sharing location...'),
+                              ],
+                            ),
+                          ),
+                        );
 
-                  // Execute share function
-                  onShare();
+                        // Execute share function
+                        onShare();
 
-                  // Close loading dialog
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                  }
+                        // Close loading dialog
+                        if (context.mounted) {
+                          Navigator.of(context).pop();
+                        }
 
-                  // Show success feedback
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Row(
-                          children: [
-                            Icon(Icons.check_circle, color: Colors.white),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
+                        // Show success feedback
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
                                 children: [
-                                  Text(
-                                    'Location shared successfully!',
-                                    style: TextStyle(fontWeight: FontWeight.w600),
-                                  ),
-                                  Text(
-                                    'Coordinates copied to clipboard',
-                                    style: TextStyle(fontSize: 12),
+                                  Icon(Icons.check_circle, color: Colors.white),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Location shared successfully!',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Coordinates copied to clipboard',
+                                          style: TextStyle(fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),
+                              backgroundColor: Colors.green,
+                              duration: Duration(seconds: 4),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              action: SnackBarAction(
+                                label: 'VIEW GPS',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  // Navigate to GPS page
+                                  Navigator.of(context).pushNamed('/gps');
+                                },
+                              ),
                             ),
-                          ],
-                        ),
-                        backgroundColor: Colors.green,
-                        duration: Duration(seconds: 4),
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        action: SnackBarAction(
-                          label: 'VIEW GPS',
-                          textColor: Colors.white,
-                          onPressed: () {
-                            // Navigate to GPS page
-                            Navigator.of(context).pushNamed('/gps');
-                          },
-                        ),
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  // Close loading dialog if still open
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                  }
+                          );
+                        }
+                      } catch (e) {
+                        // Close loading dialog if still open
+                        if (context.mounted) {
+                          Navigator.of(context).pop();
+                        }
 
-                  // Show error feedback
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Row(
-                          children: [
-                            Icon(Icons.error, color: Colors.white),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
+                        // Show error feedback
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
                                 children: [
-                                  Text(
-                                    'Failed to share location',
-                                    style: TextStyle(fontWeight: FontWeight.w600),
-                                  ),
-                                  Text(
-                                    e.toString(),
-                                    style: TextStyle(fontSize: 12),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                  Icon(Icons.error, color: Colors.white),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Failed to share location',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        Text(
+                                          e.toString(),
+                                          style: TextStyle(fontSize: 12),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),
+                              backgroundColor: Colors.red,
+                              duration: Duration(seconds: 5),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              action: SnackBarAction(
+                                label: 'RETRY',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  // Retry share
+                                },
+                              ),
                             ),
-                          ],
-                        ),
-                        backgroundColor: Colors.red,
-                        duration: Duration(seconds: 5),
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        action: SnackBarAction(
-                          label: 'RETRY',
-                          textColor: Colors.white,
-                          onPressed: () {
-                            // Retry share
-                          },
-                        ),
-                      ),
-                    );
-                  }
-                }
-              },
+                          );
+                        }
+                      }
+                    },
             ),
           ),
         ),

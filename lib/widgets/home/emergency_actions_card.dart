@@ -425,12 +425,12 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
       return;
     }
 
-    // Send to all connected devices individually AND broadcast
+    // Send to all connected devices individually for chat persistence
     debugPrint(
       '📢 Broadcasting emergency message to ${connectedDevices.length} connected devices',
     );
 
-    // First, send targeted messages
+    // Save to each device's chat session (for chat history)
     for (final entry in connectedDevices.entries) {
       final deviceId = entry.key;
       final device = entry.value;
@@ -465,22 +465,15 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
             debugPrint('⚠️ Failed to persist emergency message for $deviceId');
           }
         }
-
-        await widget.p2pService.sendMessage(
-          message: messageText,
-          type: messageType,
-          targetDeviceId: deviceId, // CRITICAL: Target specific device
-          senderName: senderName, // CRITICAL: Include actual sender name
-          latitude: latitude,
-          longitude: longitude,
-        );
-        debugPrint('✅ Emergency message sent to device: $deviceId');
       } catch (e) {
-        debugPrint('❌ Failed to send emergency message to $deviceId: $e');
+        debugPrint(
+          '❌ Failed to save emergency message to chat for $deviceId: $e',
+        );
       }
     }
 
-    // Also send as broadcast to catch any missed connections
+    // ✅ CRITICAL FIX: Send as TRUE BROADCAST for multi-hop mesh forwarding
+    // NO targetDeviceId = allows intermediate nodes to forward to others
     try {
       await widget.p2pService.sendMessage(
         message: messageText,
@@ -488,8 +481,10 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
         senderName: senderName,
         latitude: latitude,
         longitude: longitude,
+        ttl: 5, // ✅ 5 hops max for mesh network
+        // targetDeviceId: null (omitted) = BROADCAST mode enables multi-hop
       );
-      debugPrint('✅ Emergency broadcast completed');
+      debugPrint('✅ Emergency broadcast completed (multi-hop enabled)');
     } catch (e) {
       debugPrint('❌ Emergency broadcast failed: $e');
     }

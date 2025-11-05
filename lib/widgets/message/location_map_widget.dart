@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../utils/resqlink_theme.dart';
+import '../../services/map_service.dart';
 import 'location_preview_modal.dart';
 
 class LocationMapWidget extends StatelessWidget {
@@ -41,11 +42,10 @@ class LocationMapWidget extends StatelessWidget {
               ),
             ),
             children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.resqlink',
-                maxZoom: 19,
-                tileProvider: NetworkTileProvider(),
+              // CRITICAL FIX: Use PhilippinesMapService for offline map support
+              // This allows maps to load even when offline if tiles are cached
+              PhilippinesMapService.instance.getTileLayer(
+                useOffline: !PhilippinesMapService.instance.isOnline,
               ),
               MarkerLayer(
                 markers: [

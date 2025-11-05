@@ -494,9 +494,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     debugPrint('🆔 Initializing P2P with username: $userName');
 
-    final preferredRole = DateTime.now().millisecondsSinceEpoch % 2 == 0
-        ? 'host'
-        : 'client';
+    // CRITICAL FIX: Don't auto-select role - let user choose explicitly via UI
+    // Random role selection was causing unpredictable behavior
+    const String? preferredRole = null;
 
     final success = await _p2pService.initialize(
       userName,
@@ -511,7 +511,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _p2pService.onDeviceConnected = _onDeviceConnected;
       _p2pService.onDeviceDisconnected = _onDeviceDisconnected;
       _p2pService.addListener(_updateUI);
-      _p2pService.emergencyMode = true;
 
       // Message queue service initialization removed
       debugPrint('✅ P2P Service initialized without message queue');
@@ -619,7 +618,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       // WiFi Direct only mode - no fallback configuration needed
 
       if (settings.offlineMode) {
+        // CRITICAL FIX: Emergency mode controlled by settings
         _p2pService.emergencyMode = true;
+      } else {
+        _p2pService.emergencyMode = false;
       }
     }
     setState(() {});
@@ -807,27 +809,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
             ],
           ],
-        ),
-      ),
-    );
-
-    // Online/Offline Status
-    actions.add(
-      Padding(
-        padding: EdgeInsets.only(right: isNarrowScreen ? 8 : 12),
-        child: Container(
-          padding: EdgeInsets.all(isNarrowScreen ? 6 : 8),
-          decoration: BoxDecoration(
-            color: _p2pService.isOnline
-                ? Colors.green.withValues(alpha: 0.2)
-                : Colors.grey.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            _p2pService.isOnline ? Icons.cloud_done : Icons.cloud_off,
-            color: _p2pService.isOnline ? Colors.green : Colors.grey.shade300,
-            size: isNarrowScreen ? 16 : 20,
-          ),
         ),
       ),
     );

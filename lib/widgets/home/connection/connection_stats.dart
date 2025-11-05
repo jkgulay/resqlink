@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/controllers/home_controller.dart';
+import 'package:resqlink/services/p2p/wifi_direct_service.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';
 import 'package:resqlink/utils/responsive_utils.dart';
-import 'package:resqlink/services/p2p/wifi_direct_service.dart';
 
 class ConnectionStats extends StatelessWidget {
   final HomeController controller;

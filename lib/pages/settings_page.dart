@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/features/database/repositories/chat_repository.dart';
+import 'package:resqlink/features/database/repositories/location_repository.dart';
 import 'package:resqlink/pages/landing_page.dart';
 import 'package:resqlink/services/auth_service.dart';
 import 'package:resqlink/features/database/repositories/message_repository.dart';
 import 'package:resqlink/features/database/repositories/system_repository.dart';
 import 'package:resqlink/services/messaging/message_sync_service.dart';
-import 'package:resqlink/services/p2p/p2p_base_service.dart';
 import 'package:resqlink/services/p2p/p2p_main_service.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';
 import 'package:flutter/services.dart';
+import 'dart:io';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart' as path;
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
@@ -28,6 +31,9 @@ class SettingsPageState extends State<SettingsPage> {
   // Statistics
   int _totalMessages = 0;
   int _pendingMessages = 0;
+  int _totalSessions = 0;
+  int _totalLocations = 0;
+  int _activeConnections = 0;
   String _storageUsed = "0 MB";
   bool _isLoading = false;
 
@@ -40,16 +46,33 @@ class SettingsPageState extends State<SettingsPage> {
 
   Future<void> _loadStatistics() async {
     try {
+      // Get message counts
       final allMessages = await MessageRepository.getAllMessages();
       final pendingMessages = await MessageRepository.getPendingMessages();
+
+      // Get chat session count
+      final allSessions = await ChatRepository.getAllSessions();
+
+      // Get location statistics
+      final locationStats = await LocationRepository.getLocationStats();
+      final totalLocations = locationStats['totalLocations'] as int? ?? 0;
+
+      // Get actual database file size
+      final dbPath = await getDatabasesPath();
+      final dbFile = File(path.join(dbPath, 'resqlink_enhanced.db'));
+      final dbSize = await dbFile.exists() ? await dbFile.length() : 0;
+
+      // Get active P2P connections
+      final connectedDevices = widget.p2pService?.connectedDevices.length ?? 0;
 
       setState(() {
         _totalMessages = allMessages.length;
         _pendingMessages = pendingMessages.length;
-        // Calculate approximate storage (rough estimate)
-        final avgMessageSize = 200; // bytes
-        final totalBytes = _totalMessages * avgMessageSize;
-        _storageUsed = "${(totalBytes / (1024 * 1024)).toStringAsFixed(2)} MB";
+        _totalSessions = allSessions.length;
+        _totalLocations = totalLocations;
+        _activeConnections = connectedDevices;
+        // Calculate actual storage
+        _storageUsed = "${(dbSize / (1024 * 1024)).toStringAsFixed(2)} MB";
       });
     } catch (e) {
       debugPrint('Error loading statistics: $e');
@@ -131,7 +154,8 @@ class SettingsPageState extends State<SettingsPage> {
       try {
         _showMessage('Merging duplicate sessions...', isSuccess: false);
 
-        final duplicatesMerged = await ChatRepository.cleanupDuplicateSessions();
+        final duplicatesMerged =
+            await ChatRepository.cleanupDuplicateSessions();
 
         await _loadStatistics();
         if (!mounted) return;
@@ -195,152 +219,6 @@ class SettingsPageState extends State<SettingsPage> {
     } catch (e) {
       if (!mounted) return;
       _showMessage('Sync failed: $e', isDanger: true);
-    }
-  }
-
-  Future<void> _forceRole(P2PRole role) async {
-    if (widget.p2pService == null) return;
-
-    try {
-      _showMessage(
-        'Forcing role to ${role.name.toUpperCase()}...',
-        isSuccess: false,
-      );
-
-      if (role == P2PRole.host) {
-        await widget.p2pService!.forceHostRole();
-      } else if (role == P2PRole.client) {
-        await widget.p2pService!.forceClientRole();
-      }
-
-      setState(() {}); // Refresh UI
-
-      if (!mounted) return;
-      _showMessage(
-        'Role forced to ${role.name.toUpperCase()}',
-        isSuccess: true,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      _showMessage('Failed to force role: $e', isDanger: true);
-    }
-  }
-
-  Future<void> _clearForcedRole() async {
-    if (widget.p2pService == null) return;
-
-    try {
-      await widget.p2pService!.clearForcedRole();
-      setState(() {}); // Refresh UI
-
-      if (!mounted) return;
-      _showMessage('Returned to automatic role selection', isSuccess: true);
-    } catch (e) {
-      if (!mounted) return;
-      _showMessage('Failed to clear forced role: $e', isDanger: true);
-    }
-  }
-
-  void _showNetworkStatusDialog() {
-    final info = widget.p2pService?.getConnectionInfo() ?? {};
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: ResQLinkTheme.cardDark,
-        title: Text(
-          'P2P Network Status',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildInfoRow('Role', info['role'] ?? 'None'),
-            _buildInfoRow(
-              'Connection',
-              info['isConnected'] == true ? 'Connected' : 'Disconnected',
-            ),
-            _buildInfoRow(
-              'Connected Devices',
-              '${info['connectedDevices'] ?? 0}',
-            ),
-            _buildInfoRow('Known Devices', '${info['knownDevices'] ?? 0}'),
-            _buildInfoRow(
-              'Emergency Mode',
-              info['emergencyMode'] == true ? 'On' : 'Off',
-            ),
-            _buildInfoRow(
-              'Socket Health',
-              info['socketHealthy'] == true ? 'Healthy' : 'Issues',
-            ),
-            _buildInfoRow('Failures', '${info['consecutiveFailures'] ?? 0}'),
-            if (info['isRoleForced'] == true)
-              _buildInfoRow(
-                'Forced Role',
-                info['forcedRole'] ?? 'Unknown',
-                color: ResQLinkTheme.orange,
-              ),
-            SizedBox(height: 8),
-            // Pure WiFi Direct status only
-            _buildInfoRow(
-              'WiFi Direct Status',
-              widget.p2pService?.wifiDirectService?.connectionState.toString().split('.').last ?? 'Unknown',
-              color: widget.p2pService?.wifiDirectService?.connectionState.toString().contains('connected') == true
-                  ? ResQLinkTheme.safeGreen
-                  : Colors.grey,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('OK', style: TextStyle(color: Colors.white70)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInfoRow(String label, String value, {Color? color}) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(color: Colors.white70)),
-          Text(
-            value,
-            style: TextStyle(
-              color: color ?? Colors.white,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _testNotifications() async {
-    if (!mounted) return;
-    final settings = context.read<SettingsService>();
-
-    try {
-      // Test notification with current settings
-      HapticFeedback.mediumImpact();
-
-      if (settings.vibrationNotifications && !settings.silentMode) {
-        await HapticFeedback.heavyImpact();
-      }
-
-      if (!mounted) return;
-      _showMessage(
-        'Test notification sent with current settings',
-        isSuccess: true,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      _showMessage('Failed to test notifications: $e', isDanger: true);
     }
   }
 
@@ -408,22 +286,24 @@ class SettingsPageState extends State<SettingsPage> {
         behavior: SnackBarBehavior.floating,
         duration: Duration(seconds: 5),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        action: message.contains('Password:') ? SnackBarAction(
-          label: 'COPY',
-          textColor: Colors.white,
-          onPressed: () {
-            final lines = message.split('\n');
-            final passwordLine = lines.firstWhere(
-              (line) => line.contains('Password:'),
-              orElse: () => '',
-            );
-            if (passwordLine.isNotEmpty) {
-              final password = passwordLine.split('Password: ').last;
-              Clipboard.setData(ClipboardData(text: password));
-              HapticFeedback.lightImpact();
-            }
-          },
-        ) : null,
+        action: message.contains('Password:')
+            ? SnackBarAction(
+                label: 'COPY',
+                textColor: Colors.white,
+                onPressed: () {
+                  final lines = message.split('\n');
+                  final passwordLine = lines.firstWhere(
+                    (line) => line.contains('Password:'),
+                    orElse: () => '',
+                  );
+                  if (passwordLine.isNotEmpty) {
+                    final password = passwordLine.split('Password: ').last;
+                    Clipboard.setData(ClipboardData(text: password));
+                    HapticFeedback.lightImpact();
+                  }
+                },
+              )
+            : null,
       ),
     );
   }
@@ -583,7 +463,6 @@ class SettingsPageState extends State<SettingsPage> {
               children: [
                 Icon(Icons.analytics, color: ResQLinkTheme.orange),
                 SizedBox(width: ResponsiveSpacing.xs(context)),
-                // FIXED: Use ResponsiveTextWidget instead of ResponsiveText
                 ResponsiveTextWidget(
                   'App Statistics',
                   styleBuilder: (context) => ResponsiveText.heading3(context),
@@ -593,20 +472,41 @@ class SettingsPageState extends State<SettingsPage> {
               ],
             ),
             SizedBox(height: ResponsiveSpacing.md(context)),
+            // Row 1: Messages and Sessions
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
+                _buildStatItem('Messages', '$_totalMessages', Icons.message),
                 _buildStatItem(
-                  'Total Messages',
-                  '$_totalMessages',
-                  Icons.message,
+                  'Sessions',
+                  '$_totalSessions',
+                  Icons.chat_bubble,
                 ),
+                _buildStatItem(
+                  'Locations',
+                  '$_totalLocations',
+                  Icons.location_on,
+                ),
+              ],
+            ),
+            SizedBox(height: ResponsiveSpacing.md(context)),
+            Divider(color: Colors.white24, height: 1),
+            SizedBox(height: ResponsiveSpacing.md(context)),
+            // Row 2: Sync status and storage
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
                 _buildStatItem(
                   'Pending Sync',
                   '$_pendingMessages',
                   Icons.sync_problem,
                 ),
-                _buildStatItem('Storage Used', _storageUsed, Icons.storage),
+                _buildStatItem(
+                  'Connections',
+                  '$_activeConnections',
+                  Icons.devices,
+                ),
+                _buildStatItem('Storage', _storageUsed, Icons.storage),
               ],
             ),
           ],
@@ -730,200 +630,11 @@ class SettingsPageState extends State<SettingsPage> {
                 ),
                 activeColor: ResQLinkTheme.orange,
               ),
-              Divider(color: Colors.white24, height: 1),
-              ListTile(
-                title: Text(
-                  'P2P Network Status',
-                  style: TextStyle(color: Colors.white),
-                ),
-                subtitle: Text(
-                  widget.p2pService?.isConnected == true
-                      ? 'Connected to ${widget.p2pService?.connectedDevices.length ?? 0} devices'
-                      : 'Not connected',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-                leading: Icon(
-                  Icons.wifi_tethering,
-                  color: widget.p2pService?.isConnected == true
-                      ? ResQLinkTheme.safeGreen
-                      : Colors.grey,
-                ),
-                trailing: Icon(Icons.info_outline, color: Colors.white54),
-                onTap: _showNetworkStatusDialog,
-              ),
             ],
           ),
         ),
-        SizedBox(height: 16),
-        // Enhanced role selection with manual force options
-        _buildEnhancedRoleSection(settings),
         // Connection mode and hotspot sections removed - pure WiFi Direct only
       ],
-    );
-  }
-
-  Widget _buildEnhancedRoleSection(SettingsService settings) {
-    final connectionInfo = widget.p2pService?.getConnectionInfo() ?? {};
-    final isRoleForced = connectionInfo['isRoleForced'] ?? false;
-    final forcedRole = connectionInfo['forcedRole'];
-    final currentRole = connectionInfo['role'] ?? 'none';
-
-    return Card(
-      color: ResQLinkTheme.cardDark,
-      elevation: 2,
-      child: Column(
-        children: [
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(Icons.device_hub, color: ResQLinkTheme.orange),
-                SizedBox(width: 8),
-                Text(
-                  'Network Role Control',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Current status
-          Container(
-            margin: EdgeInsets.symmetric(horizontal: 16),
-            padding: EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isRoleForced
-                  ? ResQLinkTheme.orange.withAlpha(51)
-                  : ResQLinkTheme.cardDark.withAlpha(128),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: isRoleForced
-                    ? ResQLinkTheme.orange.withAlpha(128)
-                    : Colors.grey.withAlpha(128),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      isRoleForced ? Icons.lock : Icons.auto_mode,
-                      color: isRoleForced ? ResQLinkTheme.orange : Colors.grey,
-                      size: 16,
-                    ),
-                    SizedBox(width: 8),
-                    Text(
-                      isRoleForced ? 'FORCED MODE' : 'AUTO MODE',
-                      style: TextStyle(
-                        color: isRoleForced
-                            ? ResQLinkTheme.orange
-                            : Colors.grey,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: 4),
-                Text(
-                  'Current role: ${currentRole.toUpperCase()}',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
-                ),
-                if (isRoleForced)
-                  Text(
-                    'Forced as: ${forcedRole?.toString().toUpperCase() ?? 'Unknown'}',
-                    style: TextStyle(color: ResQLinkTheme.orange, fontSize: 12),
-                  ),
-              ],
-            ),
-          ),
-
-          SizedBox(height: 16),
-
-          // Manual control buttons
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _forceRole(P2PRole.host),
-                        icon: Icon(Icons.wifi_tethering, size: 18),
-                        label: Text('Force HOST'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              (isRoleForced && forcedRole == 'host')
-                              ? ResQLinkTheme.orange
-                              : ResQLinkTheme.cardDark,
-                          foregroundColor: Colors.white,
-                          side: BorderSide(color: ResQLinkTheme.orange),
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _forceRole(P2PRole.client),
-                        icon: Icon(Icons.connect_without_contact, size: 18),
-                        label: Text('Force CLIENT'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              (isRoleForced && forcedRole == 'client')
-                              ? ResQLinkTheme.orange
-                              : ResQLinkTheme.cardDark,
-                          foregroundColor: Colors.white,
-                          side: BorderSide(color: ResQLinkTheme.orange),
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: isRoleForced ? _clearForcedRole : null,
-                    icon: Icon(Icons.auto_mode, size: 18),
-                    label: Text('Return to AUTO Mode'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isRoleForced
-                          ? Colors.grey.shade700
-                          : Colors.grey.shade800,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          SizedBox(height: 16),
-
-          // Help text
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              '• HOST: Creates a group for others to join\n'
-              '• CLIENT: Connects to existing groups\n'
-              '• AUTO: Let the app decide automatically\n\n'
-              'Use manual control when experiencing connection issues.',
-              style: TextStyle(color: Colors.white60, fontSize: 11),
-            ),
-          ),
-
-          SizedBox(height: 16),
-        ],
-      ),
     );
   }
 
@@ -1068,23 +779,6 @@ class SettingsPageState extends State<SettingsPage> {
             ),
             activeColor: ResQLinkTheme.orange,
           ),
-          Divider(color: Colors.white24, height: 1),
-          ListTile(
-            title: Text(
-              'Test Notifications',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: Text(
-              'Test current notification settings',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            leading: Icon(
-              Icons.notifications_active,
-              color: ResQLinkTheme.orange,
-            ),
-            trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: _testNotifications,
-          ),
         ],
       ),
     );
@@ -1096,30 +790,6 @@ class SettingsPageState extends State<SettingsPage> {
       elevation: 2,
       child: Column(
         children: [
-          SwitchListTile(
-            title: Text(
-              'Background Sync',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: Text(
-              'Sync messages in the background',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            value: settings.backgroundSync && !settings.offlineMode,
-            onChanged: settings.offlineMode
-                ? null
-                : (value) async {
-                    await settings.setBackgroundSync(value);
-                  },
-            secondary: Icon(
-              Icons.sync_outlined,
-              color: (settings.backgroundSync && !settings.offlineMode)
-                  ? ResQLinkTheme.safeGreen
-                  : Colors.grey,
-            ),
-            activeColor: ResQLinkTheme.orange,
-          ),
-          Divider(color: Colors.white24, height: 1),
           ListTile(
             title: Text(
               'Merge Duplicate Sessions',
@@ -1146,22 +816,6 @@ class SettingsPageState extends State<SettingsPage> {
             leading: Icon(Icons.delete_forever, color: ResQLinkTheme.orange),
             trailing: Icon(Icons.chevron_right, color: Colors.white54),
             onTap: _clearChatHistory,
-          ),
-          Divider(color: Colors.white24, height: 1),
-          ListTile(
-            title: Text(
-              'Export Chat Data',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: Text(
-              'Export messages for backup',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            leading: Icon(Icons.file_download, color: ResQLinkTheme.orange),
-            trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: () {
-              _showMessage('Export feature coming soon', isWarning: true);
-            },
           ),
         ],
       ),
@@ -1243,5 +897,4 @@ class SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
-
 }

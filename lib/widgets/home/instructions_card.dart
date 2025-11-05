@@ -67,10 +67,7 @@ class InstructionsCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: Colors.orange.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: Colors.orange,
-                width: 2.5,
-              ),
+              border: Border.all(color: Colors.orange, width: 2.5),
               boxShadow: [
                 BoxShadow(
                   color: Colors.orange.withValues(alpha: 0.2),
@@ -162,14 +159,6 @@ class InstructionsCard extends StatelessWidget {
           SizedBox(height: 20),
           _buildInstructionItem(
             '4',
-            'Messages are saved locally and sync to cloud when internet is available',
-            Icons.sync,
-            Colors.teal,
-            isNarrow,
-          ),
-          SizedBox(height: 20),
-          _buildInstructionItem(
-            '5',
             'Location sharing helps rescuers find you in emergencies',
             Icons.my_location,
             Colors.red,
