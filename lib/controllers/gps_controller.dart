@@ -119,6 +119,7 @@ class GpsController extends ChangeNotifier {
   bool get autoSaveEnabled => _autoSaveEnabled;
   bool get emergencyBroadcastEnabled => _emergencyBroadcastEnabled;
   bool get hasOfflineMap =>
+      _hasOfflineMap ||
       _hasDownloadedMaps ||
       (_cacheInfo['cachedTiles'] != null && _cacheInfo['cachedTiles'] > 0);
   bool get showTrackingPath => _showTrackingPath;
@@ -290,12 +291,21 @@ class GpsController extends ChangeNotifier {
         };
 
         await downloadOfflineMaps(params);
+
+        // Wait for cache info to update before saving
+        await updateCacheInfo();
+
+        _offlineMapSizeInMB = double.parse(
+          _cacheInfo['storageSizeMB'] ?? '0.0',
+        );
       }
 
       _offlineMapLastUpdated = DateTime.now();
       await _saveOfflineMapStatus();
 
-      debugPrint('✅ Offline map update completed');
+      debugPrint(
+        '✅ Offline map update completed and saved to persistent storage',
+      );
     } catch (e) {
       debugPrint('❌ Error updating offline map: $e');
     } finally {
@@ -396,13 +406,18 @@ class GpsController extends ChangeNotifier {
 
       await downloadOfflineMaps(params);
 
+      // Wait for cache info to update before reading size
+      await updateCacheInfo();
+
       _hasOfflineMap = true;
       _offlineMapSizeInMB = double.parse(_cacheInfo['storageSizeMB'] ?? '0.0');
       _offlineMapLastUpdated = DateTime.now();
 
       await _saveOfflineMapStatus();
 
-      debugPrint('✅ Offline map download completed');
+      debugPrint(
+        '✅ Offline map download completed and saved to persistent storage',
+      );
     } catch (e) {
       debugPrint('❌ Error downloading offline map: $e');
       _errorMessage = 'Failed to download offline map: $e';
@@ -1188,6 +1203,10 @@ class GpsController extends ChangeNotifier {
       if (totalTiles > 0) {
         _hasDownloadedMaps = true;
       }
+
+      debugPrint(
+        '📊 Cache info updated: tiles=$totalTiles, size=${_cacheInfo['storageSizeMB']}MB, hasMap=$hasOfflineMap',
+      );
 
       notifyListeners();
     } catch (e) {

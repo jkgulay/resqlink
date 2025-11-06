@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/gps_controller.dart';
 import '../../pages/gps_page.dart';
@@ -52,7 +53,10 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
     return Consumer<GpsController>(
       builder: (context, controller, child) {
         final screenWidth = MediaQuery.of(context).size.width;
-        final isSmallScreen = screenWidth < 600;
+        final isNarrow = screenWidth < 400;
+        final emergencyColor = _getEmergencyColor(
+          controller.currentEmergencyLevel,
+        );
 
         return Positioned(
           top: 16,
@@ -65,21 +69,31 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
                 constraints: BoxConstraints(maxWidth: screenWidth - 32),
-                padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
+                padding: EdgeInsets.all(isNarrow ? 14 : 18),
                 decoration: BoxDecoration(
-                  color: ResQLinkTheme.cardDark.withValues(alpha: 0.95),
-                  borderRadius: BorderRadius.circular(16),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      ResQLinkTheme.cardDark.withValues(alpha: 0.95),
+                      ResQLinkTheme.cardDark.withValues(alpha: 0.90),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: _getEmergencyColor(
-                      controller.currentEmergencyLevel,
-                    ).withValues(alpha: 0.3),
-                    width: 2,
+                    color: emergencyColor.withValues(alpha: 0.6),
+                    width: 2.5,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
+                      color: emergencyColor.withValues(alpha: 0.3),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
                     ),
                   ],
                 ),
@@ -87,18 +101,18 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Always visible header
-                    _buildCompactHeader(controller, isSmallScreen),
+                    _buildCompactHeader(controller, isNarrow, emergencyColor),
 
                     // Expandable content
                     SizeTransition(
                       sizeFactor: _expandAnimation,
                       child: Column(
                         children: [
-                          SizedBox(height: isSmallScreen ? 12 : 16),
-                          _buildStatsGrid(controller, isSmallScreen),
+                          SizedBox(height: isNarrow ? 14 : 18),
+                          _buildStatsGrid(controller, isNarrow),
                           if (controller.sosMode) ...[
-                            SizedBox(height: isSmallScreen ? 12 : 16),
-                            _buildSOSPanel(controller, isSmallScreen),
+                            SizedBox(height: isNarrow ? 14 : 18),
+                            _buildSOSPanel(controller, isNarrow),
                           ],
                         ],
                       ),
@@ -113,74 +127,79 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
     );
   }
 
-  Widget _buildCompactHeader(GpsController controller, bool isSmallScreen) {
-    final emergencyColor = _getEmergencyColor(controller.currentEmergencyLevel);
-
+  Widget _buildCompactHeader(
+    GpsController controller,
+    bool isNarrow,
+    Color emergencyColor,
+  ) {
     return Row(
       children: [
-        // Status indicator
+        // Status indicator with gradient
         Container(
-          padding: const EdgeInsets.all(8),
+          padding: EdgeInsets.all(isNarrow ? 8 : 10),
           decoration: BoxDecoration(
-            color: emergencyColor.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: emergencyColor, width: 1.5),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                emergencyColor.withValues(alpha: 0.3),
+                emergencyColor.withValues(alpha: 0.15),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: emergencyColor, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: emergencyColor.withValues(alpha: 0.4),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Icon(
             _getEmergencyIcon(controller.currentEmergencyLevel),
             color: emergencyColor,
-            size: 16,
+            size: isNarrow ? 18 : 20,
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 12),
 
         // Compact info
         Expanded(
           child: Row(
             children: [
               // GPS Status
-              Icon(
+              _buildQuickStat(
                 controller.isLocationServiceEnabled
-                    ? Icons.gps_fixed
-                    : Icons.gps_off,
-                color: controller.isLocationServiceEnabled
-                    ? Colors.green
-                    : Colors.red,
-                size: 16,
-              ),
-              const SizedBox(width: 4),
-              Text(
+                    ? Icons.gps_fixed_rounded
+                    : Icons.gps_off_rounded,
                 '${controller.savedLocations.length}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
+                controller.isLocationServiceEnabled
+                    ? ResQLinkTheme.safeGreen
+                    : ResQLinkTheme.primaryRed,
+                isNarrow,
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: isNarrow ? 10 : 12),
 
               // Battery
-              Icon(
-                Icons.battery_std,
-                color: _getBatteryColor(controller.batteryLevel),
-                size: 16,
-              ),
-              const SizedBox(width: 4),
-              Text(
+              _buildQuickStat(
+                _getBatteryIcon(controller.batteryLevel),
                 '${controller.batteryLevel}%',
-                style: TextStyle(
-                  color: _getBatteryColor(controller.batteryLevel),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
+                _getBatteryColor(controller.batteryLevel),
+                isNarrow,
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: isNarrow ? 10 : 12),
 
               // Network
-              Icon(
-                controller.isConnected ? Icons.wifi : Icons.wifi_off,
-                color: controller.isConnected ? Colors.green : Colors.orange,
-                size: 16,
+              _buildQuickStat(
+                controller.isConnected
+                    ? Icons.wifi_rounded
+                    : Icons.wifi_off_rounded,
+                '',
+                controller.isConnected
+                    ? ResQLinkTheme.safeGreen
+                    : ResQLinkTheme.orange,
+                isNarrow,
               ),
             ],
           ),
@@ -189,38 +208,86 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
         // SOS indicator
         if (controller.sosMode)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: ResQLinkTheme.primaryRed,
-              borderRadius: BorderRadius.circular(12),
+            padding: EdgeInsets.symmetric(
+              horizontal: isNarrow ? 10 : 12,
+              vertical: isNarrow ? 5 : 6,
             ),
-            child: const Text(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  ResQLinkTheme.primaryRed,
+                  ResQLinkTheme.primaryRed.withValues(alpha: 0.8),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: ResQLinkTheme.primaryRed.withValues(alpha: 0.5),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Text(
               'SOS',
-              style: TextStyle(
+              style: GoogleFonts.poppins(
                 color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
+                fontSize: isNarrow ? 11 : 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
               ),
             ),
           ),
 
-        const SizedBox(width: 8),
+        SizedBox(width: isNarrow ? 10 : 12),
 
         // Expand/collapse icon
         AnimatedRotation(
           turns: _isExpanded ? 0.5 : 0,
           duration: const Duration(milliseconds: 300),
-          child: Icon(
-            Icons.keyboard_arrow_down,
-            color: Colors.white.withValues(alpha: 0.7),
-            size: 20,
+          child: Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: Colors.white.withValues(alpha: 0.8),
+              size: isNarrow ? 20 : 22,
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildStatsGrid(GpsController controller, bool isSmallScreen) {
+  Widget _buildQuickStat(
+    IconData icon,
+    String text,
+    Color color,
+    bool isNarrow,
+  ) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: isNarrow ? 16 : 18),
+        if (text.isNotEmpty) ...[
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: GoogleFonts.poppins(
+              color: color,
+              fontSize: isNarrow ? 12 : 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStatsGrid(GpsController controller, bool isNarrow) {
     // Determine accuracy quality and color
     final accuracy = controller.lastKnownLocation?.accuracy;
     Color accuracyColor;
@@ -249,19 +316,19 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
           child: _buildStatItem(
             'Accuracy',
             accuracyLabel,
-            Icons.gps_fixed,
+            Icons.gps_fixed_rounded,
             accuracyColor,
-            isSmallScreen,
+            isNarrow,
           ),
         ),
-        const SizedBox(width: 8),
+        SizedBox(width: isNarrow ? 10 : 12),
         Expanded(
           child: _buildStatItem(
             'Emergency',
             _getEmergencyLevelText(controller.currentEmergencyLevel),
             _getEmergencyIcon(controller.currentEmergencyLevel),
             _getEmergencyColor(controller.currentEmergencyLevel),
-            isSmallScreen,
+            isNarrow,
           ),
         ),
       ],
@@ -273,33 +340,49 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
     String value,
     IconData icon,
     Color color,
-    bool isSmallScreen,
+    bool isNarrow,
   ) {
     return Container(
-      padding: EdgeInsets.all(isSmallScreen ? 8 : 12),
+      padding: EdgeInsets.all(isNarrow ? 12 : 14),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [color.withValues(alpha: 0.2), color.withValues(alpha: 0.1)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.2),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         children: [
-          Icon(icon, color: color, size: 16),
-          const SizedBox(height: 4),
+          Icon(icon, color: color, size: isNarrow ? 20 : 22),
+          SizedBox(height: isNarrow ? 6 : 8),
           Text(
             value,
-            style: TextStyle(
+            style: GoogleFonts.poppins(
               color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
+              fontSize: isNarrow ? 12 : 13,
+              fontWeight: FontWeight.w700,
             ),
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
+          const SizedBox(height: 2),
           Text(
             label,
-            style: TextStyle(color: color.withValues(alpha: 0.8), fontSize: 9),
+            style: GoogleFonts.poppins(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: isNarrow ? 10 : 11,
+              fontWeight: FontWeight.w500,
+            ),
             textAlign: TextAlign.center,
           ),
         ],
@@ -307,41 +390,80 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
     );
   }
 
-  Widget _buildSOSPanel(GpsController controller, bool isSmallScreen) {
+  Widget _buildSOSPanel(GpsController controller, bool isNarrow) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(isNarrow ? 12 : 14),
       decoration: BoxDecoration(
-        color: ResQLinkTheme.primaryRed.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ResQLinkTheme.primaryRed, width: 1),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            ResQLinkTheme.primaryRed.withValues(alpha: 0.2),
+            ResQLinkTheme.primaryRed.withValues(alpha: 0.1),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: ResQLinkTheme.primaryRed.withValues(alpha: 0.6),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: ResQLinkTheme.primaryRed.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning, color: ResQLinkTheme.primaryRed, size: 16),
-          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: ResQLinkTheme.primaryRed.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              Icons.warning_rounded,
+              color: ResQLinkTheme.primaryRed,
+              size: isNarrow ? 18 : 20,
+            ),
+          ),
+          SizedBox(width: isNarrow ? 10 : 12),
           Expanded(
             child: Text(
               'EMERGENCY MODE ACTIVE',
-              style: const TextStyle(
+              style: GoogleFonts.poppins(
                 color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
+                fontSize: isNarrow ? 12 : 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
               ),
             ),
           ),
-          TextButton(
+          SizedBox(width: isNarrow ? 8 : 10),
+          ElevatedButton(
             onPressed: () => controller.deactivateSOS(),
-            style: TextButton.styleFrom(
+            style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white.withValues(alpha: 0.2),
-              minimumSize: const Size(40, 28),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              foregroundColor: Colors.white,
+              minimumSize: Size(isNarrow ? 50 : 60, isNarrow ? 32 : 36),
+              padding: EdgeInsets.symmetric(horizontal: isNarrow ? 10 : 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.3),
+                  width: 1,
+                ),
+              ),
             ),
-            child: const Text(
+            child: Text(
               'STOP',
-              style: TextStyle(
+              style: GoogleFonts.poppins(
                 color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
+                fontSize: isNarrow ? 11 : 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
               ),
             ),
           ),
@@ -355,9 +477,9 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
       case EmergencyLevel.safe:
         return ResQLinkTheme.safeGreen;
       case EmergencyLevel.caution:
-        return Colors.yellow;
+        return ResQLinkTheme.warningYellow;
       case EmergencyLevel.warning:
-        return Colors.orange;
+        return ResQLinkTheme.orange;
       case EmergencyLevel.danger:
         return ResQLinkTheme.emergencyOrange;
       case EmergencyLevel.critical:
@@ -368,15 +490,15 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
   IconData _getEmergencyIcon(EmergencyLevel level) {
     switch (level) {
       case EmergencyLevel.safe:
-        return Icons.check_circle;
+        return Icons.check_circle_rounded;
       case EmergencyLevel.caution:
-        return Icons.info;
+        return Icons.info_rounded;
       case EmergencyLevel.warning:
-        return Icons.warning_amber;
+        return Icons.warning_amber_rounded;
       case EmergencyLevel.danger:
-        return Icons.warning;
+        return Icons.warning_rounded;
       case EmergencyLevel.critical:
-        return Icons.emergency;
+        return Icons.emergency_rounded;
     }
   }
 
@@ -396,8 +518,17 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
   }
 
   Color _getBatteryColor(int level) {
-    if (level > 50) return Colors.green;
-    if (level > 20) return Colors.orange;
-    return Colors.red;
+    if (level > 50) return ResQLinkTheme.safeGreen;
+    if (level > 20) return ResQLinkTheme.orange;
+    return ResQLinkTheme.primaryRed;
+  }
+
+  IconData _getBatteryIcon(int level) {
+    if (level > 90) return Icons.battery_full_rounded;
+    if (level > 70) return Icons.battery_6_bar_rounded;
+    if (level > 50) return Icons.battery_5_bar_rounded;
+    if (level > 30) return Icons.battery_3_bar_rounded;
+    if (level > 20) return Icons.battery_2_bar_rounded;
+    return Icons.battery_1_bar_rounded;
   }
 }
