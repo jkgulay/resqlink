@@ -495,7 +495,6 @@ class P2PMainService extends P2PBaseService {
     await _wifiDirectHandler.checkForSystemConnections();
   }
 
-  /// Force device to host role
   Future<void> forceHostRole() async {
     try {
       debugPrint('👑 Forcing host role...');
@@ -507,12 +506,10 @@ class P2PMainService extends P2PBaseService {
     }
   }
 
-  /// Force device to client role
   Future<void> forceClientRole() async {
     try {
       debugPrint('📱 Forcing client role...');
       setRole(P2PRole.client);
-      // Don't call discoverDevices here - let startScan handle it
       notifyListeners();
     } catch (e) {
       debugPrint('❌ Failed to force client role: $e');

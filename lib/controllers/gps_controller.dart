@@ -1346,6 +1346,11 @@ class GpsController extends ChangeNotifier {
           '✅ Peer location added to map: ${message.fromUser} - ${_getLocationTypeText(locationType)}',
         );
       }
+
+      // Log total locations now on map for debugging
+      debugPrint(
+        '📍 Total locations on map: ${savedLocations.length} (including peer locations)',
+      );
     } catch (e) {
       debugPrint('❌ Error handling incoming location: $e');
     }

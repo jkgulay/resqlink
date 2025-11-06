@@ -18,7 +18,7 @@ class ConnectionHeader extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.3),
-          width: 1.5,
+          width: 1,
         ),
         boxShadow: [
           BoxShadow(
@@ -84,8 +84,7 @@ class ConnectionHeader extends StatelessWidget {
         controller.p2pService.wifiDirectService?.connectionState ==
         WiFiDirectConnectionState.connected;
 
-    // Show role in title when connected
-    String title = 'WiFi Direct Connection';
+    String title = 'WiFi Direct';
     if (isConnected) {
       title = isGroupOwner ? 'WiFi Direct - Host' : 'WiFi Direct - Client';
     }
@@ -119,13 +118,13 @@ class ConnectionHeader extends StatelessWidget {
     if (controller.p2pService.wifiDirectService?.connectionState ==
         WiFiDirectConnectionState.connected) {
       final deviceCount = controller.p2pService.connectedDevices.length;
-      final role = isGroupOwner ? '👑 Host' : '📱 Client';
+      final role = isGroupOwner ? 'Host' : 'Client';
       return '$role • $deviceCount device${deviceCount == 1 ? '' : 's'} connected';
     }
 
     if (controller.isConnected) {
       final deviceCount = controller.p2pService.connectedDevices.length;
-      final role = isGroupOwner ? '👑 Host' : '📱 Client';
+      final role = isGroupOwner ? 'Host' : 'Client';
       return '$role • Connected to $deviceCount device${deviceCount == 1 ? '' : 's'}';
     }
 
@@ -133,7 +132,7 @@ class ConnectionHeader extends StatelessWidget {
       return '🔍 Scanning for groups (Client mode)...';
     }
 
-    return 'Ready to host or join a group';
+    return 'Ready to Connect';
   }
 
   Widget _buildWiFiDirectSettingsButton(BuildContext context) {

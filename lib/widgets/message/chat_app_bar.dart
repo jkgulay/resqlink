@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../services/p2p/p2p_main_service.dart';
-import '../../services/p2p/p2p_base_service.dart';
 import '../../utils/resqlink_theme.dart';
-
 
 class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool isChatView;
@@ -27,79 +25,175 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isNarrow = screenWidth < 400;
+
     return AppBar(
-      elevation: 2,
-      shadowColor: Colors.black26,
-      backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+      elevation: 8,
+      shadowColor: Colors.black45,
+      backgroundColor: Colors.transparent,
+      toolbarHeight: isNarrow ? 56.0 : 64.0,
       flexibleSpace: Container(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF0B192C), Color(0xFF1E3A5F)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+          color: ResQLinkTheme.surfaceDark.withValues(alpha: 0.95),
+          border: Border(
+            bottom: BorderSide(
+              color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.3),
+              width: 1,
+            ),
           ),
+          boxShadow: [
+            BoxShadow(
+              color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.15),
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+          ],
         ),
       ),
       systemOverlayStyle: SystemUiOverlayStyle.light,
       leading: isChatView
-          ? IconButton(
-              icon: Icon(Icons.arrow_back_ios, color: Colors.white),
-              onPressed: onBackPressed,
+          ? Container(
+              margin: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.5),
+                  width: 1,
+                ),
+              ),
+              child: IconButton(
+                icon: Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: onBackPressed,
+                padding: EdgeInsets.zero,
+              ),
             )
           : null,
-      title: _buildTitle(),
+      title: _buildTitle(context),
       actions: _buildActions(context),
     );
   }
 
-  Widget _buildTitle() {
+  Widget _buildTitle(BuildContext context) {
     if (isChatView) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      final isConnected = p2pService.connectedDevices.containsKey(
+        selectedEndpointId,
+      );
+
+      return Row(
         children: [
-          FutureBuilder<String>(
-            future: _getDisplayName(),
-            builder: (context, snapshot) {
-              return Text(
-                snapshot.data ?? selectedDeviceName ?? 'Unknown Device',
-                style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
-                maxLines: 1,
-              );
-            },
-          ),
-          GestureDetector(
-            onTap: () {
-              if (!p2pService.connectedDevices.containsKey(selectedEndpointId) && 
-                  selectedEndpointId != null && onReconnect != null) {
-                onReconnect!();
-              }
-            },
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: p2pService.connectedDevices.containsKey(selectedEndpointId)
-                        ? ResQLinkTheme.safeGreen
-                        : ResQLinkTheme.warningYellow,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+          // Avatar
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: isConnected
+                  ? LinearGradient(
+                      colors: [
+                        ResQLinkTheme.safeGreen,
+                        ResQLinkTheme.safeGreen.withValues(alpha: 0.7),
+                      ],
+                    )
+                  : LinearGradient(
+                      colors: [Colors.grey.shade700, Colors.grey.shade800],
+                    ),
+              boxShadow: [
+                BoxShadow(
+                  color: isConnected
+                      ? ResQLinkTheme.safeGreen.withValues(alpha: 0.4)
+                      : Colors.black.withValues(alpha: 0.3),
+                  blurRadius: 6,
                 ),
-                SizedBox(width: 4),
-                Text(
-                  p2pService.connectedDevices.containsKey(selectedEndpointId)
-                      ? 'Connected'
-                      : 'Disconnected - Tap to reconnect',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: p2pService.connectedDevices.containsKey(selectedEndpointId)
-                        ? ResQLinkTheme.safeGreen
-                        : ResQLinkTheme.warningYellow,
-                    decoration: !p2pService.connectedDevices.containsKey(selectedEndpointId)
-                        ? TextDecoration.underline
-                        : null,
+              ],
+            ),
+            child: CircleAvatar(
+              radius: 20,
+              backgroundColor: Colors.transparent,
+              child: Text(
+                (selectedDeviceName?.isNotEmpty ?? false)
+                    ? selectedDeviceName![0].toUpperCase()
+                    : 'D',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  fontFamily: 'Poppins',
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                FutureBuilder<String>(
+                  future: _getDisplayName(),
+                  builder: (context, snapshot) {
+                    return ResponsiveTextWidget(
+                      snapshot.data ?? selectedDeviceName ?? 'Unknown Device',
+                      styleBuilder: (context) =>
+                          ResponsiveText.bodyLarge(context).copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'Poppins',
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    );
+                  },
+                ),
+                SizedBox(height: 2),
+                GestureDetector(
+                  onTap: () {
+                    if (!isConnected &&
+                        selectedEndpointId != null &&
+                        onReconnect != null) {
+                      onReconnect!();
+                    }
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: isConnected
+                              ? ResQLinkTheme.safeGreen
+                              : Colors.grey,
+                          shape: BoxShape.circle,
+                          boxShadow: isConnected
+                              ? [
+                                  BoxShadow(
+                                    color: ResQLinkTheme.safeGreen.withValues(
+                                      alpha: 0.6,
+                                    ),
+                                    blurRadius: 4,
+                                    spreadRadius: 1,
+                                  ),
+                                ]
+                              : null,
+                        ),
+                      ),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: ResponsiveTextWidget(
+                          isConnected ? 'Online' : 'Offline',
+                          styleBuilder: (context) =>
+                              ResponsiveText.caption(context).copyWith(
+                                color: isConnected
+                                    ? ResQLinkTheme.safeGreen
+                                    : Colors.white60,
+                                fontSize: 10,
+                                fontFamily: 'Poppins',
+                              ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -112,16 +206,23 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Messages', style: TextStyle(color: Colors.white)),
-        Text(
+        ResponsiveTextWidget(
+          'Messages',
+          styleBuilder: (context) => ResponsiveText.heading3(context).copyWith(
+            color: Colors.white,
+            fontFamily: 'Poppins',
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        ResponsiveTextWidget(
           p2pService.isConnected
               ? '${p2pService.connectedDevices.length} connected'
               : 'No connection',
-          style: TextStyle(
-            fontSize: 12,
+          styleBuilder: (context) => ResponsiveText.caption(context).copyWith(
             color: p2pService.isConnected
                 ? ResQLinkTheme.safeGreen
-                : ResQLinkTheme.warningYellow,
+                : Colors.white60,
+            fontFamily: 'Poppins',
           ),
         ),
       ],
@@ -130,66 +231,42 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   List<Widget> _buildActions(BuildContext context) {
     final actions = <Widget>[];
+    final isConnected = p2pService.connectedDevices.containsKey(
+      selectedEndpointId,
+    );
 
-    if (isChatView && selectedEndpointId != null &&
-        !p2pService.connectedDevices.containsKey(selectedEndpointId)) {
+    if (isChatView && selectedEndpointId != null && !isConnected) {
       actions.add(
         Container(
-          margin: EdgeInsets.only(right: 8),
-          child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: ResQLinkTheme.primaryRed,
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              minimumSize: Size(0, 32),
+          margin: EdgeInsets.only(right: 4),
+          decoration: BoxDecoration(
+            color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.2),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.5),
+              width: 1,
             ),
-            icon: Icon(Icons.refresh, size: 16, color: Colors.white),
-            label: Text('Reconnect',
-              style: TextStyle(fontSize: 12, color: Colors.white)),
+          ),
+          child: IconButton(
+            icon: Icon(Icons.refresh, color: ResQLinkTheme.primaryBlue),
             onPressed: onReconnect,
+            tooltip: 'Reconnect',
           ),
         ),
       );
     }
 
     actions.add(
-      Container(
-        margin: EdgeInsets.only(right: 8),
-        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: p2pService.isConnected
-              ? ResQLinkTheme.safeGreen
-              : ResQLinkTheme.warningYellow,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              p2pService.isConnected ? Icons.wifi : Icons.wifi_off,
-              size: 14,
-              color: Colors.white,
-            ),
-            SizedBox(width: 4),
-            Text(
-              p2pService.currentRole == P2PRole.host
-                  ? 'HOST'
-                  : p2pService.currentRole == P2PRole.client
-                  ? 'CLIENT'
-                  : 'OFF',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    actions.add(
       PopupMenuButton<String>(
         icon: Icon(Icons.more_vert, color: Colors.white),
+        color: ResQLinkTheme.surfaceDark,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
         onSelected: onMenuAction,
         itemBuilder: (context) => [
           if (isChatView) ...[
@@ -197,9 +274,15 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
               value: 'clear_chat',
               child: Row(
                 children: [
-                  Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                  Icon(Icons.delete_sweep, color: Colors.white70, size: 20),
                   SizedBox(width: 8),
-                  Text('Clear Chat', style: TextStyle(color: Colors.red)),
+                  Text(
+                    'Clear Chat',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -215,7 +298,6 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   Size get preferredSize => Size.fromHeight(kToolbarHeight);
 
   Future<String> _getDisplayName() async {
-    // Return the selected device's name - this is for displaying OTHER devices in the chat app bar
     return selectedDeviceName ?? 'Unknown Device';
   }
 }

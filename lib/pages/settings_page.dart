@@ -8,6 +8,7 @@ import 'package:resqlink/features/database/repositories/system_repository.dart';
 import 'package:resqlink/services/messaging/message_sync_service.dart';
 import 'package:resqlink/services/p2p/p2p_main_service.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';
+import 'package:resqlink/utils/responsive_helper.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:sqflite/sqflite.dart';
@@ -15,7 +16,6 @@ import 'package:path/path.dart' as path;
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -339,49 +339,51 @@ class SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // Update your build method to show loading overlay when _isLoading is true
   @override
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // Your existing build content
         Consumer<SettingsService>(
           builder: (context, settings, child) {
             return Theme(
               data: ThemeData.dark().copyWith(
-                primaryColor: ResQLinkTheme.orange,
-                scaffoldBackgroundColor: ResQLinkTheme.backgroundDark,
+                primaryColor: Color(0xFFFF6500),
+                scaffoldBackgroundColor: Colors.black,
               ),
               child: Scaffold(
-                backgroundColor: ResQLinkTheme.backgroundDark,
-                body: CustomScrollView(
-                  slivers: [
-                    SliverPadding(
-                      padding: EdgeInsets.all(16),
-                      sliver: SliverList(
-                        delegate: SliverChildListDelegate([
-                          // Your existing content...
-                          _buildStatisticsCard(),
-                          SizedBox(height: 24),
-                          _buildSectionHeader('Connectivity'),
-                          _buildConnectivitySection(settings),
-                          SizedBox(height: 24),
-                          _buildSectionHeader('Location Services'),
-                          _buildLocationSection(settings),
-                          SizedBox(height: 24),
-                          _buildSectionHeader('Notifications'),
-                          _buildNotificationSection(settings),
-                          SizedBox(height: 24),
-                          _buildSectionHeader('Data Management'),
-                          _buildDataManagementSection(settings),
-                          SizedBox(height: 24),
-                          _buildSectionHeader('Account'),
-                          _buildAccountSection(),
-                          SizedBox(height: 100),
-                        ]),
+                backgroundColor: Colors.black,
+                body: Container(
+                  decoration: BoxDecoration(color: Colors.black),
+                  child: CustomScrollView(
+                    slivers: [
+                      _buildStyledAppBar(),
+                      SliverPadding(
+                        padding: EdgeInsets.all(16),
+                        sliver: SliverList(
+                          delegate: SliverChildListDelegate([
+                            _buildSectionHeader('Statistics'),
+                            _buildStatisticsCard(),
+                            SizedBox(height: 24),
+                            _buildSectionHeader('Connectivity'),
+                            _buildConnectivitySection(settings),
+                            SizedBox(height: 24),
+                            _buildSectionHeader('Location Services'),
+                            _buildLocationSection(settings),
+                            SizedBox(height: 24),
+                            _buildSectionHeader('Notifications'),
+                            _buildNotificationSection(settings),
+                            SizedBox(height: 24),
+                            _buildSectionHeader('Data Management'),
+                            _buildDataManagementSection(settings),
+                            SizedBox(height: 24),
+                            _buildSectionHeader('Account'),
+                            _buildAccountSection(),
+                            SizedBox(height: 24),
+                          ]),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             );
@@ -391,22 +393,43 @@ class SettingsPageState extends State<SettingsPage> {
         // Loading overlay
         if (_isLoading)
           Material(
-            color: Colors.black.withAlpha(178),
+            color: Colors.black.withValues(alpha: 0.7),
             child: Center(
               child: Container(
                 padding: EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: ResQLinkTheme.cardDark,
-                  borderRadius: BorderRadius.circular(12),
+                  gradient: LinearGradient(
+                    colors: [
+                      Color(0xFF1E3E62).withValues(alpha: 0.95),
+                      Color(0xFF0B192C).withValues(alpha: 0.95),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Color(0xFFFF6500).withValues(alpha: 0.3),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0xFFFF6500).withValues(alpha: 0.2),
+                      blurRadius: 20,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(color: ResQLinkTheme.primaryRed),
-                    SizedBox(width: 16),
+                    CircularProgressIndicator(
+                      color: Color(0xFFFF6500),
+                      strokeWidth: 3,
+                    ),
+                    SizedBox(width: 20),
                     Text(
                       'Logging out...',
-                      style: TextStyle(color: Colors.white, fontSize: 16),
+                      style: ResponsiveText.bodyLarge(
+                        context,
+                      ).copyWith(color: Colors.white),
                     ),
                   ],
                 ),
@@ -417,78 +440,170 @@ class SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  SliverAppBar _buildStyledAppBar() {
+    return SliverAppBar(
+      expandedHeight: 0,
+      floating: false,
+      pinned: false,
+      toolbarHeight: 0,
+      backgroundColor: Colors.transparent,
+    );
+  }
+
   Widget _buildSectionHeader(String title) {
     return Padding(
       padding: ResponsiveSpacing.padding(context, bottom: 12),
-      child: ResponsiveTextWidget(
-        title,
-        styleBuilder: (context) {
-          final scale = MediaQuery.of(context).size.width < 600 ? 1.0 : 1.2;
-          return GoogleFonts.rajdhani(
-            fontSize: 18 * scale,
-            fontWeight: FontWeight.w700,
-            color: ResQLinkTheme.orange,
-            letterSpacing: 0.5,
-          );
-        },
-        maxLines: 1,
-        textAlign: TextAlign.start,
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 24,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFFFF6500),
+                  Color(0xFFFF6500).withValues(alpha: 0.5),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          SizedBox(width: 12),
+          Text(
+            title,
+            style: ResponsiveText.heading3(context).copyWith(
+              color: Color(0xFFFF6500),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildStatisticsCard() {
-    return Card(
-      color: ResQLinkTheme.cardDark,
-      elevation: 4,
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF1E3E62).withValues(alpha: 0.6),
+            Color(0xFF0B192C).withValues(alpha: 0.8),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Color(0xFFFF6500).withValues(alpha: 0.3),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0xFFFF6500).withValues(alpha: 0.15),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: ResponsiveSpacing.padding(context, all: 16),
+        padding: ResponsiveHelper.getCardPadding(context),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(Icons.analytics, color: ResQLinkTheme.orange),
-                SizedBox(width: ResponsiveSpacing.xs(context)),
-                ResponsiveTextWidget(
+                Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Color(0xFFFF6500).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.analytics,
+                    color: Color(0xFFFF6500),
+                    size: ResponsiveHelper.getIconSize(context),
+                  ),
+                ),
+                SizedBox(width: ResponsiveHelper.getContentSpacing(context)),
+                Text(
                   'App Statistics',
-                  styleBuilder: (context) => ResponsiveText.heading3(context),
-                  maxLines: 1,
-                  textAlign: TextAlign.start,
+                  style: ResponsiveText.heading3(
+                    context,
+                  ).copyWith(color: Colors.white, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
-            SizedBox(height: ResponsiveSpacing.md(context)),
-            // Row 1: Messages and Sessions
+            SizedBox(height: ResponsiveHelper.getSectionSpacing(context)),
+            // Row 1: Messages, Sessions, Locations
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildStatItem('Messages', '$_totalMessages', Icons.message),
-                _buildStatItem(
-                  'Sessions',
-                  '$_totalSessions',
-                  Icons.chat_bubble,
+                Expanded(
+                  child: _buildStatItem(
+                    'Messages',
+                    '$_totalMessages',
+                    Icons.message,
+                  ),
                 ),
-                _buildStatItem(
-                  'Locations',
-                  '$_totalLocations',
-                  Icons.location_on,
+                Container(
+                  width: 1,
+                  height: 50,
+                  color: Color(0xFFFF6500).withValues(alpha: 0.2),
+                ),
+                Expanded(
+                  child: _buildStatItem(
+                    'Sessions',
+                    '$_totalSessions',
+                    Icons.chat_bubble,
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 50,
+                  color: Color(0xFFFF6500).withValues(alpha: 0.2),
+                ),
+                Expanded(
+                  child: _buildStatItem(
+                    'Locations',
+                    '$_totalLocations',
+                    Icons.location_on,
+                  ),
                 ),
               ],
             ),
-            SizedBox(height: ResponsiveSpacing.md(context)),
-            Divider(color: Colors.white24, height: 1),
-            SizedBox(height: ResponsiveSpacing.md(context)),
-            // Row 2: Connections and storage
+            SizedBox(height: ResponsiveHelper.getContentSpacing(context)),
+            Divider(
+              color: Color(0xFFFF6500).withValues(alpha: 0.2),
+              thickness: 1.5,
+            ),
+            SizedBox(height: ResponsiveHelper.getContentSpacing(context)),
+            // Row 2: Connections and Storage
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildStatItem(
-                  'Connections',
-                  '$_activeConnections',
-                  Icons.devices,
+                Expanded(
+                  child: _buildStatItem(
+                    'Connections',
+                    '$_activeConnections',
+                    Icons.devices,
+                  ),
                 ),
-                _buildStatItem('Storage', _storageUsed, Icons.storage),
+                Container(
+                  width: 1,
+                  height: 50,
+                  color: Color(0xFFFF6500).withValues(alpha: 0.2),
+                ),
+                Expanded(
+                  child: _buildStatItem('Storage', _storageUsed, Icons.storage),
+                ),
               ],
             ),
           ],
@@ -500,18 +615,26 @@ class SettingsPageState extends State<SettingsPage> {
   Widget _buildStatItem(String label, String value, IconData icon) {
     return Column(
       children: [
-        Icon(icon, color: ResQLinkTheme.orange, size: 24),
-        SizedBox(height: ResponsiveSpacing.xs(context)),
-        ResponsiveTextWidget(
+        Icon(
+          icon,
+          color: Color(0xFFFF6500),
+          size: ResponsiveHelper.getIconSize(context) * 0.8,
+        ),
+        SizedBox(height: 8),
+        Text(
           value,
-          styleBuilder: (context) => ResponsiveText.heading3(context),
+          style: ResponsiveText.heading3(
+            context,
+          ).copyWith(color: Colors.white, fontWeight: FontWeight.bold),
           maxLines: 1,
           textAlign: TextAlign.center,
         ),
-        ResponsiveTextWidget(
+        SizedBox(height: 4),
+        Text(
           label,
-          styleBuilder: (context) =>
-              ResponsiveText.caption(context).copyWith(color: Colors.white70),
+          style: ResponsiveText.caption(
+            context,
+          ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
           textAlign: TextAlign.center,
           maxLines: 2,
         ),
@@ -519,39 +642,110 @@ class SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildConnectivitySection(SettingsService settings) {
-    return Column(
-      children: [
-        // Existing connectivity card
-        Card(
-          color: ResQLinkTheme.cardDark,
-          elevation: 2,
-          child: Column(
-            children: [
-              SwitchListTile(
-                title: Text(
-                  'Multi-hop Relaying',
-                  style: TextStyle(color: Colors.white),
-                ),
-                subtitle: Text(
-                  'Allow messages to relay through other devices',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-                value: settings.multiHopEnabled,
-                onChanged: _toggleMultiHop,
-                secondary: Icon(
-                  Icons.device_hub,
-                  color: settings.multiHopEnabled
-                      ? ResQLinkTheme.safeGreen
-                      : Colors.grey,
-                ),
-                activeColor: ResQLinkTheme.orange,
-              ),
-            ],
+  Widget _buildEnhancedSwitchTile({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool value,
+    required Function(bool) onChanged,
+    bool? enabled,
+  }) {
+    final isEnabled = enabled ?? true;
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: Color(0xFFFF6500).withValues(alpha: 0.1),
+            width: 1,
           ),
         ),
-        // Connection mode and hotspot sections removed - pure WiFi Direct only
-      ],
+      ),
+      child: ListTile(
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: ResponsiveHelper.getCardPadding(context).left,
+          vertical: 8,
+        ),
+        leading: Container(
+          padding: EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: value && isEnabled
+                ? Color(0xFFFF6500).withValues(alpha: 0.15)
+                : Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            icon,
+            color: value && isEnabled
+                ? Color(0xFFFF6500)
+                : Colors.white.withValues(alpha: 0.4),
+            size: 24,
+          ),
+        ),
+        title: Text(
+          title,
+          style: ResponsiveText.bodyLarge(context).copyWith(
+            color: isEnabled
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.5),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: ResponsiveText.bodySmall(context).copyWith(
+            color: isEnabled
+                ? Colors.white.withValues(alpha: 0.7)
+                : Colors.white.withValues(alpha: 0.3),
+          ),
+        ),
+        trailing: Switch(
+          value: value,
+          onChanged: isEnabled ? onChanged : null,
+          activeColor: Color(0xFFFF6500),
+          activeTrackColor: Color(0xFFFF6500).withValues(alpha: 0.5),
+          inactiveThumbColor: Colors.white.withValues(alpha: 0.3),
+          inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConnectivitySection(SettingsService settings) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF1E3E62).withValues(alpha: 0.4),
+            Color(0xFF0B192C).withValues(alpha: 0.6),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Color(0xFFFF6500).withValues(alpha: 0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0xFFFF6500).withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          _buildEnhancedSwitchTile(
+            title: 'Multi-hop Relaying',
+            subtitle: 'Allow messages to relay through other devices',
+            icon: Icons.device_hub,
+            value: settings.multiHopEnabled,
+            onChanged: _toggleMultiHop,
+          ),
+        ],
+      ),
     );
   }
 
@@ -560,45 +754,80 @@ class SettingsPageState extends State<SettingsPage> {
   // Connection mode setting removed - pure WiFi Direct only
 
   Widget _buildLocationSection(SettingsService settings) {
-    return Card(
-      color: ResQLinkTheme.cardDark,
-      elevation: 2,
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF1E3E62).withValues(alpha: 0.4),
+            Color(0xFF0B192C).withValues(alpha: 0.6),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Color(0xFFFF6500).withValues(alpha: 0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0xFFFF6500).withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
         children: [
-          SwitchListTile(
-            title: Text(
-              'Location Sharing',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: Text(
-              'Allow app to share your location in messages',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+          _buildEnhancedSwitchTile(
+            title: 'Location Sharing',
+            subtitle: 'Allow app to share your location in messages',
+            icon: Icons.location_on,
             value: settings.locationSharingEnabled,
             onChanged: _toggleLocationSharing,
-            secondary: Icon(
-              Icons.location_on,
-              color: settings.locationSharingEnabled
-                  ? ResQLinkTheme.safeGreen
-                  : Colors.grey,
-            ),
-            activeColor: ResQLinkTheme.orange,
           ),
-          Divider(color: Colors.white24, height: 1),
-          ListTile(
-            title: Text(
-              'Location Permissions',
-              style: TextStyle(color: Colors.white),
+          Container(
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: Color(0xFFFF6500).withValues(alpha: 0.1),
+                  width: 1,
+                ),
+              ),
             ),
-            subtitle: Text(
-              'Manage location access for the app',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+            child: ListTile(
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: ResponsiveHelper.getCardPadding(context).left,
+                vertical: 8,
+              ),
+              leading: Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Color(0xFFFF6500).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.security, color: Color(0xFFFF6500), size: 24),
+              ),
+              title: Text(
+                'Location Permissions',
+                style: ResponsiveText.bodyLarge(
+                  context,
+                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+              ),
+              subtitle: Text(
+                'Manage location access for the app',
+                style: ResponsiveText.bodySmall(
+                  context,
+                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: Color(0xFFFF6500).withValues(alpha: 0.6),
+              ),
+              onTap: () async {
+                await Geolocator.openAppSettings();
+              },
             ),
-            leading: Icon(Icons.security, color: ResQLinkTheme.orange),
-            trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: () async {
-              await Geolocator.openAppSettings();
-            },
           ),
         ],
       ),
@@ -606,95 +835,72 @@ class SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildNotificationSection(SettingsService settings) {
-    return Card(
-      color: ResQLinkTheme.cardDark,
-      elevation: 2,
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF1E3E62).withValues(alpha: 0.4),
+            Color(0xFF0B192C).withValues(alpha: 0.6),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Color(0xFFFF6500).withValues(alpha: 0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0xFFFF6500).withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
         children: [
-          SwitchListTile(
-            title: Text(
-              'Emergency Notifications',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: Text(
-              'Receive alerts for emergency messages',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+          _buildEnhancedSwitchTile(
+            title: 'Emergency Notifications',
+            subtitle: 'Receive alerts for emergency messages',
+            icon: Icons.emergency,
             value: settings.emergencyNotifications,
             onChanged: (value) async {
               await settings.setEmergencyNotifications(value);
             },
-            secondary: Icon(
-              Icons.emergency,
-              color: settings.emergencyNotifications
-                  ? ResQLinkTheme.orange
-                  : Colors.grey,
-            ),
-            activeColor: ResQLinkTheme.orange,
           ),
-          Divider(color: Colors.white24, height: 1),
-          SwitchListTile(
-            title: Text(
-              'Sound Notifications',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: Text(
-              'Play sound for new messages',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+          _buildEnhancedSwitchTile(
+            title: 'Sound Notifications',
+            subtitle: 'Play sound for new messages',
+            icon: Icons.volume_up,
             value: settings.soundNotifications && !settings.silentMode,
-            onChanged: settings.silentMode
-                ? null
-                : (value) async {
-                    await settings.setSoundNotifications(value);
-                  },
-            secondary: Icon(
-              Icons.volume_up,
-              color: (settings.soundNotifications && !settings.silentMode)
-                  ? ResQLinkTheme.safeGreen
-                  : Colors.grey,
-            ),
-            activeColor: ResQLinkTheme.orange,
+            onChanged: (value) async {
+              if (!settings.silentMode) {
+                await settings.setSoundNotifications(value);
+              }
+            },
+            enabled: !settings.silentMode,
           ),
-          Divider(color: Colors.white24, height: 1),
-          SwitchListTile(
-            title: Text('Vibration', style: TextStyle(color: Colors.white)),
-            subtitle: Text(
-              'Vibrate for new messages',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+          _buildEnhancedSwitchTile(
+            title: 'Vibration',
+            subtitle: 'Vibrate for new messages',
+            icon: Icons.vibration,
             value: settings.vibrationNotifications && !settings.silentMode,
-            onChanged: settings.silentMode
-                ? null
-                : (value) async {
-                    await settings.setVibrationNotifications(value);
-                  },
-            secondary: Icon(
-              Icons.vibration,
-              color: (settings.vibrationNotifications && !settings.silentMode)
-                  ? ResQLinkTheme.safeGreen
-                  : Colors.grey,
-            ),
-            activeColor: ResQLinkTheme.orange,
+            onChanged: (value) async {
+              if (!settings.silentMode) {
+                await settings.setVibrationNotifications(value);
+              }
+            },
+            enabled: !settings.silentMode,
           ),
-          Divider(color: Colors.white24, height: 1),
-          SwitchListTile(
-            title: Text('Silent Mode', style: TextStyle(color: Colors.white)),
-            subtitle: Text(
-              'Disable all sounds and vibrations',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+          _buildEnhancedSwitchTile(
+            title: 'Silent Mode',
+            subtitle: 'Disable all sounds and vibrations',
+            icon: Icons.notifications_off,
             value: settings.silentMode,
             onChanged: (value) async {
               await settings.setSilentMode(value);
             },
-            secondary: Icon(
-              Icons.notifications_off,
-              color: settings.silentMode
-                  ? ResQLinkTheme.warningYellow
-                  : Colors.grey,
-            ),
-            activeColor: ResQLinkTheme.orange,
           ),
         ],
       ),
@@ -702,37 +908,116 @@ class SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildDataManagementSection(SettingsService settings) {
-    return Card(
-      color: ResQLinkTheme.cardDark,
-      elevation: 2,
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF1E3E62).withValues(alpha: 0.4),
+            Color(0xFF0B192C).withValues(alpha: 0.6),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Color(0xFFFF6500).withValues(alpha: 0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0xFFFF6500).withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
         children: [
-          ListTile(
-            title: Text(
-              'Merge Duplicate Sessions',
-              style: TextStyle(color: Colors.white),
+          Container(
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: Color(0xFFFF6500).withValues(alpha: 0.1),
+                  width: 1,
+                ),
+              ),
             ),
-            subtitle: Text(
-              'Clean up and merge duplicate chat sessions',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+            child: ListTile(
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: ResponsiveHelper.getCardPadding(context).left,
+                vertical: 8,
+              ),
+              leading: Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Color(0xFFFF6500).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.merge, color: Color(0xFFFF6500), size: 24),
+              ),
+              title: Text(
+                'Merge Duplicate Sessions',
+                style: ResponsiveText.bodyLarge(
+                  context,
+                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+              ),
+              subtitle: Text(
+                'Clean up and merge duplicate chat sessions',
+                style: ResponsiveText.bodySmall(
+                  context,
+                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: Color(0xFFFF6500).withValues(alpha: 0.6),
+              ),
+              onTap: _mergeDuplicateSessions,
             ),
-            leading: Icon(Icons.merge, color: ResQLinkTheme.orange),
-            trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: _mergeDuplicateSessions,
           ),
-          Divider(color: Colors.white24, height: 1),
-          ListTile(
-            title: Text(
-              'Clear Chat History',
-              style: TextStyle(color: Colors.white),
+          Container(
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: Color(0xFFFF6500).withValues(alpha: 0.1),
+                  width: 1,
+                ),
+              ),
             ),
-            subtitle: Text(
-              'Delete all messages from device',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+            child: ListTile(
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: ResponsiveHelper.getCardPadding(context).left,
+                vertical: 8,
+              ),
+              leading: Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.delete_forever,
+                  color: Colors.red.shade400,
+                  size: 24,
+                ),
+              ),
+              title: Text(
+                'Clear Chat History',
+                style: ResponsiveText.bodyLarge(
+                  context,
+                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+              ),
+              subtitle: Text(
+                'Delete all messages from device',
+                style: ResponsiveText.bodySmall(
+                  context,
+                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: Colors.red.shade400.withValues(alpha: 0.6),
+              ),
+              onTap: _clearChatHistory,
             ),
-            leading: Icon(Icons.delete_forever, color: ResQLinkTheme.orange),
-            trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: _clearChatHistory,
           ),
         ],
       ),
@@ -740,55 +1025,133 @@ class SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildAccountSection() {
-    return Card(
-      color: ResQLinkTheme.cardDark,
-      elevation: 2,
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF1E3E62).withValues(alpha: 0.4),
+            Color(0xFF0B192C).withValues(alpha: 0.6),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Color(0xFFFF6500).withValues(alpha: 0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0xFFFF6500).withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
         children: [
-          ListTile(
-            title: Text(
-              'About ResQLink',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: Text(
-              'App version and information',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            leading: Icon(Icons.info, color: ResQLinkTheme.orange),
-            trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: () {
-              showAboutDialog(
-                context: context,
-                applicationName: 'ResQLink',
-                applicationVersion: '1.0.0',
-                applicationIcon: Icon(
-                  Icons.emergency,
-                  size: 48,
-                  color: ResQLinkTheme.orange,
+          Container(
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: Color(0xFFFF6500).withValues(alpha: 0.1),
+                  width: 1,
                 ),
-                children: [
-                  Padding(
-                    padding: EdgeInsets.only(top: 16),
-                    child: Text(
-                      'Offline emergency communication using Wi-Fi Direct and GPS.\n\n'
-                      'Stay connected even when the internet is down.',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-          Divider(color: Colors.white24, height: 1),
-          ListTile(
-            title: Text('Logout', style: TextStyle(color: Colors.white)),
-            subtitle: Text(
-              'Sign out from the application',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
             ),
-            leading: Icon(Icons.logout, color: ResQLinkTheme.orange),
-            trailing: Icon(Icons.chevron_right, color: Colors.white54),
-            onTap: () => _logout(false),
+            child: ListTile(
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: ResponsiveHelper.getCardPadding(context).left,
+                vertical: 8,
+              ),
+              leading: Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Color(0xFFFF6500).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.info, color: Color(0xFFFF6500), size: 24),
+              ),
+              title: Text(
+                'About ResQLink',
+                style: ResponsiveText.bodyLarge(
+                  context,
+                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+              ),
+              subtitle: Text(
+                'App version and information',
+                style: ResponsiveText.bodySmall(
+                  context,
+                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: Color(0xFFFF6500).withValues(alpha: 0.6),
+              ),
+              onTap: () {
+                showAboutDialog(
+                  context: context,
+                  applicationName: 'ResQLink',
+                  applicationVersion: '1.0.0',
+                  applicationIcon: Icon(
+                    Icons.emergency,
+                    size: 48,
+                    color: Color(0xFFFF6500),
+                  ),
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.only(top: 16),
+                      child: Text(
+                        'Offline emergency communication using Wi-Fi Direct and GPS.\n\n'
+                        'Stay connected even when the internet is down.',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: Color(0xFFFF6500).withValues(alpha: 0.1),
+                  width: 1,
+                ),
+              ),
+            ),
+            child: ListTile(
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: ResponsiveHelper.getCardPadding(context).left,
+                vertical: 8,
+              ),
+              leading: Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.logout, color: Colors.red.shade400, size: 24),
+              ),
+              title: Text(
+                'Logout',
+                style: ResponsiveText.bodyLarge(
+                  context,
+                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+              ),
+              subtitle: Text(
+                'Sign out from the application',
+                style: ResponsiveText.bodySmall(
+                  context,
+                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: Colors.red.shade400.withValues(alpha: 0.6),
+              ),
+              onTap: () => _logout(false),
+            ),
           ),
         ],
       ),

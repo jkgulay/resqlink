@@ -20,7 +20,7 @@ class ConnectionStats extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.4),
-              width: 1.5,
+              width: 1,
             ),
             boxShadow: [
               BoxShadow(
@@ -170,7 +170,7 @@ class ConnectionStats extends StatelessWidget {
                                 SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'Failed to create group: ${e.toString().contains('Permission') ? 'Check permissions' : 'Try again'}',
+                                    'Failed to create group or Turn on Wifi Direct: ${e.toString().contains('Permission') ? 'Check permissions' : 'Try again'}',
                                   ),
                                 ),
                               ],
