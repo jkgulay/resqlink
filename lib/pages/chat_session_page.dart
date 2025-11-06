@@ -23,7 +23,8 @@ class ChatSessionPage extends StatefulWidget {
     super.key,
     required this.sessionId,
     required this.deviceName,
-    required this.p2pService, required String deviceId,
+    required this.p2pService,
+    required String deviceId,
   });
 
   @override
@@ -125,7 +126,9 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
     try {
       final session = await ChatRepository.getSession(widget.sessionId);
-      final messages = await ChatRepository.getSessionMessages(widget.sessionId);
+      final messages = await ChatRepository.getSessionMessages(
+        widget.sessionId,
+      );
 
       if (mounted) {
         setState(() {
@@ -156,13 +159,13 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     await ChatRepository.markSessionMessagesAsRead(widget.sessionId);
   }
 
-
-
   /// Handle messages from MessageRouter (real-time)
   void _onRouterMessage(MessageModel message) async {
     if (!mounted) return;
 
-    debugPrint('📨 ChatSession received router message from ${message.fromUser}: ${message.message}');
+    debugPrint(
+      '📨 ChatSession received router message from ${message.fromUser}: ${message.message}',
+    );
 
     // Update message with chat session ID if not set
     MessageModel messageToAdd = message;
@@ -172,9 +175,12 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     }
 
     // Check if message is not already in our current messages list (avoid duplicates)
-    final alreadyExists = _messages.any((m) =>
-      m.messageId == messageToAdd.messageId ||
-      (m.timestamp == messageToAdd.timestamp && m.fromUser == messageToAdd.fromUser && m.message == messageToAdd.message)
+    final alreadyExists = _messages.any(
+      (m) =>
+          m.messageId == messageToAdd.messageId ||
+          (m.timestamp == messageToAdd.timestamp &&
+              m.fromUser == messageToAdd.fromUser &&
+              m.message == messageToAdd.message),
     );
 
     if (!alreadyExists) {
@@ -234,7 +240,8 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         type: type.name,
         status: MessageStatus.pending,
         chatSessionId: chatSessionId,
-        connectionType: widget.p2pService.connectionType, deviceId: null,
+        connectionType: widget.p2pService.connectionType,
+        deviceId: null,
       );
 
       // Save message to database
@@ -294,7 +301,6 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           }
         });
       }
-
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
       _showSnackBar('Failed to send message', isError: true);
@@ -332,13 +338,19 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         _locationStateService.updateCurrentLocation(freshLocation);
       } catch (e) {
         debugPrint('❌ Error getting current position: $e');
-        _showSnackBar('Location not available. Please enable GPS.', isError: true);
+        _showSnackBar(
+          'Location not available. Please enable GPS.',
+          isError: true,
+        );
         return;
       }
     }
 
     if (_currentLocation == null) {
-      _showSnackBar('Location not available. Please enable GPS.', isError: true);
+      _showSnackBar(
+        'Location not available. Please enable GPS.',
+        isError: true,
+      );
       return;
     }
 
@@ -422,7 +434,6 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     }
   }
 
-
   Future<void> _reconnectToDevice() async {
     if (_chatSession == null) return;
 
@@ -501,7 +512,9 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: TextStyle(color: Colors.white)),
-        backgroundColor: isError ? ResQLinkTheme.primaryRed : ResQLinkTheme.safeGreen,
+        backgroundColor: isError
+            ? ResQLinkTheme.primaryRed
+            : ResQLinkTheme.safeGreen,
         duration: Duration(seconds: 3),
       ),
     );
@@ -510,84 +523,226 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ResQLinkTheme.backgroundDark,
+      backgroundColor: Color(0xFF0B192C),
       appBar: _buildAppBar(),
-      resizeToAvoidBottomInset: true, // Allow proper keyboard handling for standalone chat
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return Center(
-            child: ConstrainedBox(
-              constraints: ResponsiveUtils.isDesktop(context)
-                  ? BoxConstraints(maxWidth: 1200)
-                  : BoxConstraints(),
-              child: _buildBody(),
-            ),
-          );
-        },
+      resizeToAvoidBottomInset: true,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Color(0xFF0B192C),
+              Color(0xFF1E3E62).withValues(alpha: 0.8),
+              Color(0xFF0B192C),
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            stops: [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return Center(
+              child: ConstrainedBox(
+                constraints: ResponsiveUtils.isDesktop(context)
+                    ? BoxConstraints(maxWidth: 1200)
+                    : BoxConstraints(),
+                child: _buildBody(),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
 
   AppBar _buildAppBar() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isNarrow = screenWidth < 400;
+
     return AppBar(
-      backgroundColor: ResQLinkTheme.cardDark,
-      elevation: 0,
-      leading: IconButton(
-        icon: Icon(Icons.arrow_back, color: Colors.white),
-        onPressed: () => Navigator.pop(context),
-      ),
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.deviceName,
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-            ),
+      elevation: 8,
+      shadowColor: Colors.black45,
+      backgroundColor: Colors.transparent,
+      toolbarHeight: isNarrow ? 56.0 : 64.0,
+      flexibleSpace: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0B192C), Color(0xFF1E3E62), Color(0xFF2A5278)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            stops: [0.0, 0.5, 1.0],
           ),
-          Row(
-            children: [
-              Text(
-                _isConnected ? 'Connected' : _chatSession?.lastSeenText ?? 'Offline',
-                style: TextStyle(
-                  color: _isConnected ? ResQLinkTheme.safeGreen : Colors.white60,
-                  fontSize: 12,
-                ),
-              ),
-              if (_queuedMessageCount > 0) ...[
-                SizedBox(width: 8),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.orange,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '$_queuedMessageCount',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
+          boxShadow: [
+            BoxShadow(
+              color: Color(0xFFFF6500).withValues(alpha: 0.2),
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+      ),
+      leading: Container(
+        margin: EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Color(0xFFFF6500).withValues(alpha: 0.2),
+          shape: BoxShape.circle,
+        ),
+        child: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          padding: EdgeInsets.zero,
+        ),
+      ),
+      title: Row(
+        children: [
+          // Avatar
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: _isConnected
+                  ? LinearGradient(
+                      colors: [
+                        ResQLinkTheme.safeGreen,
+                        ResQLinkTheme.safeGreen.withValues(alpha: 0.7),
+                      ],
+                    )
+                  : LinearGradient(
+                      colors: [Colors.grey.shade700, Colors.grey.shade800],
                     ),
-                  ),
+              boxShadow: [
+                BoxShadow(
+                  color: _isConnected
+                      ? ResQLinkTheme.safeGreen.withValues(alpha: 0.4)
+                      : Colors.black.withValues(alpha: 0.3),
+                  blurRadius: 6,
                 ),
               ],
-            ],
+            ),
+            child: CircleAvatar(
+              radius: 20,
+              backgroundColor: Colors.transparent,
+              child: Text(
+                widget.deviceName.isNotEmpty
+                    ? widget.deviceName[0].toUpperCase()
+                    : 'D',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ),
           ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  widget.deviceName,
+                  style: ResponsiveText.bodyLarge(
+                    context,
+                  ).copyWith(color: Colors.white, fontWeight: FontWeight.w700),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                SizedBox(height: 2),
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: _isConnected
+                            ? ResQLinkTheme.safeGreen
+                            : Colors.grey,
+                        shape: BoxShape.circle,
+                        boxShadow: _isConnected
+                            ? [
+                                BoxShadow(
+                                  color: ResQLinkTheme.safeGreen.withValues(
+                                    alpha: 0.6,
+                                  ),
+                                  blurRadius: 4,
+                                  spreadRadius: 1,
+                                ),
+                              ]
+                            : null,
+                      ),
+                    ),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _isConnected
+                            ? 'Online'
+                            : _chatSession?.lastSeenText ?? 'Offline',
+                        style: ResponsiveText.caption(context).copyWith(
+                          color: _isConnected
+                              ? ResQLinkTheme.safeGreen
+                              : Colors.white60,
+                          fontSize: 10,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (_queuedMessageCount > 0)
+            Container(
+              margin: EdgeInsets.only(left: 8),
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.orange, Colors.deepOrange],
+                ),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.orange.withValues(alpha: 0.4),
+                    blurRadius: 6,
+                  ),
+                ],
+              ),
+              child: Text(
+                '$_queuedMessageCount',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
         ],
       ),
       actions: [
         if (!_isConnected)
-          IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
-            onPressed: _reconnectToDevice,
-            tooltip: 'Reconnect',
+          Container(
+            margin: EdgeInsets.only(right: 4),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              icon: Icon(Icons.refresh, color: Colors.orange),
+              onPressed: _reconnectToDevice,
+              tooltip: 'Reconnect',
+            ),
           ),
         PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: Colors.white),
-          color: ResQLinkTheme.cardDark,
+          color: Color(0xFF1E3E62),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+              color: Color(0xFFFF6500).withValues(alpha: 0.3),
+              width: 1,
+            ),
+          ),
           onSelected: (value) async {
             switch (value) {
               case 'device_info':
@@ -690,59 +845,54 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     }
 
     return Container(
-      width: double.infinity,
-      padding: EdgeInsets.symmetric(
-        horizontal: ResponsiveUtils.getResponsiveSpacing(context, 16),
-        vertical: ResponsiveUtils.getResponsiveSpacing(context, 8),
-      ),
-      color: bannerColor.withValues(alpha: 0.1),
-      child: Row(
-        children: [
-          Icon(bannerIcon, color: bannerColor, size: 16),
-          SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 8)),
-          Expanded(
-            child: Text(
-              bannerText,
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
-              ),
-            ),
+      margin: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            bannerColor.withValues(alpha: 0.2),
+            bannerColor.withValues(alpha: 0.1),
+          ],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: bannerColor.withValues(alpha: 0.4),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: bannerColor.withValues(alpha: 0.2),
+            blurRadius: 6,
+            offset: Offset(0, 3),
           ),
-          if (isOffline)
-            TextButton(
-              onPressed: _reconnectToDevice,
-              child: Text(
-                'RECONNECT',
-                style: TextStyle(
-                  color: bannerColor,
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
-                ),
-              ),
-            ),
-          if (hasQueuedMessages && _isConnected)
-            TextButton(
-              onPressed: _retryQueuedMessages,
-              child: Text(
-                'RETRY',
-                style: TextStyle(
-                  color: bannerColor,
-                  fontSize: ResponsiveUtils.getResponsiveFontSize(context, 12),
-                ),
-              ),
-            ),
         ],
       ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: bannerColor.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(bannerIcon, color: bannerColor, size: 20),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                bannerText,
+                style: ResponsiveText.bodySmall(
+                  context,
+                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
-  }
-
-  /// Retry queued messages manually - DISABLED
-  Future<void> _retryQueuedMessages() async {
-    if (_deviceId != null) {
-      // Message queue functionality removed - no retry needed
-      _updateQueuedMessageCount();
-      _showSnackBar('Message queue disabled - no messages to retry', isError: false);
-    }
   }
 
   void _showDeviceInfo() {
@@ -764,11 +914,17 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             _buildInfoRow('Device ID', _chatSession!.deviceId),
             _buildInfoRow('Status', _isConnected ? 'Connected' : 'Offline'),
             if (_chatSession!.lastConnectionType != null)
-              _buildInfoRow('Last Connection', _chatSession!.lastConnectionType!.displayName),
+              _buildInfoRow(
+                'Last Connection',
+                _chatSession!.lastConnectionType!.displayName,
+              ),
             _buildInfoRow('Messages', _chatSession!.messageCount.toString()),
             _buildInfoRow('Created', _formatDate(_chatSession!.createdAt)),
             if (_chatSession!.lastConnectionAt != null)
-              _buildInfoRow('Last Seen', _formatDate(_chatSession!.lastConnectionAt!)),
+              _buildInfoRow(
+                'Last Seen',
+                _formatDate(_chatSession!.lastConnectionAt!),
+              ),
           ],
         ),
         actions: [
@@ -798,10 +954,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             ),
           ),
           Expanded(
-            child: Text(
-              value,
-              style: TextStyle(color: Colors.white),
-            ),
+            child: Text(value, style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -865,10 +1018,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: ResQLinkTheme.cardDark,
-        title: Text(
-          'Block Device',
-          style: TextStyle(color: Colors.white),
-        ),
+        title: Text('Block Device', style: TextStyle(color: Colors.white)),
         content: Text(
           'Are you sure you want to block this device? You will no longer receive messages from this device.',
           style: TextStyle(color: Colors.white70),

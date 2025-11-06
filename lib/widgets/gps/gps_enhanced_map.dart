@@ -440,30 +440,78 @@ class _GpsEnhancedMapState extends State<GpsEnhancedMap>
     if (widget.showSavedLocations) {
       markers.addAll(
         controller.savedLocations.take(50).map((location) {
+          // Determine if this is a peer's location (not from current user)
+          final isPeerLocation =
+              location.userId != null &&
+              location.userId != controller.p2pService.deviceId &&
+              location.userId!.isNotEmpty;
+
+          // Extract peer name from message if available
+          String? peerName;
+          if (isPeerLocation && location.message != null) {
+            // Message format: "PeerName (Live)" or "PeerName: details"
+            final match = RegExp(r'^([^:(]+)').firstMatch(location.message!);
+            if (match != null) {
+              peerName = match.group(1)?.trim();
+            }
+          }
+
           return Marker(
-            width: 60,
-            height: 60,
+            width: isPeerLocation ? 100 : 60,
+            height: isPeerLocation ? 80 : 60,
             point: LatLng(location.latitude, location.longitude),
             child: GestureDetector(
               onTap: () => widget.onLocationTap?.call(location),
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: location.getMarkerColor(),
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: location.getMarkerColor().withValues(alpha: 0.5),
-                      blurRadius: 8,
-                      spreadRadius: 1,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Main marker icon
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: location.getMarkerColor(),
+                      border: Border.all(
+                        color: isPeerLocation ? Colors.yellow : Colors.white,
+                        width: isPeerLocation ? 3 : 2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: location.getMarkerColor().withValues(
+                            alpha: 0.5,
+                          ),
+                          blurRadius: 8,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      location.getMarkerIcon(),
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                  // Label for peer locations
+                  if (isPeerLocation && peerName != null) ...[
+                    SizedBox(height: 2),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: location.getMarkerColor().withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.yellow, width: 1),
+                      ),
+                      child: Text(
+                        peerName,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
-                ),
-                child: Icon(
-                  location.getMarkerIcon(),
-                  color: Colors.white,
-                  size: 28,
-                ),
+                ],
               ),
             ),
           );

@@ -57,7 +57,8 @@ abstract class P2PBaseService with ChangeNotifier {
   bool get isDisposed => _isDisposed;
 
   Map<String, DeviceModel> get connectedDevices => Map.from(_connectedDevices);
-  List<DeviceModel> get discoveredResQLinkDevices => List.from(_discoveredResQLinkDevices);
+  List<DeviceModel> get discoveredResQLinkDevices =>
+      List.from(_discoveredResQLinkDevices);
   List<MessageModel> get messageHistory => List.from(_messageHistory);
 
   /// Get UUID for a given MAC address
@@ -102,9 +103,10 @@ abstract class P2PBaseService with ChangeNotifier {
       // Start cleanup timer
       _startMessageCleanup();
 
-      debugPrint('✅ P2P Base Service initialized - UUID: $_deviceId, DisplayName: $_userName');
+      debugPrint(
+        '✅ P2P Base Service initialized - UUID: $_deviceId, DisplayName: $_userName',
+      );
       return true;
-
     } catch (e) {
       debugPrint('❌ P2P Base Service initialization failed: $e');
       return false;
@@ -115,7 +117,9 @@ abstract class P2PBaseService with ChangeNotifier {
   void updateDeviceId(String newDeviceId) {
     final oldDeviceId = _deviceId;
     _deviceId = newDeviceId;
-    debugPrint('🔄 Base service device ID updated: $oldDeviceId → $newDeviceId');
+    debugPrint(
+      '🔄 Base service device ID updated: $oldDeviceId → $newDeviceId',
+    );
   }
 
   /// Parse role string to enum
@@ -142,18 +146,23 @@ abstract class P2PBaseService with ChangeNotifier {
   /// Check and request required permissions
   Future<bool> checkAndRequestPermissions() async {
     try {
-      final permissions = [
-        Permission.locationWhenInUse,
-        Permission.location,
-        Permission.nearbyWifiDevices,
-      ];
+      final permissions = [Permission.location, Permission.nearbyWifiDevices];
 
       bool allGranted = true;
       for (final permission in permissions) {
-        final status = await permission.request();
-        if (status != PermissionStatus.granted) {
-          debugPrint('❌ Permission denied: $permission');
+        var status = await permission.status;
+        if (status.isPermanentlyDenied) {
+          debugPrint(
+            '❌ Permission permanently denied: $permission. Please open settings to grant.',
+          );
+          await openAppSettings();
           allGranted = false;
+        } else if (!status.isGranted) {
+          final result = await permission.request();
+          if (result != PermissionStatus.granted) {
+            debugPrint('❌ Permission denied: $permission');
+            allGranted = false;
+          }
         }
       }
 
@@ -166,13 +175,15 @@ abstract class P2PBaseService with ChangeNotifier {
 
   /// Monitor connectivity changes
   void _monitorConnectivity() {
-    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
-      (List<ConnectivityResult> results) {
-        final hasConnection = results.any((result) => result != ConnectivityResult.none);
-        debugPrint('📶 Connectivity changed: $hasConnection');
-        _onConnectivityChanged(hasConnection);
-      },
-    );
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+      List<ConnectivityResult> results,
+    ) {
+      final hasConnection = results.any(
+        (result) => result != ConnectivityResult.none,
+      );
+      debugPrint('📶 Connectivity changed: $hasConnection');
+      _onConnectivityChanged(hasConnection);
+    });
   }
 
   /// Handle connectivity changes
@@ -191,15 +202,19 @@ abstract class P2PBaseService with ChangeNotifier {
   void _cleanupOldMessages() {
     final cutoff = DateTime.now().subtract(messageExpiry);
     final cutoffTimestamp = cutoff.millisecondsSinceEpoch;
-    
-    _messageHistory.removeWhere((message) => message.timestamp < cutoffTimestamp);
+
+    _messageHistory.removeWhere(
+      (message) => message.timestamp < cutoffTimestamp,
+    );
     _processedMessageIds.removeWhere((messageId) {
       // Remove processed IDs that are older than cutoff
       // This requires checking against message history
       return !_messageHistory.any((msg) => msg.messageId == messageId);
     });
-    
-    debugPrint('🧹 Cleaned up old messages. History: ${_messageHistory.length}, Processed IDs: ${_processedMessageIds.length}');
+
+    debugPrint(
+      '🧹 Cleaned up old messages. History: ${_messageHistory.length}, Processed IDs: ${_processedMessageIds.length}',
+    );
   }
 
   /// Generate unique message ID
@@ -213,7 +228,7 @@ abstract class P2PBaseService with ChangeNotifier {
       _processedMessageIds.add(message.messageId!);
     }
     _messageHistory.add(message);
-    
+
     // Keep only recent messages in memory
     if (_messageHistory.length > 1000) {
       _messageHistory.removeAt(0);
@@ -226,7 +241,11 @@ abstract class P2PBaseService with ChangeNotifier {
   }
 
   /// Add connected device with deduplication
-  void addConnectedDevice(String deviceId, String userName, {String? macAddress}) {
+  void addConnectedDevice(
+    String deviceId,
+    String userName, {
+    String? macAddress,
+  }) {
     final now = DateTime.now();
 
     // Check if device is already connected to prevent duplicate processing
@@ -235,7 +254,9 @@ abstract class P2PBaseService with ChangeNotifier {
     bool nameChanged = existingDevice?.userName != userName;
 
     if (!isNewConnection && !nameChanged) {
-      debugPrint('ℹ️ Device already connected with same name: $userName ($deviceId)');
+      debugPrint(
+        'ℹ️ Device already connected with same name: $userName ($deviceId)',
+      );
       return;
     }
 
@@ -246,7 +267,8 @@ abstract class P2PBaseService with ChangeNotifier {
       isHost: false,
       isOnline: true,
       lastSeen: now,
-      createdAt: existingDevice?.createdAt ?? now, // Preserve original creation time
+      createdAt:
+          existingDevice?.createdAt ?? now, // Preserve original creation time
     );
 
     _connectedDevices[deviceId] = device;
@@ -259,7 +281,7 @@ abstract class P2PBaseService with ChangeNotifier {
 
     // Also update the discovered device with the correct name if it exists
     final discoveredIndex = _discoveredResQLinkDevices.indexWhere(
-      (d) => d.deviceId == deviceId
+      (d) => d.deviceId == deviceId,
     );
     if (discoveredIndex >= 0) {
       final discoveredDevice = _discoveredResQLinkDevices[discoveredIndex];
@@ -348,17 +370,17 @@ abstract class P2PBaseService with ChangeNotifier {
   @override
   void dispose() {
     debugPrint('🗑️ P2P Base Service disposing...');
-    
+
     _isDisposed = true;
-    
+
     _keepAliveTimer?.cancel();
     _connectionWatchdog?.cancel();
     _messageCleanupTimer?.cancel();
     _connectivitySubscription?.cancel();
-    
+
     _connectedDevices.clear();
     _discoveredResQLinkDevices.clear();
-    
+
     super.dispose();
   }
 }
@@ -367,11 +389,7 @@ abstract class P2PBaseService with ChangeNotifier {
 enum P2PRole { none, host, client }
 
 /// P2P Connection Mode enumeration
-enum P2PConnectionMode {
-  none,
-  client,
-  wifiDirect
-}
+enum P2PConnectionMode { none, client, wifiDirect }
 
 /// Emergency template enumeration
 enum EmergencyTemplate { sos, trapped, medical, safe, evacuating }

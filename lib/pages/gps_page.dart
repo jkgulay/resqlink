@@ -1048,14 +1048,26 @@ class _GpsPageState extends State<GpsPage> {
       batteryLevel: _gpsController.batteryLevel,
     );
 
+    // Save to database
     await LocationService.insertLocation(location);
+
+    // Share with connected P2P devices
     await _gpsController.shareLocation(location);
 
+    // CRITICAL FIX: Reload locations to update UI
+    await _gpsController.reloadLocations();
+
     if (mounted) {
+      final connectedCount = _gpsController.p2pService.connectedDevices.length;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${_getLocationTypeLabel(type)} marked successfully'),
+          content: Text(
+            connectedCount > 0
+                ? '${_getLocationTypeLabel(type)} marked and shared with $connectedCount connected device(s)'
+                : '${_getLocationTypeLabel(type)} marked successfully (no connected devices)',
+          ),
           backgroundColor: ResQLinkTheme.safeGreen,
+          duration: const Duration(seconds: 3),
         ),
       );
     }

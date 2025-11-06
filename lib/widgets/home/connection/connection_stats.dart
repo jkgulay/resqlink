@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/controllers/home_controller.dart';
+import 'package:resqlink/services/p2p/wifi_direct_service.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';
 import 'package:resqlink/utils/responsive_utils.dart';
-import 'package:resqlink/services/p2p/wifi_direct_service.dart';
 
 class ConnectionStats extends StatelessWidget {
   final HomeController controller;
@@ -20,7 +20,7 @@ class ConnectionStats extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.4),
-              width: 1.5,
+              width: 1,
             ),
             boxShadow: [
               BoxShadow(
@@ -170,7 +170,7 @@ class ConnectionStats extends StatelessWidget {
                                 SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'Failed to create group: ${e.toString().contains('Permission') ? 'Check permissions' : 'Try again'}',
+                                    'Failed to create group or Turn on Wifi Direct: ${e.toString().contains('Permission') ? 'Check permissions' : 'Try again'}',
                                   ),
                                 ),
                               ],
@@ -377,6 +377,13 @@ class ConnectionStats extends StatelessWidget {
                       try {
                         await controller.p2pService.wifiDirectService
                             ?.removeGroup();
+
+                        // Clear discovered devices list when leaving/disbanding group
+                        controller.clearDiscoveredDevices();
+
+                        // Clear role when leaving/disbanding group
+                        await controller.p2pService.clearForcedRole();
+
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(

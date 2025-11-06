@@ -181,6 +181,7 @@ class PhilippinesMapService {
 
     // Offline base layer - FIXED: Check BOTH user cache AND Philippines base tiles
     // This ensures downloaded tiles AND bundled tiles work offline
+    // CRITICAL: Use cacheOnly strategy to prevent network requests in offline mode
     _offlineTileLayer = TileLayer(
       urlTemplate: urlTemplate,
       userAgentPackageName: 'com.resqlink.app',
@@ -193,7 +194,9 @@ class PhilippinesMapService {
           _philippinesStore:
               fmtc.BrowseStoreStrategy.read, // Bundled base tiles (fallback)
         },
-        loadingStrategy: fmtc.BrowseLoadingStrategy.cacheFirst,
+        loadingStrategy: fmtc
+            .BrowseLoadingStrategy
+            .cacheOnly, // Never try network in offline mode
       ),
     );
   }
@@ -389,14 +392,16 @@ class PhilippinesMapService {
     }
 
     try {
-      if (_isOnline) {
+      // CRITICAL FIX: Respect the useOffline parameter instead of just checking _isOnline
+      // This allows forcing offline mode even when internet is available
+      if (!useOffline && _isOnline) {
         debugPrint('🌐 Using online tile layer (zoom: ${zoom ?? "unknown"})');
         return _onlineTileLayer;
       } else {
         // IMPROVED offline logic - always use base tiles with cacheFirst strategy
         // This ensures peer locations load from cached Philippines tiles
         debugPrint(
-          '� Offline mode: using base tiles with fallback (zoom: ${zoom ?? "unknown"})',
+          '📴 Offline mode: using cached tiles with fallback (zoom: ${zoom ?? "unknown"})',
         );
         return _offlineTileLayer; // Now uses cacheFirst, will work for all of Philippines
       }

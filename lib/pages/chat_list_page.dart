@@ -110,7 +110,6 @@ class _ChatListPageState extends State<ChatListPage>
     }
   }
 
-
   Future<void> _openChat(ChatSessionSummary session) async {
     if (widget.onChatSelected != null) {
       widget.onChatSelected!(session.sessionId, session.deviceName);
@@ -226,99 +225,228 @@ class _ChatListPageState extends State<ChatListPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ResQLinkTheme.backgroundDark,
-      appBar: AppBar(
-        title: Row(
-          children: [
-            Text(
-              'Chats',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-            Builder(
-              builder: (context) {
-                final queueStats = _getQueueStatistics();
-                final totalQueued = queueStats['totalQueued'] as int? ?? 0;
+      backgroundColor: Color(0xFF0B192C),
+      extendBodyBehindAppBar: false,
+      appBar: _buildStyledAppBar(context),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Color(0xFF0B192C),
+              Color(0xFF1E3E62).withValues(alpha: 0.8),
+              Color(0xFF0B192C),
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            stops: [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return Center(
+              child: ConstrainedBox(
+                constraints: ResponsiveUtils.isDesktop(context)
+                    ? BoxConstraints(maxWidth: 1200)
+                    : BoxConstraints(),
+                child: Column(
+                  children: [
+                    _buildConnectionStatus(),
+                    Expanded(child: _buildChatList()),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+      floatingActionButton: _buildFloatingActionButton(),
+    );
+  }
 
-                if (totalQueued > 0) {
-                  return Container(
-                    margin: EdgeInsets.only(left: 8),
-                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.orange,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '$totalQueued queued',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  );
-                }
-                return SizedBox.shrink();
-              },
+  PreferredSizeWidget _buildStyledAppBar(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isNarrow = screenWidth < 400;
+    final queueStats = _getQueueStatistics();
+    final totalQueued = queueStats['totalQueued'] as int? ?? 0;
+
+    return AppBar(
+      elevation: 8,
+      shadowColor: Colors.black45,
+      backgroundColor: Colors.transparent,
+      toolbarHeight: isNarrow ? 56.0 : 64.0,
+      flexibleSpace: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0B192C), Color(0xFF1E3E62), Color(0xFF2A5278)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            stops: [0.0, 0.5, 1.0],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0xFFFF6500).withValues(alpha: 0.2),
+              blurRadius: 8,
+              offset: Offset(0, 2),
             ),
           ],
         ),
-        backgroundColor: ResQLinkTheme.cardDark,
-        elevation: 0,
-        iconTheme: IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(icon: Icon(Icons.refresh), onPressed: _loadChatSessions),
-        ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return ConstrainedBox(
-            constraints: ResponsiveUtils.isDesktop(context)
-                ? BoxConstraints(maxWidth: 1200)
-                : BoxConstraints(),
+      title: Row(
+        children: [
+          Icon(
+            Icons.chat_bubble_outline,
+            color: Color(0xFFFF6500),
+            size: ResponsiveHelper.getIconSize(context, narrow: 24),
+          ),
+          SizedBox(width: 12),
+          Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildConnectionStatus(),
-                Expanded(child: _buildChatList()),
+                Text(
+                  'Messages',
+                  style: ResponsiveText.heading3(context).copyWith(
+                    color: Colors.white,
+                    shadows: [
+                      Shadow(
+                        color: Color(0xFFFF6500).withValues(alpha: 0.4),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isNarrow && _chatSessions.isNotEmpty) ...[
+                  SizedBox(height: 2),
+                  Text(
+                    '${_chatSessions.length} conversation${_chatSessions.length != 1 ? 's' : ''}',
+                    style: ResponsiveText.caption(
+                      context,
+                    ).copyWith(color: Colors.white60, fontSize: 10),
+                  ),
+                ],
               ],
             ),
-          );
-        },
+          ),
+          if (totalQueued > 0)
+            Container(
+              margin: EdgeInsets.only(left: 8),
+              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.orange, Colors.deepOrange],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.orange.withValues(alpha: 0.4),
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.schedule, color: Colors.white, size: 12),
+                  SizedBox(width: 4),
+                  Text(
+                    '$totalQueued',
+                    style: ResponsiveText.caption(context).copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
-      floatingActionButton: _buildFloatingActionButton(),
+      actions: [
+        Container(
+          margin: EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(
+            color: Color(0xFFFF6500).withValues(alpha: 0.2),
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            icon: Icon(Icons.refresh, color: Color(0xFFFF6500)),
+            onPressed: _loadChatSessions,
+            tooltip: 'Refresh chats',
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildConnectionStatus() {
     if (!widget.p2pService.isConnected) {
       return Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: ResponsiveUtils.getResponsiveSpacing(context, 16),
-          vertical: ResponsiveUtils.getResponsiveSpacing(context, 8)
-        ),
-        child: Card(
-          color: ResQLinkTheme.primaryRed.withValues(alpha: 0.1),
-          child: Padding(
-            padding: EdgeInsets.all(ResponsiveUtils.getResponsiveSpacing(context, 12)),
-            child: Row(
-              children: [
-                Icon(Icons.wifi_off, color: ResQLinkTheme.primaryRed, size: 20),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'No active connections. Scan for devices to start chatting.',
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () =>
-                      widget.p2pService.discoverDevices(force: true),
-                  child: Text(
-                    'SCAN',
-                    style: TextStyle(color: ResQLinkTheme.primaryRed),
-                  ),
-                ),
-              ],
+        margin: EdgeInsets.all(ResponsiveHelper.getContentSpacing(context)),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              ResQLinkTheme.primaryRed.withValues(alpha: 0.2),
+              ResQLinkTheme.primaryRed.withValues(alpha: 0.1),
+            ],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: ResQLinkTheme.primaryRed.withValues(alpha: 0.4),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: ResQLinkTheme.primaryRed.withValues(alpha: 0.2),
+              blurRadius: 8,
+              offset: Offset(0, 4),
             ),
+          ],
+        ),
+        child: Padding(
+          padding: ResponsiveHelper.getCardPadding(context),
+          child: Row(
+            children: [
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: ResQLinkTheme.primaryRed.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.wifi_off,
+                  color: ResQLinkTheme.primaryRed,
+                  size: ResponsiveHelper.getIconSize(context, narrow: 24),
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'No Active Connections',
+                      style: ResponsiveText.bodyLarge(context).copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Connect to devices to start messaging',
+                      style: ResponsiveText.bodySmall(
+                        context,
+                      ).copyWith(color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -371,29 +499,61 @@ class _ChatListPageState extends State<ChatListPage>
   }
 
   Widget _buildChatListItem(ChatSessionSummary session) {
-    return Card(
-      margin: ResponsiveHelper.getCardMargins(context),
-      color: ResQLinkTheme.cardDark,
-      child: InkWell(
-        onTap: () => _openChat(session),
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: ResponsiveHelper.getCardPadding(context),
-          child: Row(
-            children: [
-              _buildAvatar(session),
-              SizedBox(width: 12),
-              Expanded(child: _buildChatInfo(session)),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _buildTimestamp(session),
-                  SizedBox(height: 4),
-                  _buildBadges(session),
-                ],
-              ),
-              _buildOptionsMenu(session),
-            ],
+    return Container(
+      margin: EdgeInsets.symmetric(
+        horizontal: ResponsiveHelper.getCardMargins(context).horizontal / 2,
+        vertical: 8,
+      ),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF1E3E62).withValues(alpha: 0.6),
+            Color(0xFF0B192C).withValues(alpha: 0.4),
+          ],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: session.isOnline
+              ? Color(0xFFFF6500).withValues(alpha: 0.4)
+              : Colors.white.withValues(alpha: 0.1),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: session.isOnline
+                ? Color(0xFFFF6500).withValues(alpha: 0.15)
+                : Colors.black.withValues(alpha: 0.2),
+            blurRadius: 8,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _openChat(session),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              children: [
+                _buildAvatar(session),
+                SizedBox(width: 16),
+                Expanded(child: _buildChatInfo(session)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    _buildTimestamp(session),
+                    SizedBox(height: 8),
+                    _buildBadges(session),
+                  ],
+                ),
+                SizedBox(width: 8),
+                _buildOptionsMenu(session),
+              ],
+            ),
           ),
         ),
       ),
@@ -407,19 +567,41 @@ class _ChatListPageState extends State<ChatListPage>
           future: _getDisplayName(session.deviceName),
           builder: (context, snapshot) {
             final displayName = snapshot.data ?? session.deviceName;
-            return CircleAvatar(
-              radius: 24,
-              backgroundColor: session.isOnline
-                  ? ResQLinkTheme.safeGreen
-                  : ResQLinkTheme.primaryRed.withValues(alpha: 0.3),
-              child: Text(
-                displayName.isNotEmpty
-                    ? displayName[0].toUpperCase()
-                    : 'D',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
+            return Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: session.isOnline
+                    ? LinearGradient(
+                        colors: [
+                          ResQLinkTheme.safeGreen,
+                          ResQLinkTheme.safeGreen.withValues(alpha: 0.7),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : LinearGradient(
+                        colors: [Colors.grey.shade700, Colors.grey.shade800],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                boxShadow: [
+                  BoxShadow(
+                    color: session.isOnline
+                        ? ResQLinkTheme.safeGreen.withValues(alpha: 0.4)
+                        : Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: CircleAvatar(
+                radius: 28,
+                backgroundColor: Colors.transparent,
+                child: Text(
+                  displayName.isNotEmpty ? displayName[0].toUpperCase() : 'D',
+                  style: ResponsiveText.heading3(
+                    context,
+                  ).copyWith(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
               ),
             );
@@ -427,15 +609,22 @@ class _ChatListPageState extends State<ChatListPage>
         ),
         if (session.isOnline)
           Positioned(
-            bottom: 0,
-            right: 0,
+            bottom: 2,
+            right: 2,
             child: Container(
-              width: 12,
-              height: 12,
+              width: 14,
+              height: 14,
               decoration: BoxDecoration(
                 color: ResQLinkTheme.safeGreen,
                 shape: BoxShape.circle,
-                border: Border.all(color: ResQLinkTheme.cardDark, width: 2),
+                border: Border.all(color: Color(0xFF0B192C), width: 2.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: ResQLinkTheme.safeGreen.withValues(alpha: 0.6),
+                    blurRadius: 4,
+                    spreadRadius: 1,
+                  ),
+                ],
               ),
             ),
           ),
@@ -455,10 +644,9 @@ class _ChatListPageState extends State<ChatListPage>
                 builder: (context, snapshot) {
                   return Text(
                     snapshot.data ?? session.deviceName,
-                    style: TextStyle(
+                    style: ResponsiveText.bodyLarge(context).copyWith(
                       color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -467,30 +655,46 @@ class _ChatListPageState extends State<ChatListPage>
               ),
             ),
             if (session.connectionType != null) ...[
-              SizedBox(width: 4),
-              Icon(
-                session.connectionType == ConnectionType.wifiDirect
-                    ? Icons.wifi
-                    : Icons.wifi_tethering,
-                size: 16,
-                color: session.isOnline
-                    ? ResQLinkTheme.safeGreen
-                    : Colors.white30,
+              SizedBox(width: 6),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: session.isOnline
+                      ? ResQLinkTheme.safeGreen.withValues(alpha: 0.2)
+                      : Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      session.connectionType == ConnectionType.wifiDirect
+                          ? Icons.wifi
+                          : Icons.wifi_tethering,
+                      size: 12,
+                      color: session.isOnline
+                          ? ResQLinkTheme.safeGreen
+                          : Colors.white38,
+                    ),
+                  ],
+                ),
               ),
             ],
           ],
         ),
-        SizedBox(height: 4),
+        SizedBox(height: 6),
         Row(
           children: [
             Expanded(
               child: Text(
                 session.lastMessage ?? 'No messages yet',
-                style: TextStyle(
+                style: ResponsiveText.bodySmall(context).copyWith(
                   color: session.lastMessage != null
                       ? Colors.white70
-                      : Colors.white30,
-                  fontSize: 14,
+                      : Colors.white38,
+                  fontStyle: session.lastMessage == null
+                      ? FontStyle.italic
+                      : FontStyle.normal,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

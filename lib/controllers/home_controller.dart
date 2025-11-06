@@ -203,9 +203,19 @@ class HomeController extends ChangeNotifier {
   void stopScan() {
     if (_isScanning) {
       _isScanning = false;
+      // Clear discovered devices when canceling scan
+      clearDiscoveredDevices();
+      // Clear client role when canceling scan
+      p2pService.clearForcedRole();
       debugPrint("⏹️ Scan cancelled by user");
       notifyListeners();
     }
+  }
+
+  void clearDiscoveredDevices() {
+    _discoveredDevices.clear();
+    debugPrint("🧹 Cleared discovered devices list");
+    notifyListeners();
   }
 
   Future<void> createGroup() async {
@@ -215,6 +225,9 @@ class HomeController extends ChangeNotifier {
       // Check permissions first
       await p2pService.checkAndRequestPermissions();
 
+      // Set role to host
+      await p2pService.forceHostRole();
+
       // Create WiFi Direct group
       final success =
           await p2pService.wifiDirectService?.createGroup() ?? false;
@@ -223,6 +236,8 @@ class HomeController extends ChangeNotifier {
         debugPrint("✅ WiFi Direct group created successfully");
       } else {
         debugPrint("❌ Failed to create WiFi Direct group");
+        // Reset role if group creation failed
+        await p2pService.clearForcedRole();
         throw Exception("Failed to create WiFi Direct group");
       }
 

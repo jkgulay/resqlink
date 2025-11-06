@@ -19,11 +19,6 @@ class DeviceList extends StatelessWidget {
       return deviceId != null && deviceId.toString().isNotEmpty;
     }).toList();
 
-    // Show empty state if no valid devices
-    if (validDevices.isEmpty) {
-      return _buildEmptyState(context);
-    }
-
     return Container(
       padding: ResponsiveSpacing.padding(context, all: 16),
       decoration: BoxDecoration(
@@ -41,14 +36,16 @@ class DeviceList extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeader(context, validDevices.length),
-          SizedBox(height: ResponsiveSpacing.md(context)),
-          _buildDevicesList(context, validDevices),
-        ],
-      ),
+      child: validDevices.isEmpty
+          ? _buildEmptyStateContent(context)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(context, validDevices.length),
+                SizedBox(height: ResponsiveSpacing.md(context)),
+                _buildDevicesList(context, validDevices),
+              ],
+            ),
     );
   }
 
@@ -142,17 +139,13 @@ class DeviceList extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState(BuildContext context) {
+  /*Widget _buildEmptyState(BuildContext context) {
+    return _buildEmptyStateContent(context);
+  }*/
+
+  Widget _buildEmptyStateContent(BuildContext context) {
     return Container(
       padding: ResponsiveSpacing.padding(context, horizontal: 32, vertical: 48),
-      decoration: BoxDecoration(
-        color: ResQLinkTheme.surfaceDark.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: ResQLinkTheme.offlineGray.withValues(alpha: 0.3),
-          width: 1.5,
-        ),
-      ),
       child: Column(
         children: [
           Icon(

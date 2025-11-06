@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/controllers/gps_controller.dart';
 import 'package:resqlink/services/settings_service.dart';
 import '../utils/responsive_utils.dart';
+import '../utils/responsive_helper.dart';
 import '../utils/resqlink_theme.dart';
 import 'message_page.dart';
 import 'gps_page.dart';
@@ -122,62 +122,59 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       providers: [
         ChangeNotifierProvider.value(value: _homeController),
         ChangeNotifierProvider.value(value: LocationStateService()),
-        ChangeNotifierProvider.value(
-          value: _gpsController,
-        ), // Add GPS controller
+        ChangeNotifierProvider.value(value: _gpsController),
       ],
       child: Consumer3<HomeController, LocationStateService, GpsController>(
         builder: (context, controller, locationState, gpsController, child) {
-          return RefreshIndicator(
-            onRefresh: () async {
-              // CRITICAL FIX: Add device scan to pull-to-refresh
-              debugPrint('🔄 Pull to refresh triggered');
-              await Future.wait([
-                controller.refreshLocation(),
-                locationState.refreshLocation(),
-                gpsController.getCurrentLocation(),
-                _homeController.startScan(), // Trigger device scan
-              ]);
-            },
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return SingleChildScrollView(
-                  physics: AlwaysScrollableScrollPhysics(),
-                  padding: ResponsiveSpacing.padding(
-                    context,
-                    horizontal: ResponsiveUtils.isMobile(context) ? 16 : 24,
-                    vertical: ResponsiveUtils.isMobile(context) ? 16 : 20,
-                  ),
-                  child: ConstrainedBox(
-                    constraints: ResponsiveUtils.isDesktop(context)
-                        ? BoxConstraints(maxWidth: 1200)
-                        : BoxConstraints(),
-                    child: Column(
-                      children: [
-                        // Use responsive layout for tablet/desktop
-                        if (ResponsiveUtils.isDesktop(context))
-                          _buildDesktopLayout(
-                            controller,
-                            locationState,
-                            gpsController,
-                          )
-                        else if (ResponsiveUtils.isTablet(context))
-                          _buildTabletLayout(
-                            controller,
-                            locationState,
-                            gpsController,
-                          )
-                        else
-                          _buildMobileLayout(
-                            controller,
-                            locationState,
-                            gpsController,
-                          ),
-                      ],
-                    ),
-                  ),
-                );
+          return Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFF0B192C),
+                  Color(0xFF1E3E62).withValues(alpha: 0.8),
+                  Color(0xFF0B192C),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: [0.0, 0.5, 1.0],
+              ),
+            ),
+            child: RefreshIndicator(
+              onRefresh: () async {
+                debugPrint('🔄 Pull to refresh triggered');
+                await Future.wait([
+                  controller.refreshLocation(),
+                  locationState.refreshLocation(),
+                  gpsController.getCurrentLocation(),
+                  _homeController.startScan(),
+                ]);
               },
+              color: Color(0xFFFF6500),
+              backgroundColor: Color(0xFF1E3E62),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // Direct layout selection without ConstrainedBox wrapper
+                  if (ResponsiveUtils.isDesktop(context)) {
+                    return _buildDesktopLayout(
+                      controller,
+                      locationState,
+                      gpsController,
+                    );
+                  } else if (ResponsiveUtils.isTablet(context)) {
+                    return _buildTabletLayout(
+                      controller,
+                      locationState,
+                      gpsController,
+                    );
+                  } else {
+                    return _buildMobileLayout(
+                      controller,
+                      locationState,
+                      gpsController,
+                    );
+                  }
+                },
+              ),
             ),
           );
         },
@@ -185,46 +182,60 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  // Responsive layout builders
+  // Responsive layout builders with enhanced visual design
   Widget _buildMobileLayout(
     HomeController controller,
     LocationStateService locationState,
     GpsController gpsController,
   ) {
-    return Column(
-      children: [
-        // Connection & Discovery Card
-        ConnectionDiscoveryCard(
-          controller: controller,
-          onDeviceChatTap: _onDeviceChatTap,
-        ),
-        SizedBox(height: ResponsiveSpacing.lg(context)),
+    return SingleChildScrollView(
+      padding: EdgeInsets.symmetric(
+        horizontal: ResponsiveHelper.getCardMargins(context).horizontal / 2,
+        vertical: 12,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(height: 8),
 
-        // Emergency Actions (only when connected)
-        if (controller.isConnected) ...[
-          EmergencyActionsCard(
-            p2pService: _p2pService,
-            onEmergencyMessage: _sendEmergencyMessage,
+          // Connection & Discovery Card
+          ConnectionDiscoveryCard(
+            controller: controller,
+            onDeviceChatTap: _onDeviceChatTap,
           ),
-          SizedBox(height: ResponsiveSpacing.lg(context)),
+
+          SizedBox(height: ResponsiveHelper.getSectionSpacing(context)),
+
+          // Emergency Actions (only when connected)
+          if (controller.isConnected) ...[
+            EmergencyActionsCard(
+              p2pService: _p2pService,
+              onEmergencyMessage: _sendEmergencyMessage,
+            ),
+            SizedBox(height: ResponsiveHelper.getSectionSpacing(context)),
+          ],
+
+          // Location Status Card
+          LocationStatusCard(
+            location: locationState.currentLocation,
+            isLoading: locationState.isLoadingLocation,
+            unsyncedCount: locationState.unsyncedCount,
+            onRefresh: () async {
+              await locationState.refreshLocation();
+              await gpsController.getCurrentLocation();
+            },
+            onShare: locationState.shareLocation,
+          ),
+
+          SizedBox(height: ResponsiveHelper.getSectionSpacing(context)),
+
+          // Instructions Card
+          InstructionsCard(),
+
+          // Bottom spacing for better scroll
+          SizedBox(height: 24),
         ],
-
-        // Location Status Card
-        LocationStatusCard(
-          location: locationState.currentLocation,
-          isLoading: locationState.isLoadingLocation,
-          unsyncedCount: locationState.unsyncedCount,
-          onRefresh: () async {
-            await locationState.refreshLocation();
-            await gpsController.getCurrentLocation();
-          },
-          onShare: locationState.shareLocation,
-        ),
-        SizedBox(height: ResponsiveSpacing.lg(context)),
-
-        // Instructions Card
-        InstructionsCard(),
-      ],
+      ),
     );
   }
 
@@ -233,46 +244,132 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     LocationStateService locationState,
     GpsController gpsController,
   ) {
-    return Column(
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: ConnectionDiscoveryCard(
-                controller: controller,
-                onDeviceChatTap: _onDeviceChatTap,
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(ResponsiveHelper.getSectionSpacing(context)),
+      child: Column(
+        children: [
+          // Welcome Banner
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFF1E3E62).withValues(alpha: 0.7),
+                  Color(0xFF0B192C).withValues(alpha: 0.5),
+                ],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
               ),
-            ),
-            SizedBox(width: ResponsiveSpacing.lg(context)),
-            Expanded(
-              child: LocationStatusCard(
-                location: locationState.currentLocation,
-                isLoading: locationState.isLoadingLocation,
-                unsyncedCount: locationState.unsyncedCount,
-                onRefresh: () async {
-                  await locationState.refreshLocation();
-                  await gpsController.getCurrentLocation();
-                },
-                onShare: locationState.shareLocation,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Color(0xFFFF6500).withValues(alpha: 0.4),
+                width: 1.5,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0xFFFF6500).withValues(alpha: 0.15),
+                  blurRadius: 12,
+                  offset: Offset(0, 4),
+                ),
+              ],
             ),
-          ],
-        ),
-        SizedBox(height: ResponsiveSpacing.lg(context)),
-
-        // Emergency Actions (only when connected)
-        if (controller.isConnected) ...[
-          EmergencyActionsCard(
-            p2pService: _p2pService,
-            onEmergencyMessage: _sendEmergencyMessage,
+            child: Row(
+              children: [
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Color(0xFFFF6500).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.shield_outlined,
+                    color: Color(0xFFFF6500),
+                    size: 32,
+                  ),
+                ),
+                SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "ResQLink Emergency Network",
+                        style: ResponsiveText.heading2(
+                          context,
+                        ).copyWith(color: Colors.white),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        "Peer-to-peer mesh networking for disaster response",
+                        style: ResponsiveText.bodyMedium(
+                          context,
+                        ).copyWith(color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          SizedBox(height: ResponsiveSpacing.lg(context)),
-        ],
 
-        // Instructions Card
-        InstructionsCard(),
-      ],
+          SizedBox(height: ResponsiveHelper.getSectionSpacing(context)),
+
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Left Column - Connection & Emergency
+              Expanded(
+                flex: 3,
+                child: Column(
+                  children: [
+                    ConnectionDiscoveryCard(
+                      controller: controller,
+                      onDeviceChatTap: _onDeviceChatTap,
+                    ),
+                    if (controller.isConnected) ...[
+                      SizedBox(
+                        height: ResponsiveHelper.getSectionSpacing(context),
+                      ),
+                      EmergencyActionsCard(
+                        p2pService: _p2pService,
+                        onEmergencyMessage: _sendEmergencyMessage,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              SizedBox(width: ResponsiveHelper.getSectionSpacing(context)),
+
+              // Right Column - Location & Instructions
+              Expanded(
+                flex: 2,
+                child: Column(
+                  children: [
+                    LocationStatusCard(
+                      location: locationState.currentLocation,
+                      isLoading: locationState.isLoadingLocation,
+                      unsyncedCount: locationState.unsyncedCount,
+                      onRefresh: () async {
+                        await locationState.refreshLocation();
+                        await gpsController.getCurrentLocation();
+                      },
+                      onShare: locationState.shareLocation,
+                    ),
+                    SizedBox(
+                      height: ResponsiveHelper.getSectionSpacing(context),
+                    ),
+                    InstructionsCard(),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          SizedBox(height: 24),
+        ],
+      ),
     );
   }
 
@@ -281,52 +378,198 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     LocationStateService locationState,
     GpsController gpsController,
   ) {
-    return Column(
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              flex: 2,
-              child: Column(
-                children: [
-                  ConnectionDiscoveryCard(
-                    controller: controller,
-                    onDeviceChatTap: _onDeviceChatTap,
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(ResponsiveHelper.getSectionSpacing(context)),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: 1400),
+          child: Column(
+            children: [
+              // Hero Banner
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Color(0xFF1E3E62),
+                      Color(0xFF0B192C),
+                      Color(0xFF1E3E62),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  if (controller.isConnected) ...[
-                    SizedBox(height: ResponsiveSpacing.lg(context)),
-                    EmergencyActionsCard(
-                      p2pService: _p2pService,
-                      onEmergencyMessage: _sendEmergencyMessage,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: Color(0xFFFF6500).withValues(alpha: 0.5),
+                    width: 2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0xFFFF6500).withValues(alpha: 0.25),
+                      blurRadius: 20,
+                      offset: Offset(0, 8),
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 16,
+                      offset: Offset(0, 4),
                     ),
                   ],
-                ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        gradient: RadialGradient(
+                          colors: [
+                            Color(0xFFFF6500).withValues(alpha: 0.3),
+                            Color(0xFFFF6500).withValues(alpha: 0.1),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Icon(
+                        Icons.router,
+                        color: Color(0xFFFF6500),
+                        size: 48,
+                      ),
+                    ),
+                    SizedBox(width: 24),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "ResQLink Emergency Response Network",
+                            style: ResponsiveText.heading1(context).copyWith(
+                              color: Colors.white,
+                              shadows: [
+                                Shadow(
+                                  color: Color(
+                                    0xFFFF6500,
+                                  ).withValues(alpha: 0.5),
+                                  blurRadius: 12,
+                                ),
+                              ],
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            "Advanced peer-to-peer mesh networking for disaster communication • Offline-first architecture • Real-time location sharing",
+                            style: ResponsiveText.bodyLarge(
+                              context,
+                            ).copyWith(color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Status Indicator
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: controller.isConnected
+                            ? Colors.green.withValues(alpha: 0.2)
+                            : Colors.grey.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: controller.isConnected
+                              ? Colors.green
+                              : Colors.grey,
+                          width: 2,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            controller.isConnected
+                                ? Icons.check_circle
+                                : Icons.circle_outlined,
+                            color: controller.isConnected
+                                ? Colors.green
+                                : Colors.grey,
+                            size: 24,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            controller.isConnected ? "CONNECTED" : "OFFLINE",
+                            style: ResponsiveText.button(context).copyWith(
+                              color: controller.isConnected
+                                  ? Colors.green
+                                  : Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            SizedBox(width: ResponsiveUtils.getResponsiveSpacing(context, 24)),
-            Expanded(
-              flex: 1,
-              child: Column(
+
+              SizedBox(height: ResponsiveHelper.getSectionSpacing(context)),
+
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  LocationStatusCard(
-                    location: locationState.currentLocation,
-                    isLoading: locationState.isLoadingLocation,
-                    unsyncedCount: locationState.unsyncedCount,
-                    onRefresh: () async {
-                      await locationState.refreshLocation();
-                      await gpsController.getCurrentLocation();
-                    },
-                    onShare: locationState.shareLocation,
+                  // Main Content - Connection & Emergency
+                  Expanded(
+                    flex: 2,
+                    child: Column(
+                      children: [
+                        ConnectionDiscoveryCard(
+                          controller: controller,
+                          onDeviceChatTap: _onDeviceChatTap,
+                        ),
+                        if (controller.isConnected) ...[
+                          SizedBox(
+                            height: ResponsiveHelper.getSectionSpacing(context),
+                          ),
+                          EmergencyActionsCard(
+                            p2pService: _p2pService,
+                            onEmergencyMessage: _sendEmergencyMessage,
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                  SizedBox(height: ResponsiveSpacing.lg(context)),
-                  InstructionsCard(),
+
+                  SizedBox(width: ResponsiveHelper.getSectionSpacing(context)),
+
+                  // Sidebar - Location & Instructions
+                  Expanded(
+                    flex: 1,
+                    child: Column(
+                      children: [
+                        LocationStatusCard(
+                          location: locationState.currentLocation,
+                          isLoading: locationState.isLoadingLocation,
+                          unsyncedCount: locationState.unsyncedCount,
+                          onRefresh: () async {
+                            await locationState.refreshLocation();
+                            await gpsController.getCurrentLocation();
+                          },
+                          onShare: locationState.shareLocation,
+                        ),
+                        SizedBox(
+                          height: ResponsiveHelper.getSectionSpacing(context),
+                        ),
+                        InstructionsCard(),
+                      ],
+                    ),
+                  ),
                 ],
               ),
-            ),
-          ],
+
+              SizedBox(height: 32),
+            ],
+          ),
         ),
-      ],
+      ),
     );
   }
 
@@ -494,9 +737,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     debugPrint('🆔 Initializing P2P with username: $userName');
 
-    final preferredRole = DateTime.now().millisecondsSinceEpoch % 2 == 0
-        ? 'host'
-        : 'client';
+    // CRITICAL FIX: Don't auto-select role - let user choose explicitly via UI
+    // Random role selection was causing unpredictable behavior
+    const String? preferredRole = null;
 
     final success = await _p2pService.initialize(
       userName,
@@ -511,7 +754,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _p2pService.onDeviceConnected = _onDeviceConnected;
       _p2pService.onDeviceDisconnected = _onDeviceDisconnected;
       _p2pService.addListener(_updateUI);
-      _p2pService.emergencyMode = true;
 
       // Message queue service initialization removed
       debugPrint('✅ P2P Service initialized without message queue');
@@ -619,13 +861,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       // WiFi Direct only mode - no fallback configuration needed
 
       if (settings.offlineMode) {
+        // CRITICAL FIX: Emergency mode controlled by settings
         _p2pService.emergencyMode = true;
+      } else {
+        _p2pService.emergencyMode = false;
       }
     }
     setState(() {});
   }
 
-  void _onLocationShare(LocationModel location) {}
+  void _onLocationShare(LocationModel location) {
+    // Keep shared location state in sync for UI cards, but avoid
+    // triggering additional broadcasts. Actual sending logic
+    // lives in GPS controller and LocationStateService.
+    LocationStateService().updateCurrentLocation(location);
+  }
 
   void _onDeviceChatTap(Map<String, dynamic> device) {
     debugPrint('🎯 HomePage: Device chat tap for ${device['deviceName']}');
@@ -680,62 +930,118 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   PreferredSizeWidget _buildResponsiveAppBar(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final isNarrowScreen = screenWidth < 600;
+    final isTablet = ResponsiveHelper.isTablet(context);
+
+    // Responsive toolbar height
+    final toolbarHeight = screenWidth < 400 ? 56.0 : (isTablet ? 64.0 : 72.0);
 
     return AppBar(
-      elevation: 2,
-      shadowColor: Colors.black26,
-      backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-      toolbarHeight: isNarrowScreen ? 56 : 64,
+      elevation: 8,
+      shadowColor: Colors.black45,
+      backgroundColor: Colors.transparent,
+      toolbarHeight: toolbarHeight,
       flexibleSpace: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF0B192C), Color(0xFF1E3A5F)],
+            colors: [Color(0xFF0B192C), Color(0xFF1E3E62), Color(0xFF2A5278)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
+            stops: [0.0, 0.5, 1.0],
           ),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0xFFFF6500).withValues(alpha: 0.2),
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+          ],
         ),
       ),
-      title: _buildAppBarTitle(isNarrowScreen),
-      actions: _buildAppBarActions(isNarrowScreen),
+      title: _buildAppBarTitle(context),
+      actions: _buildAppBarActions(context),
+      centerTitle: false,
     );
   }
 
-  Widget _buildAppBarTitle(bool isNarrowScreen) {
+  Widget _buildAppBarTitle(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final logoSize = ResponsiveHelper.getIconSize(context);
+    final spacing = screenWidth < 400 ? 6.0 : 8.0;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Image.asset(
-          'assets/1.png',
-          height: isNarrowScreen ? 24 : 30,
-          errorBuilder: (context, error, stackTrace) => Icon(
-            Icons.emergency,
-            size: isNarrowScreen ? 24 : 30,
-            color: Colors.white,
+        // Logo with animated glow
+        Container(
+          padding: EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                Color(0xFFFF6500).withValues(alpha: 0.3),
+                Colors.transparent,
+              ],
+              stops: [0.0, 1.0],
+            ),
+          ),
+          child: Image.asset(
+            'assets/1.png',
+            height: logoSize,
+            width: logoSize,
+            errorBuilder: (context, error, stackTrace) =>
+                Icon(Icons.emergency, size: logoSize, color: Color(0xFFFF6500)),
           ),
         ),
-        SizedBox(width: 8),
+        SizedBox(width: spacing),
         Flexible(
-          child: Text(
-            "ResQLink",
-            style: GoogleFonts.rajdhani(
-              fontSize: isNarrowScreen ? 16 : 20,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-              letterSpacing: 0.5,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "ResQLink",
+                style: ResponsiveText.heading2(context).copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
+                  shadows: [
+                    Shadow(
+                      color: Color(0xFFFF6500).withValues(alpha: 0.5),
+                      blurRadius: 8,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (screenWidth >= 400) ...[
+                SizedBox(height: 2),
+                Text(
+                  "Emergency Response Network",
+                  style: ResponsiveText.caption(context).copyWith(
+                    color: Colors.white70,
+                    letterSpacing: 0.8,
+                    fontSize: 9,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ],
           ),
         ),
       ],
     );
   }
 
-  List<Widget> _buildAppBarActions(bool isNarrowScreen) {
+  List<Widget> _buildAppBarActions(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isNarrowScreen = screenWidth < 400;
+
     final actions = <Widget>[];
 
-    // P2P Connection Status
+    // P2P Connection Status Badge
     actions.add(
       Container(
         margin: EdgeInsets.only(right: isNarrowScreen ? 4 : 8),
@@ -768,7 +1074,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               size: isNarrowScreen ? 12 : 16,
               color: Colors.white,
             ),
-            if (!isNarrowScreen || MediaQuery.of(context).size.width > 360) ...[
+            if (!isNarrowScreen) ...[
               SizedBox(width: 3),
               Text(
                 _p2pService.currentRole == P2PRole.host
@@ -802,27 +1108,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
             ],
           ],
-        ),
-      ),
-    );
-
-    // Online/Offline Status
-    actions.add(
-      Padding(
-        padding: EdgeInsets.only(right: isNarrowScreen ? 8 : 12),
-        child: Container(
-          padding: EdgeInsets.all(isNarrowScreen ? 6 : 8),
-          decoration: BoxDecoration(
-            color: _p2pService.isOnline
-                ? Colors.green.withValues(alpha: 0.2)
-                : Colors.grey.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            _p2pService.isOnline ? Icons.cloud_done : Icons.cloud_off,
-            color: _p2pService.isOnline ? Colors.green : Colors.grey.shade300,
-            size: isNarrowScreen ? 16 : 20,
-          ),
         ),
       ),
     );

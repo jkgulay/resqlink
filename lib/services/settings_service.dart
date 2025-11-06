@@ -9,7 +9,8 @@ class SettingsService extends ChangeNotifier {
   // Settings state
   bool _offlineMode = false;
   bool _locationSharingEnabled = true;
-  bool _multiHopEnabled = true;
+  // CRITICAL FIX: Multi-hop disabled by default - can interfere with regular chat
+  bool _multiHopEnabled = false;
   bool _emergencyNotifications = true;
   bool _soundNotifications = true;
   bool _vibrationNotifications = true;
@@ -37,7 +38,8 @@ class SettingsService extends ChangeNotifier {
 
     _offlineMode = prefs.getBool('offline_mode') ?? false;
     _locationSharingEnabled = prefs.getBool('location_sharing_enabled') ?? true;
-    _multiHopEnabled = prefs.getBool('multi_hop_enabled') ?? true;
+    // CRITICAL FIX: Multi-hop disabled by default to prevent chat interference
+    _multiHopEnabled = prefs.getBool('multi_hop_enabled') ?? false;
     _emergencyNotifications = prefs.getBool('emergency_notifications') ?? true;
     _soundNotifications = prefs.getBool('sound_notifications') ?? true;
     _vibrationNotifications = prefs.getBool('vibration_notifications') ?? true;

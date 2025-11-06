@@ -729,19 +729,57 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
       await LocationService.insertLocation(locationModel);
 
-      // Send location via P2P service instead of sync service for better delivery
+      final messageId = _generateMessageId();
+      final timestamp = DateTime.now();
+      final senderName = widget.p2pService.userName ?? 'Unknown User';
+      final isConnected = widget.p2pService.connectedDevices.containsKey(
+        _selectedEndpointId,
+      );
+
+      final dbMessage = MessageModel(
+        endpointId: _selectedEndpointId!,
+        fromUser: senderName,
+        message: locationText,
+        isMe: true,
+        isEmergency: false,
+        messageType: MessageType.location,
+        timestamp: timestamp.millisecondsSinceEpoch,
+        latitude: latitude,
+        longitude: longitude,
+        messageId: messageId,
+        type: MessageType.location.name,
+        status: isConnected ? MessageStatus.sent : MessageStatus.pending,
+        deviceId: widget.p2pService.deviceId,
+      );
+
+      await MessageRepository.insert(dbMessage);
+
+      if (mounted) {
+        setState(() {
+          _selectedConversationMessages.add(dbMessage);
+          _selectedConversationMessages.sort(
+            (a, b) => a.timestamp.compareTo(b.timestamp),
+          );
+        });
+        _scrollToBottomImmediate();
+      }
+
       await widget.p2pService.sendMessage(
+        id: messageId,
         message: locationText,
         type: MessageType.location,
         targetDeviceId: _selectedEndpointId!,
         latitude: latitude,
         longitude: longitude,
-        senderName: widget.p2pService.userName ?? 'Unknown',
+        senderName: senderName,
       );
 
       if (mounted) {
-        await _loadMessagesForDevice(_selectedEndpointId!);
-        _showSuccessMessage('Location shared successfully');
+        _showSuccessMessage(
+          isConnected
+              ? 'Location shared successfully'
+              : 'Location queued (device offline)',
+        );
       }
     } catch (e) {
       debugPrint('❌ Error sending location: $e');
@@ -888,7 +926,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
           if (confirm == true && _selectedEndpointId != null) {
             try {
-              await MessageRepository.deleteMessagesForEndpoint(_selectedEndpointId!);
+              await MessageRepository.deleteMessagesForEndpoint(
+                _selectedEndpointId!,
+              );
 
               if (mounted) {
                 setState(() {

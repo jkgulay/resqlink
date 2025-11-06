@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../pages/gps_page.dart';
+import '../../utils/responsive_helper.dart';
 
 class LocationStatusCard extends StatelessWidget {
   final LocationModel? location;
@@ -21,12 +22,12 @@ class LocationStatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     // Show empty state only when no location AND not loading
     if (location == null && !isLoading) {
-      return _buildEmptyState();
+      return _buildEmptyState(context);
     }
 
     return Card(
       elevation: 8,
-      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: ResponsiveHelper.getCardMargins(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Container(
         decoration: BoxDecoration(
@@ -45,10 +46,10 @@ class LocationStatusCard extends StatelessWidget {
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: ResponsiveHelper.getCardPadding(context),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final isNarrow = constraints.maxWidth < 400;
+              final isNarrow = ResponsiveHelper.isNarrow(constraints);
               return _buildLocationContent(context, isNarrow);
             },
           ),
@@ -57,10 +58,10 @@ class LocationStatusCard extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(BuildContext context) {
     return Card(
       elevation: 8,
-      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: ResponsiveHelper.getCardMargins(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Container(
         decoration: BoxDecoration(
@@ -79,7 +80,7 @@ class LocationStatusCard extends StatelessWidget {
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: ResponsiveHelper.getCardPadding(context),
           child: Column(
             children: [
               Icon(Icons.location_off, size: 48, color: Colors.grey),
@@ -106,16 +107,19 @@ class LocationStatusCard extends StatelessWidget {
   }
 
   Widget _buildLocationContent(BuildContext context, bool isNarrow) {
+    final spacing = ResponsiveHelper.getContentSpacing(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Header with loading indicator if needed
-        _buildLocationHeader(isNarrow),
-        SizedBox(height: 24),
+        _buildLocationHeader(context, isNarrow),
+        SizedBox(height: spacing),
 
         // Location details - show loading or actual data
-        isLoading ? _buildLoadingDetails(isNarrow) : _buildLocationDetails(isNarrow),
-        SizedBox(height: 24),
+        isLoading
+            ? _buildLoadingDetails(isNarrow)
+            : _buildLocationDetails(isNarrow),
+        SizedBox(height: spacing),
 
         // Action buttons - disable during loading
         _buildActionButtons(context, isNarrow),
@@ -123,9 +127,26 @@ class LocationStatusCard extends StatelessWidget {
     );
   }
 
-  Widget _buildLocationHeader(bool isNarrow) {
+  Widget _buildLocationHeader(BuildContext context, bool isNarrow) {
+    final itemPadding = ResponsiveHelper.getItemPadding(
+      context,
+      narrow: isNarrow ? 18 : null,
+    );
+    final iconSize = ResponsiveHelper.getIconSize(
+      context,
+      narrow: isNarrow ? 26 : null,
+    );
+    final titleSize = ResponsiveHelper.getTitleSize(
+      context,
+      narrow: isNarrow ? 18 : null,
+    );
+    final subtitleSize = ResponsiveHelper.getSubtitleSize(
+      context,
+      narrow: isNarrow ? 13 : null,
+    );
+
     return Container(
-      padding: EdgeInsets.all(isNarrow ? 18 : 22),
+      padding: EdgeInsets.all(itemPadding),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(18),
@@ -137,12 +158,12 @@ class LocationStatusCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            padding: EdgeInsets.all(isNarrow ? 14 : 16),
+            padding: EdgeInsets.all(iconSize * 0.5),
             decoration: BoxDecoration(
               color: isLoading
                   ? Colors.grey.withValues(alpha: 0.15)
                   : (location?.type == LocationType.emergency ||
-                      location?.type == LocationType.sos)
+                        location?.type == LocationType.sos)
                   ? Colors.red.withValues(alpha: 0.15)
                   : Colors.blue.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(16),
@@ -150,20 +171,21 @@ class LocationStatusCard extends StatelessWidget {
                 color: isLoading
                     ? Colors.grey
                     : (location?.type == LocationType.emergency ||
-                        location?.type == LocationType.sos)
+                          location?.type == LocationType.sos)
                     ? Colors.red
                     : Colors.blue,
                 width: 2.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: (isLoading
-                          ? Colors.grey
-                          : (location?.type == LocationType.emergency ||
-                                  location?.type == LocationType.sos)
+                  color:
+                      (isLoading
+                              ? Colors.grey
+                              : (location?.type == LocationType.emergency ||
+                                    location?.type == LocationType.sos)
                               ? Colors.red
                               : Colors.blue)
-                      .withValues(alpha: 0.2),
+                          .withValues(alpha: 0.2),
                   blurRadius: 8,
                   spreadRadius: 1,
                 ),
@@ -171,8 +193,8 @@ class LocationStatusCard extends StatelessWidget {
             ),
             child: isLoading
                 ? SizedBox(
-                    width: isNarrow ? 26 : 30,
-                    height: isNarrow ? 26 : 30,
+                    width: iconSize,
+                    height: iconSize,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       valueColor: AlwaysStoppedAnimation<Color>(Colors.grey),
@@ -183,14 +205,15 @@ class LocationStatusCard extends StatelessWidget {
                             location?.type == LocationType.sos
                         ? Icons.emergency_share
                         : Icons.location_on,
-                    color: location?.type == LocationType.emergency ||
+                    color:
+                        location?.type == LocationType.emergency ||
                             location?.type == LocationType.sos
                         ? Colors.red
                         : Colors.blue,
-                    size: isNarrow ? 26 : 30,
+                    size: iconSize,
                   ),
           ),
-          SizedBox(width: isNarrow ? 14 : 18),
+          SizedBox(width: itemPadding * 0.7),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -199,7 +222,7 @@ class LocationStatusCard extends StatelessWidget {
                   isLoading ? 'Refreshing Location...' : 'Last Known Location',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
-                    fontSize: isNarrow ? 18 : 20,
+                    fontSize: titleSize,
                     color: Color.fromARGB(255, 252, 254, 255),
                     letterSpacing: -0.5,
                   ),
@@ -214,19 +237,22 @@ class LocationStatusCard extends StatelessWidget {
                         color: isLoading
                             ? Colors.orange
                             : (location?.type == LocationType.emergency ||
-                                location?.type == LocationType.sos)
+                                  location?.type == LocationType.sos)
                             ? Colors.red
                             : Colors.green,
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: (isLoading
-                                    ? Colors.orange
-                                    : (location?.type == LocationType.emergency ||
-                                            location?.type == LocationType.sos)
+                            color:
+                                (isLoading
+                                        ? Colors.orange
+                                        : (location?.type ==
+                                                  LocationType.emergency ||
+                                              location?.type ==
+                                                  LocationType.sos)
                                         ? Colors.red
                                         : Colors.green)
-                                .withValues(alpha: 0.4),
+                                    .withValues(alpha: 0.4),
                             blurRadius: 6,
                             spreadRadius: 1,
                           ),
@@ -239,17 +265,17 @@ class LocationStatusCard extends StatelessWidget {
                         isLoading
                             ? 'Updating location data...'
                             : (location?.type == LocationType.emergency ||
-                                location?.type == LocationType.sos)
+                                  location?.type == LocationType.sos)
                             ? 'Emergency Location Active'
                             : 'Location Available',
                         style: TextStyle(
                           color: isLoading
                               ? Colors.orange
                               : (location?.type == LocationType.emergency ||
-                                  location?.type == LocationType.sos)
+                                    location?.type == LocationType.sos)
                               ? Colors.red
                               : Colors.green,
-                          fontSize: isNarrow ? 13 : 15,
+                          fontSize: subtitleSize,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -259,34 +285,6 @@ class LocationStatusCard extends StatelessWidget {
               ],
             ),
           ),
-          if (unsyncedCount > 0 && !isLoading)
-            Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: isNarrow ? 10 : 12,
-                vertical: isNarrow ? 6 : 8,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.orange.withValues(alpha: 0.2),
-                    blurRadius: 6,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Text(
-                '$unsyncedCount unsynced',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontSize: isNarrow ? 11 : 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3,
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -312,17 +310,17 @@ class LocationStatusCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _buildLoadingRow(Icons.my_location, "Latitude", isNarrow),
+          _buildShimmerRow(Icons.my_location, "Latitude", isNarrow),
           SizedBox(height: 16),
-          _buildLoadingRow(Icons.my_location, "Longitude", isNarrow),
+          _buildShimmerRow(Icons.my_location, "Longitude", isNarrow),
           SizedBox(height: 16),
-          _buildLoadingRow(Icons.schedule, "Timestamp", isNarrow),
+          _buildShimmerRow(Icons.schedule, "Timestamp", isNarrow),
         ],
       ),
     );
   }
 
-  Widget _buildLoadingRow(IconData icon, String label, bool isNarrow) {
+  Widget _buildShimmerRow(IconData icon, String label, bool isNarrow) {
     return Row(
       children: [
         Container(
@@ -347,23 +345,7 @@ class LocationStatusCard extends StatelessWidget {
                 ),
               ),
               SizedBox(height: 4),
-              Container(
-                height: isNarrow ? 14 : 15,
-                width: 120,
-                decoration: BoxDecoration(
-                  color: Colors.grey.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    backgroundColor: Colors.transparent,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Colors.orange.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ),
-              ),
+              _ShimmerLoading(width: 120, height: isNarrow ? 14 : 15),
             ],
           ),
         ),
@@ -386,10 +368,7 @@ class LocationStatusCard extends StatelessWidget {
         child: Center(
           child: Text(
             'No location data available',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: isNarrow ? 14 : 16,
-            ),
+            style: TextStyle(color: Colors.grey, fontSize: isNarrow ? 14 : 16),
           ),
         ),
       );
@@ -552,10 +531,11 @@ class LocationStatusCard extends StatelessWidget {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: (isLoading || location == null
-                          ? Colors.grey
-                          : Color(0xFFFF6500))
-                      .withValues(alpha: 0.4),
+                  color:
+                      (isLoading || location == null
+                              ? Colors.grey
+                              : Color(0xFFFF6500))
+                          .withValues(alpha: 0.4),
                   blurRadius: 10,
                   offset: Offset(0, 3),
                 ),
@@ -579,127 +559,135 @@ class LocationStatusCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              onPressed: (isLoading || location == null) ? null : () async {
-                try {
-                  // Show loading indicator
-                  showDialog(
-                    context: context,
-                    barrierDismissible: false,
-                    builder: (context) => AlertDialog(
-                      content: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(),
-                          SizedBox(width: 16),
-                          Text('Sharing location...'),
-                        ],
-                      ),
-                    ),
-                  );
+              onPressed: (isLoading || location == null)
+                  ? null
+                  : () async {
+                      try {
+                        // Show loading indicator
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (context) => AlertDialog(
+                            content: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CircularProgressIndicator(),
+                                SizedBox(width: 16),
+                                Text('Sharing location...'),
+                              ],
+                            ),
+                          ),
+                        );
 
-                  // Execute share function
-                  onShare();
+                        // Execute share function
+                        onShare();
 
-                  // Close loading dialog
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                  }
+                        // Close loading dialog
+                        if (context.mounted) {
+                          Navigator.of(context).pop();
+                        }
 
-                  // Show success feedback
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Row(
-                          children: [
-                            Icon(Icons.check_circle, color: Colors.white),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
+                        // Show success feedback
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
                                 children: [
-                                  Text(
-                                    'Location shared successfully!',
-                                    style: TextStyle(fontWeight: FontWeight.w600),
-                                  ),
-                                  Text(
-                                    'Coordinates copied to clipboard',
-                                    style: TextStyle(fontSize: 12),
+                                  Icon(Icons.check_circle, color: Colors.white),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Location shared successfully!',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Coordinates copied to clipboard',
+                                          style: TextStyle(fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),
+                              backgroundColor: Colors.green,
+                              duration: Duration(seconds: 4),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              action: SnackBarAction(
+                                label: 'VIEW GPS',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  // Navigate to GPS page
+                                  Navigator.of(context).pushNamed('/gps');
+                                },
+                              ),
                             ),
-                          ],
-                        ),
-                        backgroundColor: Colors.green,
-                        duration: Duration(seconds: 4),
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        action: SnackBarAction(
-                          label: 'VIEW GPS',
-                          textColor: Colors.white,
-                          onPressed: () {
-                            // Navigate to GPS page
-                            Navigator.of(context).pushNamed('/gps');
-                          },
-                        ),
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  // Close loading dialog if still open
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                  }
+                          );
+                        }
+                      } catch (e) {
+                        // Close loading dialog if still open
+                        if (context.mounted) {
+                          Navigator.of(context).pop();
+                        }
 
-                  // Show error feedback
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Row(
-                          children: [
-                            Icon(Icons.error, color: Colors.white),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
+                        // Show error feedback
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
                                 children: [
-                                  Text(
-                                    'Failed to share location',
-                                    style: TextStyle(fontWeight: FontWeight.w600),
-                                  ),
-                                  Text(
-                                    e.toString(),
-                                    style: TextStyle(fontSize: 12),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                  Icon(Icons.error, color: Colors.white),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Failed to share location',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        Text(
+                                          e.toString(),
+                                          style: TextStyle(fontSize: 12),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),
+                              backgroundColor: Colors.red,
+                              duration: Duration(seconds: 5),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              action: SnackBarAction(
+                                label: 'RETRY',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  // Retry share
+                                },
+                              ),
                             ),
-                          ],
-                        ),
-                        backgroundColor: Colors.red,
-                        duration: Duration(seconds: 5),
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        action: SnackBarAction(
-                          label: 'RETRY',
-                          textColor: Colors.white,
-                          onPressed: () {
-                            // Retry share
-                          },
-                        ),
-                      ),
-                    );
-                  }
-                }
-              },
+                          );
+                        }
+                      }
+                    },
             ),
           ),
         ),
@@ -722,5 +710,72 @@ class LocationStatusCard extends StatelessWidget {
     } else {
       return dateTime.toString().substring(0, 19);
     }
+  }
+}
+
+// Shimmer loading widget for smooth skeleton effect
+class _ShimmerLoading extends StatefulWidget {
+  final double width;
+  final double height;
+
+  const _ShimmerLoading({required this.width, required this.height});
+
+  @override
+  State<_ShimmerLoading> createState() => _ShimmerLoadingState();
+}
+
+class _ShimmerLoadingState extends State<_ShimmerLoading>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 1500),
+    )..repeat();
+
+    _animation = Tween<double>(
+      begin: -1.0,
+      end: 2.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                Colors.grey.withValues(alpha: 0.3),
+                Colors.grey.withValues(alpha: 0.5),
+                Colors.grey.withValues(alpha: 0.3),
+              ],
+              stops: [
+                _animation.value - 0.3,
+                _animation.value,
+                _animation.value + 0.3,
+              ].map((stop) => stop.clamp(0.0, 1.0)).toList(),
+            ),
+          ),
+        );
+      },
+    );
   }
 }

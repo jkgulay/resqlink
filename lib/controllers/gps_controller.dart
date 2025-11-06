@@ -10,6 +10,8 @@ import 'package:resqlink/pages/gps_page.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';
+import '../features/p2p/events/p2p_event_bus.dart';
+import '../models/message_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class GpsController extends ChangeNotifier {
@@ -90,9 +92,11 @@ class GpsController extends ChangeNotifier {
   Timer? _locationTimer;
   Timer? _sosTimer;
   Timer? _batteryTimer;
+  Timer? _locationBroadcastTimer;
   StreamSubscription<Position>? _positionStream;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   StreamSubscription<double>? _downloadProgressSubscription;
+  StreamSubscription<MessageReceivedEvent>? _p2pLocationSubscription;
 
   // Getters
   List<LocationModel> get locations => savedLocations;
@@ -115,6 +119,7 @@ class GpsController extends ChangeNotifier {
   bool get autoSaveEnabled => _autoSaveEnabled;
   bool get emergencyBroadcastEnabled => _emergencyBroadcastEnabled;
   bool get hasOfflineMap =>
+      _hasOfflineMap ||
       _hasDownloadedMaps ||
       (_cacheInfo['cachedTiles'] != null && _cacheInfo['cachedTiles'] > 0);
   bool get showTrackingPath => _showTrackingPath;
@@ -209,6 +214,41 @@ class GpsController extends ChangeNotifier {
     await checkLocationPermission();
     await _loadLastKnownLocation();
     await _checkBatteryLevel();
+
+    // ✅ CRITICAL: Listen for incoming P2P location messages
+    _setupP2PLocationListener();
+
+    // ✅ Monitor P2P connections to auto-start/stop location broadcast
+    _setupConnectionListener();
+  }
+
+  /// Listen for P2P connection changes to auto-start/stop location broadcasting
+  void _setupConnectionListener() {
+    try {
+      final eventBus = P2PEventBus();
+
+      // Listen for device connections
+      eventBus.onDeviceConnectedListen((event) {
+        debugPrint('📡 Device connected: ${event.deviceId}');
+        startLocationBroadcast();
+      });
+
+      // Listen for device disconnections
+      eventBus.onDeviceDisconnectedListen((event) {
+        debugPrint('📡 Device disconnected: ${event.deviceId}');
+
+        // Stop broadcasting if no devices are connected
+        if (p2pService.connectedDevices.isEmpty) {
+          stopLocationBroadcast();
+        }
+      });
+
+      debugPrint(
+        '✅ GPS Controller monitoring P2P connections for auto-broadcast',
+      );
+    } catch (e) {
+      debugPrint('❌ Error setting up connection listener: $e');
+    }
   }
 
   Future<void> shareCurrentLocation() async {
@@ -251,12 +291,21 @@ class GpsController extends ChangeNotifier {
         };
 
         await downloadOfflineMaps(params);
+
+        // Wait for cache info to update before saving
+        await updateCacheInfo();
+
+        _offlineMapSizeInMB = double.parse(
+          _cacheInfo['storageSizeMB'] ?? '0.0',
+        );
       }
 
       _offlineMapLastUpdated = DateTime.now();
       await _saveOfflineMapStatus();
 
-      debugPrint('✅ Offline map update completed');
+      debugPrint(
+        '✅ Offline map update completed and saved to persistent storage',
+      );
     } catch (e) {
       debugPrint('❌ Error updating offline map: $e');
     } finally {
@@ -357,13 +406,18 @@ class GpsController extends ChangeNotifier {
 
       await downloadOfflineMaps(params);
 
+      // Wait for cache info to update before reading size
+      await updateCacheInfo();
+
       _hasOfflineMap = true;
       _offlineMapSizeInMB = double.parse(_cacheInfo['storageSizeMB'] ?? '0.0');
       _offlineMapLastUpdated = DateTime.now();
 
       await _saveOfflineMapStatus();
 
-      debugPrint('✅ Offline map download completed');
+      debugPrint(
+        '✅ Offline map download completed and saved to persistent storage',
+      );
     } catch (e) {
       debugPrint('❌ Error downloading offline map: $e');
       _errorMessage = 'Failed to download offline map: $e';
@@ -374,6 +428,19 @@ class GpsController extends ChangeNotifier {
   }
 
   Future<void> shareLocation(LocationModel location) async {
+    try {
+      _locationStateService.updateCurrentLocation(location);
+
+      if (location.type == LocationType.sos ||
+          location.type == LocationType.emergency) {
+        await _locationStateService.broadcastLocationToAll();
+      } else {
+        await _locationStateService.shareLocation();
+      }
+    } catch (e) {
+      debugPrint('❌ Error sharing location from GPS controller: $e');
+    }
+
     if (onLocationShare != null) {
       onLocationShare!(location);
     }
@@ -497,6 +564,10 @@ class GpsController extends ChangeNotifier {
       savedLocations.clear();
       notifyListeners();
     }
+  }
+
+  Future<void> reloadLocations() async {
+    await _loadSavedLocations();
   }
 
   Future<void> _checkConnectivity() async {
@@ -786,11 +857,10 @@ class GpsController extends ChangeNotifier {
 
     try {
       debugPrint('📡 Broadcasting SOS via P2P...');
-      if (onLocationShare != null) {
-        onLocationShare!(sosLocation);
-      }
+      _locationStateService.updateCurrentLocation(sosLocation);
+      await _locationStateService.broadcastLocationToAll();
     } catch (e) {
-      debugPrint('❌ P2P broadcast failed: $e');
+      debugPrint('❌ SOS broadcast failed: $e');
     }
 
     await _loadSavedLocations();
@@ -871,19 +941,117 @@ class GpsController extends ChangeNotifier {
       type: type,
       emergencyLevel: _currentEmergencyLevel,
       batteryLevel: _batteryLevel,
+      message: _getLocationTypeText(type),
     );
 
+    // Save locally
     await LocationService.insertLocation(location);
 
+    // CRITICAL FIX: Broadcast marked location to all connected devices via P2P
+    // This allows other devices to see your marked locations on their GPS map
+    if (p2pService.connectedDevices.isNotEmpty) {
+      try {
+        final messageType =
+            type == LocationType.emergency || type == LocationType.sos
+            ? MessageType.emergency
+            : MessageType.location;
+
+        debugPrint(
+          '📍 Broadcasting marked location to ${p2pService.connectedDevices.length} device(s)',
+        );
+        debugPrint('   Type: ${_getLocationTypeText(type)}');
+        debugPrint('   Lat: ${location.latitude}, Lng: ${location.longitude}');
+
+        // Broadcast to all connected devices
+        await p2pService.sendMessage(
+          message: '${_getLocationTypeText(type)} marked',
+          type: messageType,
+          senderName: p2pService.userName ?? 'Unknown User',
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          ttl: 3600,
+          routePath: [p2pService.deviceId ?? 'unknown_device'],
+          latitude: location.latitude,
+          longitude: location.longitude,
+        );
+
+        debugPrint('✅ Marked location broadcasted to all connected devices');
+      } catch (e) {
+        debugPrint('❌ P2P broadcast failed: $e');
+      }
+    }
+
+    // Firebase sync (when online)
     if (_isConnected) {
       try {
         await FirebaseLocationService.syncLocation(location);
+        debugPrint('☁️ Marked location synced to Firebase');
       } catch (e) {
-        debugPrint('Firebase sync failed: $e');
+        debugPrint('❌ Firebase sync failed: $e');
       }
     }
 
     await _loadSavedLocations();
+  }
+
+  // Start broadcasting real-time location to connected P2P devices
+  void startLocationBroadcast() {
+    if (_locationBroadcastTimer != null && _locationBroadcastTimer!.isActive) {
+      debugPrint('📡 Location broadcast already active');
+      return;
+    }
+
+    // Broadcast every 30 seconds (or 60s if low battery)
+    final interval = _batteryLevel < 20
+        ? Duration(seconds: 60)
+        : Duration(seconds: 30);
+
+    _locationBroadcastTimer?.cancel();
+    _locationBroadcastTimer = Timer.periodic(interval, (timer) async {
+      if (_currentLocation == null) {
+        debugPrint('⚠️ No current location to broadcast');
+        return;
+      }
+
+      final connectedDevices = p2pService.connectedDevices;
+      if (connectedDevices.isEmpty) {
+        debugPrint('📡 No connected devices to broadcast location');
+        return;
+      }
+
+      try {
+        final location = _currentLocation!;
+        final userName = p2pService.userName ?? 'Unknown User';
+
+        // Broadcast real-time location to all connected devices
+        await p2pService.sendMessage(
+          message: 'Real-time location update',
+          type: MessageType.location,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          senderName: userName,
+        );
+
+        debugPrint(
+          '📡 Real-time location broadcasted to ${connectedDevices.length} device(s)',
+        );
+        debugPrint(
+          '   Lat: ${location.latitude.toStringAsFixed(6)}, Lng: ${location.longitude.toStringAsFixed(6)}',
+        );
+      } catch (e) {
+        debugPrint('❌ Failed to broadcast location: $e');
+      }
+    });
+
+    debugPrint(
+      '📡 Started real-time location broadcast (every ${interval.inSeconds}s)',
+    );
+  }
+
+  // Stop broadcasting location
+  void stopLocationBroadcast() {
+    _locationBroadcastTimer?.cancel();
+    _locationBroadcastTimer = null;
+    debugPrint('📡 Stopped real-time location broadcast');
   }
 
   Future<void> _syncLocationsToFirebase() async {
@@ -1036,6 +1204,10 @@ class GpsController extends ChangeNotifier {
         _hasDownloadedMaps = true;
       }
 
+      debugPrint(
+        '📊 Cache info updated: tiles=$totalTiles, size=${_cacheInfo['storageSizeMB']}MB, hasMap=$hasOfflineMap',
+      );
+
       notifyListeners();
     } catch (e) {
       debugPrint('Error updating cache info: $e');
@@ -1103,14 +1275,129 @@ class GpsController extends ChangeNotifier {
     _initialize();
   }
 
+  /// Listen for incoming P2P location messages and add them to the map
+  void _setupP2PLocationListener() {
+    try {
+      final eventBus = P2PEventBus();
+
+      _p2pLocationSubscription = eventBus.onMessageReceivedListen((event) {
+        _handleIncomingLocationMessage(event.message);
+      });
+
+      debugPrint('✅ GPS Controller listening for P2P location messages');
+    } catch (e) {
+      debugPrint('❌ Error setting up P2P location listener: $e');
+    }
+  }
+
+  /// Handle incoming location messages from peers
+  Future<void> _handleIncomingLocationMessage(MessageModel message) async {
+    // Only process messages with location data
+    if (message.latitude == null || message.longitude == null) {
+      return;
+    }
+
+    // Only process location-type messages
+    if (message.messageType != MessageType.location &&
+        message.messageType != MessageType.emergency &&
+        message.messageType != MessageType.sos) {
+      return;
+    }
+
+    try {
+      debugPrint('📍 Received location from ${message.fromUser}:');
+      debugPrint('   Lat: ${message.latitude}, Lng: ${message.longitude}');
+      debugPrint('   Type: ${message.messageType}');
+
+      // Check if this is a real-time location update (not a marked location)
+      bool isRealtimeUpdate = message.message.toLowerCase().contains(
+        'real-time location',
+      );
+
+      // Determine location type from message
+      LocationType locationType = _getLocationTypeFromMessageType(
+        message.messageType,
+      );
+
+      // Parse location type from message text if available (for marked locations)
+      if (!isRealtimeUpdate) {
+        if (message.message.contains('Emergency')) {
+          locationType = LocationType.emergency;
+        } else if (message.message.contains('SOS')) {
+          locationType = LocationType.sos;
+        } else if (message.message.contains('Safe Zone')) {
+          locationType = LocationType.safezone;
+        } else if (message.message.contains('Hazard')) {
+          locationType = LocationType.hazard;
+        } else if (message.message.contains('Evacuation')) {
+          locationType = LocationType.evacuationPoint;
+        } else if (message.message.contains('Medical')) {
+          locationType = LocationType.medicalAid;
+        } else if (message.message.contains('Supplies')) {
+          locationType = LocationType.supplies;
+        }
+      }
+
+      // Create LocationModel from the received message
+      final peerLocation = LocationModel(
+        latitude: message.latitude!,
+        longitude: message.longitude!,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(message.timestamp),
+        userId: message.endpointId, // Peer's device ID
+        type: locationType,
+        message: isRealtimeUpdate
+            ? '${message.fromUser} (Live)'
+            : '${message.fromUser}: ${message.message}',
+        synced: false,
+        batteryLevel: 100, // Default if not provided
+      );
+
+      // Save to local database so it appears on the map
+      await LocationService.insertLocation(peerLocation);
+
+      // Reload locations to update the map
+      await reloadLocations();
+
+      if (isRealtimeUpdate) {
+        debugPrint('✅ Peer real-time location updated: ${message.fromUser}');
+      } else {
+        debugPrint(
+          '✅ Peer location added to map: ${message.fromUser} - ${_getLocationTypeText(locationType)}',
+        );
+      }
+
+      // Log total locations now on map for debugging
+      debugPrint(
+        '📍 Total locations on map: ${savedLocations.length} (including peer locations)',
+      );
+    } catch (e) {
+      debugPrint('❌ Error handling incoming location: $e');
+    }
+  }
+
+  /// Convert MessageType to LocationType
+  LocationType _getLocationTypeFromMessageType(MessageType messageType) {
+    switch (messageType) {
+      case MessageType.emergency:
+        return LocationType.emergency;
+      case MessageType.sos:
+        return LocationType.sos;
+      case MessageType.location:
+      default:
+        return LocationType.normal;
+    }
+  }
+
   @override
   void dispose() {
     _locationTimer?.cancel();
     _sosTimer?.cancel();
     _batteryTimer?.cancel();
+    _locationBroadcastTimer?.cancel();
     _downloadProgressSubscription?.cancel();
     _connectivitySubscription?.cancel();
     _positionStream?.cancel();
+    _p2pLocationSubscription?.cancel();
     super.dispose();
   }
 }

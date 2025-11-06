@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:resqlink/models/message_model.dart';
+// ChatService import removed - no longer needed after fixing duplicate send issue
 import '../pages/gps_page.dart';
 import 'p2p/p2p_main_service.dart';
 
@@ -82,13 +83,25 @@ class LocationStateService extends ChangeNotifier {
 
       // 2. Share via P2P if service is available and connected
       if (_p2pService != null && _p2pService!.connectedDevices.isNotEmpty) {
+        final locationMessage = _getLocationShareMessage();
+        final messageType =
+            _currentLocation!.type == LocationType.emergency ||
+                _currentLocation!.type == LocationType.sos
+            ? MessageType.emergency
+            : MessageType.location;
+
+        // CRITICAL FIX: Only send via P2P, let MessageRouter handle DB saving
+        // Removed duplicate chatService.sendMessage() loop that created race conditions
+
+        debugPrint(
+          '📤 Sharing location via P2P to ${_p2pService!.connectedDevices.length} device(s)',
+        );
+
+        // Send via P2P for actual transmission
+        // MessageRouter will handle saving to DB when message is routed
         await _p2pService!.sendMessage(
-          message: _getLocationShareMessage(),
-          type:
-              _currentLocation!.type == LocationType.emergency ||
-                  _currentLocation!.type == LocationType.sos
-              ? MessageType.emergency
-              : MessageType.location,
+          message: locationMessage,
+          type: messageType,
           senderName: _p2pService!.userName ?? 'Unknown User',
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           ttl: 3600,
@@ -97,9 +110,7 @@ class LocationStateService extends ChangeNotifier {
           longitude: _currentLocation!.longitude,
         );
 
-        debugPrint(
-          '📡 Location shared via P2P to ${_p2pService!.connectedDevices.length} devices',
-        );
+        debugPrint('✅ Location shared via P2P successfully');
       }
 
       // 3. REAL Firebase sync
@@ -142,25 +153,35 @@ class LocationStateService extends ChangeNotifier {
     }
 
     try {
-      // Fix: Use named parameters for sendMessage call
+      final locationMessage = _getLocationShareMessage();
+      final messageType =
+          _currentLocation!.type == LocationType.emergency ||
+              _currentLocation!.type == LocationType.sos
+          ? MessageType.emergency
+          : MessageType.location;
+
+      // CRITICAL FIX: Only send via P2P broadcast, let MessageRouter handle DB saving
+      // Removed duplicate chatService.sendMessage() loop that created race conditions
+
+      debugPrint(
+        '📡 Broadcasting emergency location to ${_p2pService!.connectedDevices.length} device(s)',
+      );
+
+      // Send via P2P for actual transmission
+      // MessageRouter will handle saving to DB when message is routed
       await _p2pService!.sendMessage(
-        message: _getLocationShareMessage(),
-        type:
-            _currentLocation!.type == LocationType.emergency ||
-                _currentLocation!.type == LocationType.sos
-            ? MessageType.emergency
-            : MessageType.location,
+        message: locationMessage,
+        type: messageType,
         senderName: _p2pService!.userName ?? 'Emergency User',
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        ttl: 7200, // 2 hours for emergency messages
+        ttl: 5, // 5 hops max for multi-hop mesh forwarding (emergency only)
         routePath: [_p2pService!.deviceId ?? 'emergency_device'],
         latitude: _currentLocation!.latitude,
         longitude: _currentLocation!.longitude,
+        // targetDeviceId: null (omitted = broadcast mode for multi-hop)
       );
 
-      debugPrint(
-        '✅ Location broadcast completed to ${_p2pService!.connectedDevices.length} devices',
-      );
+      debugPrint('✅ Emergency location broadcast completed via P2P');
     } catch (e) {
       debugPrint('❌ Error broadcasting location: $e');
       rethrow;

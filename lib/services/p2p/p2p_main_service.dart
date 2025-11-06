@@ -20,7 +20,6 @@ import 'monitoring/device_prioritization.dart';
 import 'monitoring/timeout_manager.dart';
 import 'managers/identifier_resolver.dart';
 
-
 class P2PMainService extends P2PBaseService {
   // Core service components
   late P2PNetworkService _networkService;
@@ -208,7 +207,9 @@ class P2PMainService extends P2PBaseService {
     };
 
     _qualityMonitor.onConnectionDegraded = (deviceId) {
-      debugPrint('⚠️ Connection degraded for $deviceId, considering reconnection');
+      debugPrint(
+        '⚠️ Connection degraded for $deviceId, considering reconnection',
+      );
       // Optionally trigger reconnection for degraded connections
     };
 
@@ -287,13 +288,15 @@ class P2PMainService extends P2PBaseService {
   // ============================================================================
 
   /// Get WiFi Direct service instance
-  WiFiDirectService? get wifiDirectService => _wifiDirectHandler.wifiDirectService;
+  WiFiDirectService? get wifiDirectService =>
+      _wifiDirectHandler.wifiDirectService;
 
   /// Get online status
   bool get isOnline => _connectionManager.isOnline;
 
   /// Get current connection mode
-  P2PConnectionMode get currentConnectionMode => _connectionManager.currentConnectionMode;
+  P2PConnectionMode get currentConnectionMode =>
+      _connectionManager.currentConnectionMode;
 
   /// Get connection type as string
   String get connectionType => _connectionManager.connectionType;
@@ -351,7 +354,8 @@ class P2PMainService extends P2PBaseService {
 
   /// Connect to a device with timeout and quality tracking
   Future<bool> connectToDevice(Map<String, dynamic> device) async {
-    final deviceId = device['deviceId'] as String? ?? device['deviceAddress'] as String?;
+    final deviceId =
+        device['deviceId'] as String? ?? device['deviceAddress'] as String?;
     if (deviceId == null) {
       debugPrint('❌ Cannot connect: device ID not found');
       return false;
@@ -407,7 +411,8 @@ class P2PMainService extends P2PBaseService {
       deviceFactors[deviceId] = factors;
     }
 
-    return _devicePrioritization.prioritizeDevices(deviceFactors)
+    return _devicePrioritization
+        .prioritizeDevices(deviceFactors)
         .map((p) => p.deviceId)
         .toList();
   }
@@ -490,25 +495,21 @@ class P2PMainService extends P2PBaseService {
     await _wifiDirectHandler.checkForSystemConnections();
   }
 
-  /// Force device to host role
   Future<void> forceHostRole() async {
     try {
       debugPrint('👑 Forcing host role...');
       setRole(P2PRole.host);
       _connectionManager.setConnectionMode(P2PConnectionMode.wifiDirect);
-      await discoverDevices(force: true);
       notifyListeners();
     } catch (e) {
       debugPrint('❌ Failed to force host role: $e');
     }
   }
 
-  /// Force device to client role
   Future<void> forceClientRole() async {
     try {
       debugPrint('📱 Forcing client role...');
       setRole(P2PRole.client);
-      await discoverDevices(force: true);
       notifyListeners();
     } catch (e) {
       debugPrint('❌ Failed to force client role: $e');
@@ -520,7 +521,7 @@ class P2PMainService extends P2PBaseService {
     try {
       debugPrint('🔄 Clearing forced role...');
       setRole(P2PRole.none);
-      await discoverDevices(force: true);
+      // Don't call discoverDevices here
       notifyListeners();
     } catch (e) {
       debugPrint('❌ Failed to clear forced role: $e');
