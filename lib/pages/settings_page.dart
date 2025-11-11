@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:resqlink/features/database/repositories/chat_repository.dart';
 import 'package:resqlink/features/database/repositories/location_repository.dart';
 import 'package:resqlink/pages/landing_page.dart';
@@ -225,22 +226,42 @@ class SettingsPageState extends State<SettingsPage> {
       builder: (BuildContext context) {
         return AlertDialog(
           backgroundColor: ResQLinkTheme.cardDark,
-          title: Text(title, style: TextStyle(color: Colors.white)),
-          content: Text(content, style: TextStyle(color: Colors.white70)),
+          title: Text(
+            title,
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 18,
+            ),
+          ),
+          content: Text(
+            content,
+            style: GoogleFonts.poppins(
+              color: Colors.white70,
+              fontSize: 14,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: Text('Cancel', style: TextStyle(color: Colors.white70)),
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.poppins(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
               child: Text(
                 confirmText,
-                style: TextStyle(
+                style: GoogleFonts.poppins(
                   color: isDangerous
                       ? ResQLinkTheme.primaryRed
                       : ResQLinkTheme.orange,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
@@ -270,7 +291,7 @@ class SettingsPageState extends State<SettingsPage> {
       SnackBar(
         content: Text(
           message,
-          style: TextStyle(fontWeight: FontWeight.bold),
+          style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
           maxLines: 4,
           overflow: TextOverflow.ellipsis,
         ),
@@ -427,9 +448,11 @@ class SettingsPageState extends State<SettingsPage> {
                     SizedBox(width: 20),
                     Text(
                       'Logging out...',
-                      style: ResponsiveText.bodyLarge(
-                        context,
-                      ).copyWith(color: Colors.white),
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ],
                 ),
@@ -473,8 +496,9 @@ class SettingsPageState extends State<SettingsPage> {
           SizedBox(width: 12),
           Text(
             title,
-            style: ResponsiveText.heading3(context).copyWith(
-              color: Color(0xFFFF6500),
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontSize: ResponsiveHelper.getTitleSize(context),
               fontWeight: FontWeight.w700,
               letterSpacing: 0.5,
             ),
@@ -489,27 +513,24 @@ class SettingsPageState extends State<SettingsPage> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Color(0xFF1E3E62).withValues(alpha: 0.6),
-            Color(0xFF0B192C).withValues(alpha: 0.8),
+            Color(0xFF1E3E62).withValues(alpha: 0.9),
+            Color(0xFF0B192C).withValues(alpha: 0.7),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Color(0xFFFF6500).withValues(alpha: 0.3),
-          width: 1.5,
-        ),
+        border: Border.all(color: Color(0xFF1E3A5F), width: 2.5),
         boxShadow: [
           BoxShadow(
-            color: Color(0xFFFF6500).withValues(alpha: 0.15),
-            blurRadius: 12,
+            color: Color(0xFF1E3A5F).withValues(alpha: 0.5),
+            blurRadius: 20,
             offset: Offset(0, 4),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 8,
-            offset: Offset(0, 2),
+            color: Colors.black.withValues(alpha: 0.6),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -535,9 +556,11 @@ class SettingsPageState extends State<SettingsPage> {
                 SizedBox(width: ResponsiveHelper.getContentSpacing(context)),
                 Text(
                   'App Statistics',
-                  style: ResponsiveText.heading3(
-                    context,
-                  ).copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: ResponsiveHelper.getTitleSize(context),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -623,18 +646,22 @@ class SettingsPageState extends State<SettingsPage> {
         SizedBox(height: 8),
         Text(
           value,
-          style: ResponsiveText.heading3(
-            context,
-          ).copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: ResponsiveHelper.getTitleSize(context),
+            fontWeight: FontWeight.w700,
+          ),
           maxLines: 1,
           textAlign: TextAlign.center,
         ),
         SizedBox(height: 4),
         Text(
           label,
-          style: ResponsiveText.caption(
-            context,
-          ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+          style: GoogleFonts.poppins(
+            color: Colors.white.withValues(alpha: 0.8),
+            fontSize: ResponsiveHelper.getSubtitleSize(context) - 2,
+            fontWeight: FontWeight.w400,
+          ),
           textAlign: TextAlign.center,
           maxLines: 2,
         ),
@@ -656,7 +683,7 @@ class SettingsPageState extends State<SettingsPage> {
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
-            color: Color(0xFFFF6500).withValues(alpha: 0.1),
+            color: Color(0xFF1E3A5F).withValues(alpha: 0.15),
             width: 1,
           ),
         ),
@@ -670,33 +697,36 @@ class SettingsPageState extends State<SettingsPage> {
           padding: EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: value && isEnabled
-                ? Color(0xFFFF6500).withValues(alpha: 0.15)
+                ? Color(0xFF1E3A5F).withValues(alpha: 0.2)
                 : Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
             icon,
             color: value && isEnabled
-                ? Color(0xFFFF6500)
+                ? Color(0xFF4A90E2)
                 : Colors.white.withValues(alpha: 0.4),
             size: 24,
           ),
         ),
         title: Text(
           title,
-          style: ResponsiveText.bodyLarge(context).copyWith(
+          style: GoogleFonts.poppins(
             color: isEnabled
                 ? Colors.white
                 : Colors.white.withValues(alpha: 0.5),
             fontWeight: FontWeight.w500,
+            fontSize: 16,
           ),
         ),
         subtitle: Text(
           subtitle,
-          style: ResponsiveText.bodySmall(context).copyWith(
+          style: GoogleFonts.poppins(
             color: isEnabled
                 ? Colors.white.withValues(alpha: 0.7)
                 : Colors.white.withValues(alpha: 0.3),
+            fontSize: 13,
+            fontWeight: FontWeight.w400,
           ),
         ),
         trailing: Switch(
@@ -716,22 +746,24 @@ class SettingsPageState extends State<SettingsPage> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Color(0xFF1E3E62).withValues(alpha: 0.4),
-            Color(0xFF0B192C).withValues(alpha: 0.6),
+            Color(0xFF1E3E62).withValues(alpha: 0.9),
+            Color(0xFF0B192C).withValues(alpha: 0.7),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Color(0xFFFF6500).withValues(alpha: 0.2),
-          width: 1,
-        ),
+        border: Border.all(color: Color(0xFF1E3A5F), width: 2.5),
         boxShadow: [
           BoxShadow(
-            color: Color(0xFFFF6500).withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
+            color: Color(0xFF1E3A5F).withValues(alpha: 0.5),
+            blurRadius: 20,
+            offset: Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.6),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -758,22 +790,24 @@ class SettingsPageState extends State<SettingsPage> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Color(0xFF1E3E62).withValues(alpha: 0.4),
-            Color(0xFF0B192C).withValues(alpha: 0.6),
+            Color(0xFF1E3E62).withValues(alpha: 0.9),
+            Color(0xFF0B192C).withValues(alpha: 0.7),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Color(0xFFFF6500).withValues(alpha: 0.2),
-          width: 1,
-        ),
+        border: Border.all(color: Color(0xFF1E3A5F), width: 2.5),
         boxShadow: [
           BoxShadow(
-            color: Color(0xFFFF6500).withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
+            color: Color(0xFF1E3A5F).withValues(alpha: 0.5),
+            blurRadius: 20,
+            offset: Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.6),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -810,15 +844,19 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'Location Permissions',
-                style: ResponsiveText.bodyLarge(
-                  context,
-                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 16,
+                ),
               ),
               subtitle: Text(
                 'Manage location access for the app',
-                style: ResponsiveText.bodySmall(
-                  context,
-                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+                style: GoogleFonts.poppins(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
               trailing: Icon(
                 Icons.chevron_right,
@@ -839,22 +877,24 @@ class SettingsPageState extends State<SettingsPage> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Color(0xFF1E3E62).withValues(alpha: 0.4),
-            Color(0xFF0B192C).withValues(alpha: 0.6),
+            Color(0xFF1E3E62).withValues(alpha: 0.9),
+            Color(0xFF0B192C).withValues(alpha: 0.7),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Color(0xFFFF6500).withValues(alpha: 0.2),
-          width: 1,
-        ),
+        border: Border.all(color: Color(0xFF1E3A5F), width: 2.5),
         boxShadow: [
           BoxShadow(
-            color: Color(0xFFFF6500).withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
+            color: Color(0xFF1E3A5F).withValues(alpha: 0.5),
+            blurRadius: 20,
+            offset: Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.6),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -912,22 +952,24 @@ class SettingsPageState extends State<SettingsPage> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Color(0xFF1E3E62).withValues(alpha: 0.4),
-            Color(0xFF0B192C).withValues(alpha: 0.6),
+            Color(0xFF1E3E62).withValues(alpha: 0.9),
+            Color(0xFF0B192C).withValues(alpha: 0.7),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Color(0xFFFF6500).withValues(alpha: 0.2),
-          width: 1,
-        ),
+        border: Border.all(color: Color(0xFF1E3A5F), width: 2.5),
         boxShadow: [
           BoxShadow(
-            color: Color(0xFFFF6500).withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
+            color: Color(0xFF1E3A5F).withValues(alpha: 0.5),
+            blurRadius: 20,
+            offset: Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.6),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -937,7 +979,7 @@ class SettingsPageState extends State<SettingsPage> {
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
-                  color: Color(0xFFFF6500).withValues(alpha: 0.1),
+                  color: Color(0xFF1E3A5F).withValues(alpha: 0.15),
                   width: 1,
                 ),
               ),
@@ -957,15 +999,19 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'Merge Duplicate Sessions',
-                style: ResponsiveText.bodyLarge(
-                  context,
-                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 16,
+                ),
               ),
               subtitle: Text(
                 'Clean up and merge duplicate chat sessions',
-                style: ResponsiveText.bodySmall(
-                  context,
-                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+                style: GoogleFonts.poppins(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
               trailing: Icon(
                 Icons.chevron_right,
@@ -1002,15 +1048,19 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'Clear Chat History',
-                style: ResponsiveText.bodyLarge(
-                  context,
-                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 16,
+                ),
               ),
               subtitle: Text(
                 'Delete all messages from device',
-                style: ResponsiveText.bodySmall(
-                  context,
-                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+                style: GoogleFonts.poppins(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
               trailing: Icon(
                 Icons.chevron_right,
@@ -1029,22 +1079,24 @@ class SettingsPageState extends State<SettingsPage> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Color(0xFF1E3E62).withValues(alpha: 0.4),
-            Color(0xFF0B192C).withValues(alpha: 0.6),
+            Color(0xFF1E3E62).withValues(alpha: 0.9),
+            Color(0xFF0B192C).withValues(alpha: 0.7),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Color(0xFFFF6500).withValues(alpha: 0.2),
-          width: 1,
-        ),
+        border: Border.all(color: Color(0xFF1E3A5F), width: 2.5),
         boxShadow: [
           BoxShadow(
-            color: Color(0xFFFF6500).withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
+            color: Color(0xFF1E3A5F).withValues(alpha: 0.5),
+            blurRadius: 20,
+            offset: Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.6),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -1054,7 +1106,7 @@ class SettingsPageState extends State<SettingsPage> {
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
-                  color: Color(0xFFFF6500).withValues(alpha: 0.1),
+                  color: Color(0xFF1E3A5F).withValues(alpha: 0.15),
                   width: 1,
                 ),
               ),
@@ -1074,15 +1126,19 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'About ResQLink',
-                style: ResponsiveText.bodyLarge(
-                  context,
-                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 16,
+                ),
               ),
               subtitle: Text(
                 'App version and information',
-                style: ResponsiveText.bodySmall(
-                  context,
-                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+                style: GoogleFonts.poppins(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
               trailing: Icon(
                 Icons.chevron_right,
@@ -1104,7 +1160,11 @@ class SettingsPageState extends State<SettingsPage> {
                       child: Text(
                         'Offline emergency communication using Wi-Fi Direct and GPS.\n\n'
                         'Stay connected even when the internet is down.',
-                        style: TextStyle(color: Colors.white70),
+                        style: GoogleFonts.poppins(
+                          color: Colors.white70,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w400,
+                        ),
                       ),
                     ),
                   ],
@@ -1136,15 +1196,19 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'Logout',
-                style: ResponsiveText.bodyLarge(
-                  context,
-                ).copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 16,
+                ),
               ),
               subtitle: Text(
                 'Sign out from the application',
-                style: ResponsiveText.bodySmall(
-                  context,
-                ).copyWith(color: Colors.white.withValues(alpha: 0.7)),
+                style: GoogleFonts.poppins(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
               trailing: Icon(
                 Icons.chevron_right,

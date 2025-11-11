@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../models/message_model.dart';
 import '../../utils/resqlink_theme.dart';
 import '../../services/p2p/p2p_main_service.dart';
@@ -50,14 +51,21 @@ class ConversationList extends StatelessWidget {
             SizedBox(height: 16),
             Text(
               'No messages yet',
-              style: TextStyle(fontSize: 18, color: Colors.white),
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             SizedBox(height: 8),
             Text(
               p2pService.connectedDevices.isEmpty
                   ? 'Connect to a device to start messaging'
                   : 'Select a device to start messaging',
-              style: TextStyle(color: Colors.white70),
+              style: GoogleFonts.poppins(
+                color: Colors.white70,
+                fontWeight: FontWeight.w400,
+              ),
               textAlign: TextAlign.center,
             ),
           ],
@@ -72,14 +80,13 @@ class ConversationList extends StatelessWidget {
       child: ListView.builder(
         padding: EdgeInsets.all(16),
         itemCount: conversations.length,
-        itemBuilder: (context, index) =>
-            ConversationCard(
-              conversation: conversations[index],
-              onTap: () => onConversationTap(
-                conversations[index].endpointId,
-                conversations[index].deviceName,
-              ),
-            ),
+        itemBuilder: (context, index) => ConversationCard(
+          conversation: conversations[index],
+          onTap: () => onConversationTap(
+            conversations[index].endpointId,
+            conversations[index].deviceName,
+          ),
+        ),
       ),
     );
   }
@@ -154,8 +161,8 @@ class ConversationCard extends StatelessWidget {
                           Expanded(
                             child: Text(
                               conversation.deviceName,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w700,
                                 fontSize: 16,
                                 color: Colors.white,
                               ),
@@ -164,9 +171,10 @@ class ConversationCard extends StatelessWidget {
                           if (message != null)
                             Text(
                               _formatRelativeTime(message.dateTime),
-                              style: TextStyle(
+                              style: GoogleFonts.poppins(
                                 fontSize: 12,
                                 color: Colors.white54,
+                                fontWeight: FontWeight.w400,
                               ),
                             ),
                         ],
@@ -175,7 +183,11 @@ class ConversationCard extends StatelessWidget {
                         SizedBox(height: 4),
                         Text(
                           message.message,
-                          style: TextStyle(color: Colors.white70, fontSize: 14),
+                          style: GoogleFonts.poppins(
+                            color: Colors.white70,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w400,
+                          ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -193,10 +205,10 @@ class ConversationCard extends StatelessWidget {
                     ),
                     child: Text(
                       '${conversation.unreadCount}',
-                      style: TextStyle(
+                      style: GoogleFonts.poppins(
                         color: Colors.white,
                         fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),

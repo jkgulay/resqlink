@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:resqlink/pages/gps_page.dart';
 import 'package:resqlink/services/messaging/message_sync_service.dart';
 import '../services/p2p/p2p_main_service.dart';
@@ -881,7 +882,14 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           children: [
             Icon(Icons.check_circle, color: Colors.white, size: 20),
             SizedBox(width: 8),
-            Text(message, style: TextStyle(color: Colors.white)),
+            Text(
+              message,
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
           ],
         ),
         backgroundColor: ResQLinkTheme.safeGreen,
@@ -901,7 +909,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             Expanded(
               child: Text(
                 message,
-                style: TextStyle(color: Colors.white),
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
                 maxLines: 2,
               ),
             ),

@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../utils/resqlink_theme.dart';
 
 class ConnectionBanner extends StatelessWidget {
   final VoidCallback onScanPressed;
 
-  const ConnectionBanner({
-    super.key,
-    required this.onScanPressed,
-  });
+  const ConnectionBanner({super.key, required this.onScanPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -22,7 +20,10 @@ class ConnectionBanner extends StatelessWidget {
           Expanded(
             child: Text(
               'Not connected to any devices. Messages will be saved locally.',
-              style: TextStyle(color: Colors.white),
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
               maxLines: 2,
             ),
           ),
@@ -30,9 +31,9 @@ class ConnectionBanner extends StatelessWidget {
             onPressed: onScanPressed,
             child: Text(
               'SCAN',
-              style: TextStyle(
+              style: GoogleFonts.poppins(
                 color: Colors.white,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),

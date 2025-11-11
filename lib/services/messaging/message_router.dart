@@ -8,6 +8,7 @@ import '../../features/database/repositories/chat_repository.dart';
 import '../chat/session_deduplication_service.dart';
 import '../../utils/session_consistency_checker.dart';
 import '../p2p/managers/identifier_resolver.dart';
+import '../../widgets/message/notification_service.dart';
 
 class MessageRouter {
   static final MessageRouter _instance = MessageRouter._internal();
@@ -59,8 +60,14 @@ class MessageRouter {
 
   /// Unregister device listener
   void unregisterDeviceListener(String deviceId) {
+    final hadListener = _deviceListeners.containsKey(deviceId);
     _deviceListeners.remove(deviceId);
-    debugPrint('🔕 Unregistered listener for device: $deviceId');
+    debugPrint(
+      '🔕 Unregistered listener for device: $deviceId (had listener: $hadListener)',
+    );
+    debugPrint(
+      '   Remaining active listeners: ${_deviceListeners.keys.toList()}',
+    );
   }
 
   /// Set global message listener
@@ -104,6 +111,51 @@ class MessageRouter {
         } catch (e) {
           debugPrint('⚠️ Failed to update connection time: $e');
         }
+      }
+
+      // Show notification for incoming messages (not our own messages)
+      if (!message.isMe && message.deviceId != null) {
+        try {
+          final isEmergency =
+              message.messageType == MessageType.emergency ||
+              message.messageType == MessageType.sos;
+
+          final senderName = message.fromUser;
+          final messageBody = message.message;
+
+          debugPrint('📣 Incoming message notification:');
+          debugPrint('   From: $senderName');
+          debugPrint('   Type: ${message.messageType}');
+          debugPrint('   Is emergency: $isEmergency');
+
+          if (isEmergency) {
+            debugPrint('🚨 Triggering emergency notification...');
+            await NotificationService.showEmergencyNotification(
+              title: '🚨 Emergency from $senderName',
+              body: messageBody,
+              sender: senderName,
+            );
+            debugPrint('✅ Emergency notification triggered');
+          } else {
+            // Show notification for all non-emergency messages
+            debugPrint('💬 Triggering message notification...');
+            await NotificationService.showMessageNotification(
+              title: senderName,
+              body: messageBody,
+              sender: senderName,
+            );
+            debugPrint('✅ Message notification triggered');
+          }
+        } catch (e) {
+          debugPrint('❌ Error showing notification: $e');
+          debugPrint('   Stack trace: ${StackTrace.current}');
+        }
+      } else {
+        debugPrint(
+          '📤 Message is from current user or has no device ID, skipping notification',
+        );
+        debugPrint('   isMe: ${message.isMe}');
+        debugPrint('   deviceId: ${message.deviceId}');
       }
 
       _globalListener?.call(message);
@@ -282,13 +334,12 @@ class MessageRouter {
 
       final messageModel = MessageModel(
         messageId:
-            data['messageId'] ??
-            MessageModel.generateMessageId(senderDeviceId),
+            data['messageId'] ?? MessageModel.generateMessageId(senderDeviceId),
 
         // ARCHITECTURE: endpointId = UUID (routing), fromUser = display name (UI)
-        endpointId: senderDeviceId,   // Sender's UUID (routing identifier)
-        fromUser: senderName,          // Sender's display name (UI only)
-        deviceId: senderDeviceId,      // Same as endpointId (legacy)
+        endpointId: senderDeviceId, // Sender's UUID (routing identifier)
+        fromUser: senderName, // Sender's display name (UI only)
+        deviceId: senderDeviceId, // Same as endpointId (legacy)
         targetDeviceId: targetDeviceId, // Recipient UUID or 'broadcast'
         message: data['message'] ?? '',
         isMe: false, // This is an incoming message

@@ -68,16 +68,25 @@ class LocationStatusCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           gradient: LinearGradient(
             colors: [
-              Color(0xFF0B192C).withValues(alpha: 0.08),
-              Color(0xFF1E3A5F).withValues(alpha: 0.05),
+              Color(0xFF0B192C).withValues(alpha: 0.9),
+              Color(0xFF1E3A5F).withValues(alpha: 0.7),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          border: Border.all(
-            color: Color(0xFF1E3A5F).withValues(alpha: 0.15),
-            width: 1,
-          ),
+          border: Border.all(color: Color(0xFF1E3A5F), width: 2.5),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0xFF1E3A5F).withValues(alpha: 0.5),
+              blurRadius: 20,
+              offset: Offset(0, 4),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.6),
+              blurRadius: 16,
+              offset: Offset(0, 8),
+            ),
+          ],
         ),
         child: Padding(
           padding: ResponsiveHelper.getCardPadding(context),
@@ -292,7 +301,7 @@ class LocationStatusCard extends StatelessWidget {
 
   Widget _buildLoadingDetails(bool isNarrow) {
     return Container(
-      padding: EdgeInsets.all(20),
+      padding: EdgeInsets.all(40),
       decoration: BoxDecoration(
         color: Color.fromARGB(255, 105, 107, 109).withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(16),
@@ -308,48 +317,26 @@ class LocationStatusCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        children: [
-          _buildShimmerRow(Icons.my_location, "Latitude", isNarrow),
-          SizedBox(height: 16),
-          _buildShimmerRow(Icons.my_location, "Longitude", isNarrow),
-          SizedBox(height: 16),
-          _buildShimmerRow(Icons.schedule, "Timestamp", isNarrow),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildShimmerRow(IconData icon, String label, bool isNarrow) {
-    return Row(
-      children: [
-        Container(
-          padding: EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.grey.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, size: isNarrow ? 16 : 18, color: Colors.grey),
-        ),
-        SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: isNarrow ? 12 : 13,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
-                ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+              strokeWidth: 3,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Loading location data...',
+              style: TextStyle(
+                fontSize: isNarrow ? 13 : 14,
+                color: Colors.grey[400],
+                fontWeight: FontWeight.w500,
               ),
-              SizedBox(height: 4),
-              _ShimmerLoading(width: 120, height: isNarrow ? 14 : 15),
-            ],
-          ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -710,72 +697,5 @@ class LocationStatusCard extends StatelessWidget {
     } else {
       return dateTime.toString().substring(0, 19);
     }
-  }
-}
-
-// Shimmer loading widget for smooth skeleton effect
-class _ShimmerLoading extends StatefulWidget {
-  final double width;
-  final double height;
-
-  const _ShimmerLoading({required this.width, required this.height});
-
-  @override
-  State<_ShimmerLoading> createState() => _ShimmerLoadingState();
-}
-
-class _ShimmerLoadingState extends State<_ShimmerLoading>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 1500),
-    )..repeat();
-
-    _animation = Tween<double>(
-      begin: -1.0,
-      end: 2.0,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _animation,
-      builder: (context, child) {
-        return Container(
-          width: widget.width,
-          height: widget.height,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
-            gradient: LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [
-                Colors.grey.withValues(alpha: 0.3),
-                Colors.grey.withValues(alpha: 0.5),
-                Colors.grey.withValues(alpha: 0.3),
-              ],
-              stops: [
-                _animation.value - 0.3,
-                _animation.value,
-                _animation.value + 0.3,
-              ].map((stop) => stop.clamp(0.0, 1.0)).toList(),
-            ),
-          ),
-        );
-      },
-    );
   }
 }

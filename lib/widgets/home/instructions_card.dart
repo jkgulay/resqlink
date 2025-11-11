@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class InstructionsCard extends StatelessWidget {
   const InstructionsCard({super.key});
@@ -14,16 +15,25 @@ class InstructionsCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           gradient: LinearGradient(
             colors: [
-              Color(0xFF0B192C).withValues(alpha: 0.08),
-              Color(0xFF1E3A5F).withValues(alpha: 0.05),
+              Color(0xFF0B192C).withValues(alpha: 0.9),
+              Color(0xFF1E3A5F).withValues(alpha: 0.7),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          border: Border.all(
-            color: Color(0xFF1E3A5F).withValues(alpha: 0.15),
-            width: 1,
-          ),
+          border: Border.all(color: Color(0xFF1E3A5F), width: 2.5),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0xFF1E3A5F).withValues(alpha: 0.5),
+              blurRadius: 20,
+              offset: Offset(0, 4),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.6),
+              blurRadius: 16,
+              offset: Offset(0, 8),
+            ),
+          ],
         ),
         child: Padding(
           padding: const EdgeInsets.all(24.0),
@@ -89,17 +99,17 @@ class InstructionsCard extends StatelessWidget {
               children: [
                 Text(
                   'How It Works',
-                  style: TextStyle(
+                  style: GoogleFonts.poppins(
                     fontWeight: FontWeight.w700,
                     fontSize: isNarrow ? 18 : 20,
-                    color: Color.fromARGB(255, 252, 254, 255),
+                    color: Colors.white,
                     letterSpacing: -0.5,
                   ),
                 ),
                 SizedBox(height: 6),
                 Text(
                   'ResQLink Emergency Network',
-                  style: TextStyle(
+                  style: GoogleFonts.poppins(
                     color: Colors.orange,
                     fontSize: isNarrow ? 13 : 15,
                     fontWeight: FontWeight.w600,
