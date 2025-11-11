@@ -1,6 +1,6 @@
 # 🆘 ResQLink — Offline Emergency Communication App
 
-**ResQLink** is a disaster response communication tool designed to work without internet or cellular service. Built with Flutter, it enables peer-to-peer messaging via Wi-Fi Direct, logs GPS coordinates offline, and syncs data to the cloud (Firebase) once connectivity is restored. Designed for emergency responders and disaster victims in network-compromised environments.
+**ResQLink** is a disaster response communication tool designed to work without internet or cellular service. Built with Flutter, it enables peer-to-peer messaging via Wi-Fi Direct, and logs GPS coordinates offline. Designed for emergency responders and disaster victims in network-compromised environments.
 
 ---
 
@@ -8,7 +8,6 @@
 
 - 📡 **Offline Messaging** — Send and receive emergency messages using Wi-Fi Direct, no internet required.
 - 📍 **Location Tracking** — Logs and stores GPS coordinates even when offline.
-- 🔄 **Auto-Sync** — Automatically syncs messages and location data to Firebase when internet is restored.
 - 💾 **Local Storage** — Uses SQLite for persistent local message and location storage.
 - 🧭 **Crisis-Optimized UI** — Simple interface designed for fast, stress-free interaction during emergencies.
 
