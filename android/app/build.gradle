@@ -40,7 +40,7 @@ android {
 
     defaultConfig {
         applicationId "com.example.resqlink"
-        minSdkVersion 23
+        minSdkVersion 24  // Updated to 24 for flutter_sound compatibility
         targetSdk 35  // Changed from 34 to 35
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName

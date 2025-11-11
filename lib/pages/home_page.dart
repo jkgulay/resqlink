@@ -22,6 +22,7 @@ import '../widgets/home/emergency_actions_card.dart';
 import '../widgets/home/location_status_card.dart';
 import '../widgets/home/connection_discovery_card.dart';
 import '../widgets/home/instructions_card.dart';
+import '../widgets/message/loading_view.dart';
 
 class HomePage extends StatefulWidget {
   final int? initialTab;
@@ -47,6 +48,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String? _userId = "user_${DateTime.now().millisecondsSinceEpoch}";
   bool _isP2PInitialized = false;
   bool _isInBackground = false;
+  bool _isLoading = true;
 
   late HomeController _homeController;
   SettingsService? _settingsService;
@@ -88,7 +90,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _messagePageKey = GlobalKey();
 
     pages = [
-      _buildHomePage(),
+      Container(), // Home page built dynamically in build() to respond to _isLoading state
       ChangeNotifierProvider<GpsController>.value(
         value: _gpsController,
         child: GpsPage(
@@ -118,6 +120,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Widget _buildHomePage() {
+    // Show loading screen during initialization
+    if (_isLoading) {
+      return LoadingView(message: "Initializing ResQLink...");
+    }
+
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: _homeController),
@@ -775,6 +782,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       setState(() => _isP2PInitialized = false);
       debugPrint("❌ Failed to initialize P2P service");
     }
+
+    // Set loading to false after initialization completes
+    setState(() => _isLoading = false);
   }
 
   void _updateUI() {
@@ -1119,13 +1129,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
+    // Build current page - home page is built dynamically to respond to loading state
+    final currentPage = selectedIndex == 0
+        ? _buildHomePage()
+        : pages[selectedIndex];
+
     // Message page is created once in initState and reused
 
     final mainArea = ColoredBox(
       color: colorScheme.surfaceContainerHighest,
       child: AnimatedSwitcher(
         duration: Duration(milliseconds: 200),
-        child: pages[selectedIndex],
+        child: currentPage,
       ),
     );
 

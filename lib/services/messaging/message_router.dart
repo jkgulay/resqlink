@@ -92,10 +92,20 @@ class MessageRouter {
       _processedMessageIds.add(messageId);
       _messageTimestamps[messageId] = DateTime.now();
 
+      // Format debug log based on message type
       debugPrint('📨 Routing message:');
       debugPrint('  From: ${message.fromUser} (${message.deviceId})');
       debugPrint('  To: ${message.endpointId}');
-      debugPrint('  Message: ${message.message}');
+      debugPrint('  Type: ${message.messageType}');
+      if (message.messageType == MessageType.voice) {
+        debugPrint('  Content: Voice message');
+      } else if (message.messageType == MessageType.location) {
+        debugPrint(
+          '  Content: Location (${message.latitude}, ${message.longitude})',
+        );
+      } else {
+        debugPrint('  Message: ${message.message}');
+      }
 
       await MessageRepository.insertMessage(message);
 
@@ -121,7 +131,17 @@ class MessageRouter {
               message.messageType == MessageType.sos;
 
           final senderName = message.fromUser;
-          final messageBody = message.message;
+          // Format message body based on type
+          String messageBody;
+          if (message.messageType == MessageType.voice) {
+            messageBody = '🎤 Voice message';
+          } else if (message.messageType == MessageType.location) {
+            messageBody = '📍 Location shared';
+          } else if (message.messageType == MessageType.file) {
+            messageBody = '📎 File attachment';
+          } else {
+            messageBody = message.message;
+          }
 
           debugPrint('📣 Incoming message notification:');
           debugPrint('   From: $senderName');

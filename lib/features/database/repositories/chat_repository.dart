@@ -36,7 +36,9 @@ class ChatRepository {
       // Session ID is now based on the stable device identifier (UUID)
       final sessionId = 'chat_${stableDeviceId.replaceAll(':', '_')}';
 
-      debugPrint('✅ Creating/updating session with validated UUID: $stableDeviceId');
+      debugPrint(
+        '✅ Creating/updating session with validated UUID: $stableDeviceId',
+      );
       debugPrint('   Display Name: $deviceName');
       debugPrint('   Session ID: $sessionId');
 
@@ -304,12 +306,31 @@ class ChatRepository {
                       .inMinutes <
                   5;
 
+          // Format last message preview based on message type
+          String? lastMessagePreview;
+          if (lastMessage != null) {
+            final messageType = lastMessage['message_type'] as String?;
+            final messageText = lastMessage['message'] as String?;
+
+            if (messageType == 'voice') {
+              lastMessagePreview = '🎤 Voice message';
+            } else if (messageType == 'location') {
+              lastMessagePreview = '📍 Location shared';
+            } else if (messageType == 'file') {
+              lastMessagePreview = '📎 File attachment';
+            } else if (messageType == 'emergency' || messageType == 'sos') {
+              lastMessagePreview = '🚨 $messageText';
+            } else {
+              lastMessagePreview = messageText;
+            }
+          }
+
           summaries.add(
             ChatSessionSummary(
               sessionId: sessionRow['id'] as String,
               deviceId: sessionRow['device_id'] as String,
               deviceName: sessionRow['device_name'] as String,
-              lastMessage: lastMessage?['message'] as String?,
+              lastMessage: lastMessagePreview,
               lastMessageTime: lastMessage?['timestamp'] != null
                   ? DateTime.fromMillisecondsSinceEpoch(
                       lastMessage!['timestamp'] as int,
@@ -617,7 +638,6 @@ class ChatRepository {
       final Map<String, List<Map<String, dynamic>>> sessionsByName = {};
 
       for (final session in allSessions) {
-
         final deviceName = session['device_name'] as String?;
 
         if (deviceName == null || deviceName.isEmpty) continue;
@@ -625,7 +645,7 @@ class ChatRepository {
         // Normalize device name for grouping (remove extra spaces, lowercase)
         final normalizedName = deviceName.trim().toLowerCase();
 
-        if (!sessionsByName.containsKey(normalizedName)) { 
+        if (!sessionsByName.containsKey(normalizedName)) {
           sessionsByName[normalizedName] = [];
         }
         sessionsByName[normalizedName]!.add(session);
@@ -691,10 +711,14 @@ class ChatRepository {
 
           // Priority 2: Prefer sessions with device model names over user names
           // Device names like "HONOR X9c" are more stable than user names like "Kyle"
-          final aLooksLikeModel = aName.length > 3 &&
-              (aName.contains(RegExp(r'[0-9]')) || aName.toUpperCase() == aName);
-          final bLooksLikeModel = bName.length > 3 &&
-              (bName.contains(RegExp(r'[0-9]')) || bName.toUpperCase() == bName);
+          final aLooksLikeModel =
+              aName.length > 3 &&
+              (aName.contains(RegExp(r'[0-9]')) ||
+                  aName.toUpperCase() == aName);
+          final bLooksLikeModel =
+              bName.length > 3 &&
+              (bName.contains(RegExp(r'[0-9]')) ||
+                  bName.toUpperCase() == bName);
 
           if (aLooksLikeModel != bLooksLikeModel) {
             return aLooksLikeModel ? -1 : 1;
@@ -727,7 +751,8 @@ class ChatRepository {
           if (name != null && name.isNotEmpty) {
             // Prefer names that look like device models (contain numbers or are uppercase)
             if (name.length > 3 &&
-                (name.contains(RegExp(r'[0-9]')) || name.toUpperCase() == name)) {
+                (name.contains(RegExp(r'[0-9]')) ||
+                    name.toUpperCase() == name)) {
               finalDeviceName = name;
               break;
             }

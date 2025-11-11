@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 enum MessageStatus { pending, sent, delivered, failed, synced, received }
 
-enum MessageType { text, emergency, location, sos, system, file }
+enum MessageType { text, emergency, location, sos, system, file, voice }
 
 /// Message model with clear identifier architecture:
 /// - endpointId: Device's wlan0 MAC address (stable, used for routing/sessions)
@@ -15,8 +15,8 @@ class MessageModel {
   final int? id;
 
   // CRITICAL: Identifier architecture
-  final String endpointId;      // Sender's wlan0 MAC (routing/session ID)
-  final String fromUser;         // Sender's display name (UI only)
+  final String endpointId; // Sender's wlan0 MAC (routing/session ID)
+  final String fromUser; // Sender's display name (UI only)
   final String message;
   final bool isMe;
   final bool isEmergency;
@@ -32,10 +32,10 @@ class MessageModel {
   final int? ttl;
   final String? connectionType;
   final Map<String, dynamic>? deviceInfo;
-  final String? targetDeviceId;  // Target MAC (null = broadcast)
+  final String? targetDeviceId; // Target MAC (null = broadcast)
   final MessageType messageType;
   final String? chatSessionId;
-  final String? deviceId;        // Same as endpointId (legacy compat)
+  final String? deviceId; // Same as endpointId (legacy compat)
 
   // Database-generated fields (read-only, not set in constructor)
   final int? retryCount;
@@ -45,8 +45,8 @@ class MessageModel {
 
   MessageModel({
     this.id,
-    required this.endpointId,     // MAC address (wlan0) - routing identifier
-    required this.fromUser,        // Display name - UI only
+    required this.endpointId, // MAC address (wlan0) - routing identifier
+    required this.fromUser, // Display name - UI only
     required this.message,
     required this.isMe,
     required this.isEmergency,
@@ -62,17 +62,19 @@ class MessageModel {
     this.ttl,
     this.connectionType,
     this.deviceInfo,
-    this.targetDeviceId,          // Target MAC (null = broadcast)
+    this.targetDeviceId, // Target MAC (null = broadcast)
     MessageType? messageType,
     this.chatSessionId,
-    this.deviceId,                // Same as endpointId (legacy)
+    this.deviceId, // Same as endpointId (legacy)
     // Database-generated fields
     this.retryCount,
     this.lastRetryTime,
     this.priority,
     this.createdAt,
   }) : type = type ?? (isEmergency ? 'emergency' : 'message'),
-       messageType = messageType ?? (isEmergency ? MessageType.emergency : MessageType.text);
+       messageType =
+           messageType ??
+           (isEmergency ? MessageType.emergency : MessageType.text);
 
   // DateTime getter for convenience
   DateTime get dateTime => DateTime.fromMillisecondsSinceEpoch(timestamp);
@@ -191,10 +193,11 @@ class MessageModel {
       type: map['type'] ?? 'message',
       status: map['status'] != null
           ? (map['status'] is int
-              ? MessageStatus.values[map['status']]
-              : MessageStatus.values.firstWhere(
-                  (e) => e.name == map['status'],
-                  orElse: () => MessageStatus.pending))
+                ? MessageStatus.values[map['status']]
+                : MessageStatus.values.firstWhere(
+                    (e) => e.name == map['status'],
+                    orElse: () => MessageStatus.pending,
+                  ))
           : MessageStatus.pending,
       latitude: map['latitude']?.toDouble(),
       longitude: map['longitude']?.toDouble(),
@@ -209,10 +212,11 @@ class MessageModel {
       targetDeviceId: map['targetDeviceId'],
       messageType: map['messageType'] != null
           ? (map['messageType'] is int
-              ? MessageType.values[map['messageType']]
-              : MessageType.values.firstWhere(
-                  (e) => e.name == map['messageType'],
-                  orElse: () => MessageType.text))
+                ? MessageType.values[map['messageType']]
+                : MessageType.values.firstWhere(
+                    (e) => e.name == map['messageType'],
+                    orElse: () => MessageType.text,
+                  ))
           : MessageType.text,
       chatSessionId: map['chatSessionId'],
       synced: map['synced'] == 1,
