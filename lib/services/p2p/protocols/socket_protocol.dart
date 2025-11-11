@@ -9,7 +9,7 @@ import '../../messaging/message_router.dart';
 import '../../identity_service.dart';
 
 class SocketProtocol {
-  static const int defaultPort= 8888;
+  static const int defaultPort = 8888;
   static const int bufferSize = 4096;
 
   ServerSocket? _serverSocket;
@@ -20,6 +20,9 @@ class SocketProtocol {
   final MessageRouter _messageRouter = MessageRouter();
   StreamSubscription? _serverSubscription;
   final Map<Socket, StreamSubscription> _clientSubscriptions = {};
+
+  // Message buffers for handling large messages (voice recordings)
+  final Map<Socket, StringBuffer> _messageBuffers = {};
 
   bool _isRunning = false;
   String? _deviceId;
@@ -40,14 +43,18 @@ class SocketProtocol {
   void updateDeviceId(String newDeviceId) {
     final oldDeviceId = _deviceId;
     _deviceId = newDeviceId;
-    debugPrint('🔄 Socket protocol device ID updated: $oldDeviceId → $newDeviceId');
+    debugPrint(
+      '🔄 Socket protocol device ID updated: $oldDeviceId → $newDeviceId',
+    );
   }
 
   /// Start socket server
   Future<bool> startServer({int port = defaultPort}) async {
     try {
       if (_isRunning && _serverSocket != null) {
-        debugPrint('✅ Socket server already running on port ${_serverSocket!.port}');
+        debugPrint(
+          '✅ Socket server already running on port ${_serverSocket!.port}',
+        );
         return true;
       }
 
@@ -68,16 +75,21 @@ class SocketProtocol {
           // - Linux: error code 98 (EADDRINUSE)
           // - Windows: error code 10048 (WSAEADDRINUSE)
           // - Also check error message as fallback
-          final isPortInUse = e.osError?.errorCode == 98 ||
+          final isPortInUse =
+              e.osError?.errorCode == 98 ||
               e.osError?.errorCode == 10048 ||
               e.message.toLowerCase().contains('address already in use') ||
               e.message.toLowerCase().contains('only one usage');
 
           if (isPortInUse) {
-            debugPrint('⚠️ Port $attemptPort already in use, trying next port...');
+            debugPrint(
+              '⚠️ Port $attemptPort already in use, trying next port...',
+            );
             if (attemptPort == port + 9) {
               // Last attempt failed
-              throw SocketException('All ports from $port to ${port + 9} are in use');
+              throw SocketException(
+                'All ports from $port to ${port + 9} are in use',
+              );
             }
             continue;
           } else {
@@ -127,11 +139,15 @@ class SocketProtocol {
       onError: (error) {
         // Handle different types of connection errors gracefully
         if (error.toString().contains('Connection reset by peer')) {
-          debugPrint('🔄 Client connection reset by peer: $clientAddress:$clientPort (normal disconnection)');
+          debugPrint(
+            '🔄 Client connection reset by peer: $clientAddress:$clientPort (normal disconnection)',
+          );
         } else if (error.toString().contains('Connection refused')) {
           debugPrint('❌ Client connection refused: $clientAddress:$clientPort');
         } else {
-          debugPrint('❌ Client connection error: $error ($clientAddress:$clientPort)');
+          debugPrint(
+            '❌ Client connection error: $error ($clientAddress:$clientPort)',
+          );
         }
         _removeClient(client);
       },
@@ -146,10 +162,7 @@ class SocketProtocol {
   }
 
   /// Connect to server as client
-  Future<bool> connectToServer(
-    String address, {
-    int port = defaultPort,
-  }) async {
+  Future<bool> connectToServer(String address, {int port = defaultPort}) async {
     try {
       if (_clientSocket != null) {
         debugPrint('⚠️ Already connected as client');
@@ -196,15 +209,16 @@ class SocketProtocol {
     final identity = IdentityService();
     final deviceId = await identity.getDeviceId();
 
-    debugPrint('✅ Sending handshake with UUID: $deviceId, DisplayName: $_userName');
+    debugPrint(
+      '✅ Sending handshake with UUID: $deviceId, DisplayName: $_userName',
+    );
 
     final handshake = jsonEncode({
       'type': 'handshake',
-      'deviceId': deviceId,            // Persistent UUID (unique identifier)
-      'displayName': _userName,        // User's chosen name (UI display)
+      'deviceId': deviceId, // Persistent UUID (unique identifier)
+      'displayName': _userName, // User's chosen name (UI display)
       'timestamp': DateTime.now().millisecondsSinceEpoch,
-      'protocol_version': '3.0',       // v3.0 = UUID-based identification
-
+      'protocol_version': '3.0', // v3.0 = UUID-based identification
       // Legacy fields for backward compatibility with older versions
       'deviceMac': deviceId,
       'macAddress': deviceId,
@@ -217,14 +231,43 @@ class SocketProtocol {
   /// Handle incoming socket data
   void _handleSocketData(Uint8List data, Socket socket) {
     try {
-      final message = utf8.decode(data);
-      final lines = message.split('\n').where((line) => line.isNotEmpty);
+      final chunk = utf8.decode(data);
 
-      for (final line in lines) {
-        _processMessage(line, socket);
+      // Initialize buffer for this socket if not exists
+      _messageBuffers.putIfAbsent(socket, () => StringBuffer());
+
+      // Append chunk to buffer
+      _messageBuffers[socket]!.write(chunk);
+
+      // Get complete buffer content
+      final buffer = _messageBuffers[socket]!.toString();
+
+      // Process complete messages (terminated by newline)
+      final lines = buffer.split('\n');
+
+      // Keep the last incomplete line in buffer
+      if (lines.isNotEmpty) {
+        final lastLine = lines.last;
+
+        // Process all complete lines (all except the last one)
+        for (int i = 0; i < lines.length - 1; i++) {
+          final line = lines[i].trim();
+          if (line.isNotEmpty) {
+            _processMessage(line, socket);
+          }
+        }
+
+        // Clear buffer and keep only the incomplete last line
+        _messageBuffers[socket]!.clear();
+        if (lastLine.isNotEmpty && !buffer.endsWith('\n')) {
+          // Last line is incomplete, keep it in buffer
+          _messageBuffers[socket]!.write(lastLine);
+        }
       }
     } catch (e) {
       debugPrint('❌ Error processing socket data: $e');
+      // Clear buffer on error to prevent corruption
+      _messageBuffers[socket]?.clear();
     }
   }
 
@@ -233,6 +276,15 @@ class SocketProtocol {
     try {
       final data = jsonDecode(message);
       final type = data['type'] as String?;
+
+      // Log message size for debugging (especially for voice messages)
+      if (type == 'message') {
+        final messageType = data['messageType'] ?? data['type'];
+        final messageSize = message.length;
+        debugPrint(
+          '📨 Processing $messageType message (${(messageSize / 1024).toStringAsFixed(2)} KB)',
+        );
+      }
 
       switch (type) {
         case 'handshake':
@@ -256,7 +308,10 @@ class SocketProtocol {
   }
 
   /// Handle handshake message
-  Future<void> _handleHandshake(Map<String, dynamic> data, Socket socket) async {
+  Future<void> _handleHandshake(
+    Map<String, dynamic> data,
+    Socket socket,
+  ) async {
     final ipAddress = socket.remoteAddress.address;
     final protocolVersion = data['protocol_version'] ?? '1.0';
 
@@ -266,8 +321,8 @@ class SocketProtocol {
 
     // Legacy fallback for older versions
     if (peerDeviceId == null || peerDeviceId.isEmpty) {
-      peerDeviceId = data['deviceMac'] as String? ??
-                     data['macAddress'] as String?;
+      peerDeviceId =
+          data['deviceMac'] as String? ?? data['macAddress'] as String?;
       peerDisplayName = peerDisplayName ?? data['userName'] as String?;
     }
 
@@ -301,9 +356,9 @@ class SocketProtocol {
     final ack = jsonEncode({
       'type': 'ack',
       'ackType': 'handshake',
-      'deviceId': ourDeviceId,           // Our UUID
-      'displayName': _userName,          // Our display name
-      'peerId': peerDeviceId,            // Acknowledge their UUID
+      'deviceId': ourDeviceId, // Our UUID
+      'displayName': _userName, // Our display name
+      'peerId': peerDeviceId, // Acknowledge their UUID
       'timestamp': DateTime.now().millisecondsSinceEpoch,
       'protocol_version': '3.0',
 
@@ -480,6 +535,9 @@ class SocketProtocol {
     // Remove from device sockets
     _deviceSockets.removeWhere((_, socket) => socket == client);
 
+    // Clean up message buffer for this client
+    _messageBuffers.remove(client);
+
     try {
       client.close();
     } catch (_) {}
@@ -487,8 +545,12 @@ class SocketProtocol {
 
   /// Disconnect client connection
   void _disconnectClient() {
-    _clientSocket?.close();
-    _clientSocket = null;
+    if (_clientSocket != null) {
+      // Clean up message buffer for client socket
+      _messageBuffers.remove(_clientSocket);
+      _clientSocket?.close();
+      _clientSocket = null;
+    }
   }
 
   /// Stop socket server/client

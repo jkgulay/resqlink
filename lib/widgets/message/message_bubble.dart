@@ -3,6 +3,7 @@ import '../../models/message_model.dart';
 import '../../utils/resqlink_theme.dart';
 import 'location_map_widget.dart';
 import 'location_preview_modal.dart';
+import 'voice_message_player.dart';
 
 class MessageBubble extends StatelessWidget {
   final MessageModel message;
@@ -13,6 +14,7 @@ class MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final isMe = message.isMe;
     final hasLocation = message.hasLocation;
+    final isVoiceMessage = message.messageType == MessageType.voice;
     final isEmergency =
         message.isEmergency ||
         message.type == 'emergency' ||
@@ -83,16 +85,22 @@ class MessageBubble extends StatelessWidget {
                     SizedBox(height: 4),
                   ],
 
-                  // Message text
-                  Text(
-                    message.message,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: isNarrow ? 14 : 15,
-                      height: 1.4,
-                      fontFamily: 'Poppins',
+                  // Voice message player
+                  if (isVoiceMessage) ...[
+                    _buildVoiceMessageContent(message, isMe),
+                  ]
+                  // Message text (only for non-voice messages)
+                  else ...[
+                    Text(
+                      message.message,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: isNarrow ? 14 : 15,
+                        height: 1.4,
+                        fontFamily: 'Poppins',
+                      ),
                     ),
-                  ),
+                  ],
 
                   // Location preview
                   if (hasLocation) ...[
@@ -127,6 +135,54 @@ class MessageBubble extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _buildVoiceMessageContent(MessageModel message, bool isMe) {
+    try {
+      // Parse voice message data from message text
+      // Format: {audioData: base64string, duration: seconds, format: m4a}
+      final messageText = message.message;
+
+      // Extract voice data (message contains JSON-like string)
+      final audioDataMatch = RegExp(
+        r'audioData: ([^,}]+)',
+      ).firstMatch(messageText);
+      final durationMatch = RegExp(r'duration: (\d+)').firstMatch(messageText);
+      final formatMatch = RegExp(r'format: ([^,}]+)').firstMatch(messageText);
+
+      if (audioDataMatch == null || durationMatch == null) {
+        debugPrint('⚠️ Failed to parse voice message data');
+        return Text(
+          'Voice message (unable to play)',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.6),
+            fontSize: 13,
+            fontStyle: FontStyle.italic,
+          ),
+        );
+      }
+
+      final audioData = audioDataMatch.group(1)!.trim();
+      final duration = int.parse(durationMatch.group(1)!);
+      final format = formatMatch?.group(1)?.trim() ?? 'm4a';
+
+      return VoiceMessagePlayer(
+        base64Audio: audioData,
+        durationSeconds: duration,
+        isMe: isMe,
+        format: format,
+      );
+    } catch (e) {
+      debugPrint('❌ Error building voice message: $e');
+      return Text(
+        'Voice message (error loading)',
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.6),
+          fontSize: 13,
+          fontStyle: FontStyle.italic,
+        ),
+      );
+    }
   }
 
   Widget _buildEmergencyBadge(String type) {

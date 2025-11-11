@@ -164,9 +164,18 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   void _onRouterMessage(MessageModel message) async {
     if (!mounted) return;
 
-    debugPrint(
-      '📨 ChatSession received router message from ${message.fromUser}: ${message.message}',
-    );
+    // Format debug log based on message type
+    String logMessage;
+    if (message.messageType == MessageType.voice) {
+      logMessage =
+          '📨 ChatSession received voice message from ${message.fromUser}';
+    } else if (message.messageType == MessageType.location) {
+      logMessage = '📨 ChatSession received location from ${message.fromUser}';
+    } else {
+      logMessage =
+          '📨 ChatSession received message from ${message.fromUser}: ${message.message}';
+    }
+    debugPrint(logMessage);
 
     // Update message with chat session ID if not set
     MessageModel messageToAdd = message;
