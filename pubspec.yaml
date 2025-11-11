@@ -57,6 +57,8 @@ flutter:
   uses-material-design: true
   assets:
     - assets/1.png
+    - assets/sounds/emergency_alert.mp3
+    - assets/sounds/message_received.mp3
   fonts:
     - family: Ubuntu
       fonts:

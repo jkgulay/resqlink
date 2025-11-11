@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class LoadingView extends StatelessWidget {
   final String message;
@@ -62,10 +63,9 @@ class LoadingView extends StatelessWidget {
             // Loading text
             Text(
               message,
-              style: TextStyle(
+              style: GoogleFonts.poppins(
                 fontSize: isNarrow ? 16 : 18,
                 color: Colors.white.withValues(alpha: 0.8),
-                fontFamily: 'Poppins',
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -75,10 +75,10 @@ class LoadingView extends StatelessWidget {
             // Subtitle
             Text(
               'Please wait',
-              style: TextStyle(
+              style: GoogleFonts.poppins(
                 fontSize: isNarrow ? 12 : 13,
                 color: Colors.white.withValues(alpha: 0.5),
-                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w400,
               ),
             ),
           ],

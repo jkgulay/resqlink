@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../services/p2p/p2p_main_service.dart';
 
 class EmptyChatView extends StatelessWidget {
@@ -63,11 +64,10 @@ class EmptyChatView extends StatelessWidget {
               // Title
               Text(
                 'No messages yet',
-                style: TextStyle(
+                style: GoogleFonts.poppins(
                   fontSize: isNarrow ? 20 : 24,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w700,
                   color: Colors.white,
-                  fontFamily: 'Poppins',
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -81,11 +81,11 @@ class EmptyChatView extends StatelessWidget {
                   hasConnectedDevices
                       ? 'Start the conversation by sending\nyour first message'
                       : 'Connect to a device to start\nchatting offline',
-                  style: TextStyle(
+                  style: GoogleFonts.poppins(
                     fontSize: isNarrow ? 14 : 15,
                     color: Colors.white.withValues(alpha: 0.6),
                     height: 1.5,
-                    fontFamily: 'Poppins',
+                    fontWeight: FontWeight.w400,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -118,11 +118,10 @@ class EmptyChatView extends StatelessWidget {
                       SizedBox(width: 10),
                       Text(
                         'Enable WiFi to discover peers',
-                        style: TextStyle(
+                        style: GoogleFonts.poppins(
                           color: Color(0xFFFF6500),
                           fontSize: isNarrow ? 12 : 13,
                           fontWeight: FontWeight.w600,
-                          fontFamily: 'Poppins',
                         ),
                       ),
                     ],

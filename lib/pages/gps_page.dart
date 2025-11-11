@@ -723,36 +723,86 @@ class _GpsPageState extends State<GpsPage> {
   }
 
   Widget _buildLoadingScreen() {
+    final isNarrow = MediaQuery.of(context).size.width < 400;
+
     return Scaffold(
       backgroundColor: ResQLinkTheme.backgroundDark,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset(
-              'assets/resqlink_logo.png',
-              width: 120,
-              height: 120,
-              errorBuilder: (context, error, stackTrace) {
-                return const Icon(
-                  Icons.emergency,
-                  size: 80,
-                  color: ResQLinkTheme.primaryRed,
-                );
-              },
-            ),
-            const SizedBox(height: 24),
-            const CircularProgressIndicator(color: ResQLinkTheme.primaryRed),
-            const SizedBox(height: 16),
-            const Text(
-              'Initializing Emergency GPS...',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Color(0xFF0B192C).withValues(alpha: 0.5),
+              Color(0xFF1E3E62).withValues(alpha: 0.3),
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Image.asset(
+                'assets/resqlink_logo.png',
+                width: 120,
+                height: 120,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Icon(
+                    Icons.emergency,
+                    size: 80,
+                    color: ResQLinkTheme.primaryRed,
+                  );
+                },
               ),
-            ),
-          ],
+              const SizedBox(height: 32),
+              // Spinner container with gradient background (matching LoadingView)
+              Container(
+                padding: EdgeInsets.all(isNarrow ? 20 : 24),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Color(0xFF1E3E62).withValues(alpha: 0.4),
+                      Color(0xFF0B192C).withValues(alpha: 0.6),
+                    ],
+                  ),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Color(0xFFFF6500).withValues(alpha: 0.3),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0xFFFF6500).withValues(alpha: 0.2),
+                      blurRadius: 16,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: const CircularProgressIndicator(
+                  color: ResQLinkTheme.primaryRed,
+                  strokeWidth: 3,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Initializing Emergency GPS...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Please wait...',
+                style: TextStyle(
+                  color: Colors.grey[400],
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

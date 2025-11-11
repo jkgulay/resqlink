@@ -43,7 +43,15 @@ class HomeController extends ChangeNotifier {
       _isLoadingLocation = true;
       notifyListeners();
 
-      final lastLocation = await LocationService.getLastKnownLocation();
+      // Add timeout to prevent loading state from hanging
+      final lastLocation = await LocationService.getLastKnownLocation().timeout(
+        Duration(seconds: 5),
+        onTimeout: () {
+          debugPrint('⚠️ Location load timed out after 5 seconds');
+          return _currentLocation;
+        },
+      );
+
       _currentLocation = lastLocation;
       _isLoadingLocation = false;
       notifyListeners();

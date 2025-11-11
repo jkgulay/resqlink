@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../utils/resqlink_theme.dart';
 
 class EmergencyDialog extends StatelessWidget {
@@ -13,24 +14,47 @@ class EmergencyDialog extends StatelessWidget {
         children: [
           Icon(Icons.warning, color: ResQLinkTheme.primaryRed, size: 24),
           SizedBox(width: 8),
-          Text('Send Emergency SOS?', style: TextStyle(color: Colors.white)),
+          Text(
+            'Send Emergency SOS?',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 18,
+            ),
+          ),
         ],
       ),
       content: Text(
         'This will send an emergency SOS message to the selected device, including your location if available.',
-        style: TextStyle(color: Colors.white70),
+        style: GoogleFonts.poppins(
+          color: Colors.white70,
+          fontWeight: FontWeight.w400,
+          fontSize: 14,
+        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: Text('Cancel', style: TextStyle(color: Colors.white70)),
+          child: Text(
+            'Cancel',
+            style: GoogleFonts.poppins(
+              color: Colors.white70,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: ResQLinkTheme.primaryRed,
           ),
           onPressed: () => Navigator.pop(context, true),
-          child: Text('Send SOS', style: TextStyle(color: Colors.white)),
+          child: Text(
+            'Send SOS',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ),
       ],
     );
@@ -46,23 +70,43 @@ class ClearChatDialog extends StatelessWidget {
       backgroundColor: ResQLinkTheme.cardDark,
       title: Text(
         'Clear Chat History?',
-        style: TextStyle(color: Colors.white),
+        style: GoogleFonts.poppins(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+          fontSize: 18,
+        ),
       ),
       content: Text(
         'This will permanently delete all messages in this conversation.',
-        style: TextStyle(color: Colors.white70),
+        style: GoogleFonts.poppins(
+          color: Colors.white70,
+          fontWeight: FontWeight.w400,
+          fontSize: 14,
+        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: Text('Cancel', style: TextStyle(color: Colors.white70)),
+          child: Text(
+            'Cancel',
+            style: GoogleFonts.poppins(
+              color: Colors.white70,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: ResQLinkTheme.primaryRed,
           ),
           onPressed: () => Navigator.pop(context, true),
-          child: Text('Clear', style: TextStyle(color: Colors.white)),
+          child: Text(
+            'Clear',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ),
       ],
     );

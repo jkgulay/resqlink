@@ -55,11 +55,21 @@ class LocationStateService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final lastLocation = await LocationService.getLastKnownLocation();
-      final unsyncedCount = await LocationService.getUnsyncedCount();
+      // Add timeout to prevent loading state from hanging
+      final results =
+          await Future.wait([
+            LocationService.getLastKnownLocation(),
+            LocationService.getUnsyncedCount(),
+          ]).timeout(
+            Duration(seconds: 5),
+            onTimeout: () {
+              debugPrint('⚠️ Location refresh timed out after 5 seconds');
+              return [_currentLocation, _unsyncedCount];
+            },
+          );
 
-      _currentLocation = lastLocation;
-      _unsyncedCount = unsyncedCount;
+      _currentLocation = results[0] as LocationModel?;
+      _unsyncedCount = results[1] as int;
     } catch (e) {
       debugPrint('Error refreshing location: $e');
     } finally {

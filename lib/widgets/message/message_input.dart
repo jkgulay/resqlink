@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../models/message_model.dart';
 
 class MessageInput extends StatelessWidget {
@@ -105,10 +106,10 @@ class MessageInput extends StatelessWidget {
                   enabled: enabled,
                   decoration: InputDecoration(
                     hintText: enabled ? 'Type a message...' : 'Device offline',
-                    hintStyle: TextStyle(
+                    hintStyle: GoogleFonts.poppins(
                       color: Colors.white.withValues(alpha: 0.4),
-                      fontFamily: 'Poppins',
                       fontSize: isNarrow ? 14 : 15,
+                      fontWeight: FontWeight.w400,
                     ),
                     border: InputBorder.none,
                     contentPadding: EdgeInsets.symmetric(
@@ -116,10 +117,10 @@ class MessageInput extends StatelessWidget {
                       vertical: 12,
                     ),
                   ),
-                  style: TextStyle(
+                  style: GoogleFonts.poppins(
                     color: Colors.white,
-                    fontFamily: 'Poppins',
                     fontSize: isNarrow ? 14 : 15,
+                    fontWeight: FontWeight.w400,
                   ),
                   maxLines: null,
                   keyboardType: TextInputType.multiline,
