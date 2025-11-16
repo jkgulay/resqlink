@@ -107,7 +107,10 @@ class MessageRouter {
         debugPrint('  Message: ${message.message}');
       }
 
+      // Store ALL messages - device ID filtering removed
+      // Messages will be displayed in the correct chat session automatically
       await MessageRepository.insertMessage(message);
+      debugPrint('✅ Message stored in database');
 
       // CRITICAL FIX: Update lastConnectionAt to keep session showing as "online"
       // This prevents the "disconnected" status when messages are actively being exchanged
