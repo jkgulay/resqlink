@@ -21,20 +21,12 @@ class P2PDeviceManager {
     _wifiDirectService = service;
   }
 
-  /// Get all discovered devices with connection info
   Map<String, Map<String, dynamic>> get discoveredDevices {
     final deviceMap = <String, Map<String, dynamic>>{};
 
-    // Add WiFi Direct peers with actual signal strength and connection status
     for (final peer in (_wifiDirectService?.discoveredPeers ?? <dynamic>[])) {
-      // FIXED: Only status 0 (connected) means truly connected
-      // Status 1 (invited) means pending, not yet connected
       final isConnected = peer.status == WiFiDirectPeerStatus.connected;
 
-      // CRITICAL FIX: Use custom device name with priority:
-      // 1. Handshake name (if connected) - lookup by UUID via MAC mapping
-      // 2. Service discovery name (DNS-SD broadcast - before connection)
-      // 3. System WiFi Direct name (fallback)
       final uuid = _baseService.getUuidForMac(peer.deviceAddress);
       final connectedDevice = uuid != null
           ? _baseService.connectedDevices[uuid]

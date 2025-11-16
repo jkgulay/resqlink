@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ResQLink is a disaster response communication app built with Flutter that enables **offline peer-to-peer messaging** via WiFi Direct when internet/cellular networks are down. The app syncs messages and location data to Firebase when connectivity is restored.
+ResQLink is a disaster response communication app built with Flutter that enables **offline peer-to-peer messaging** via WiFi Direct when internet/cellular networks are down. All data is stored locally in SQLite for offline-first operation.
 
 ## Critical Architecture Concepts
 
@@ -21,7 +21,7 @@ Messages flow through TWO distinct systems that must stay synchronized:
 
 - SQLite local persistence (`resqlink_enhanced.db`, version 11)
 - Chat sessions and message repositories
-- Firebase cloud sync when online
+- Offline-first architecture with local-only storage
 - UI state management via `ChatService` (Provider pattern)
 
 **Integration Point**: The `MessageRouter` (`lib/services/messaging/message_router.dart`) bridges these layers:
@@ -192,9 +192,9 @@ lib/
 
 ### Firebase Integration
 
-- Optional - app works fully offline if Firebase fails
-- `FirebaseDebugService` runs checks in debug mode only
-- Sync services wrap Firebase calls in try-catch (see `lib/services/messaging/message_sync_service.dart`)
+- **DEPRECATED/DISABLED** - Firebase sync has been removed from active use
+- App operates in fully offline mode with local SQLite storage only
+- Legacy Firebase code may still exist but is not actively used
 
 ## Common Pitfalls to Avoid
 
