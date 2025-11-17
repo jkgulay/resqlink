@@ -21,20 +21,13 @@ class P2PDeviceManager {
     _wifiDirectService = service;
   }
 
-  /// Get all discovered devices with connection info
   Map<String, Map<String, dynamic>> get discoveredDevices {
     final deviceMap = <String, Map<String, dynamic>>{};
 
-    // Add WiFi Direct peers with actual signal strength and connection status
+    // 1. Add WiFi Direct peers (direct neighbors)
     for (final peer in (_wifiDirectService?.discoveredPeers ?? <dynamic>[])) {
-      // FIXED: Only status 0 (connected) means truly connected
-      // Status 1 (invited) means pending, not yet connected
       final isConnected = peer.status == WiFiDirectPeerStatus.connected;
 
-      // CRITICAL FIX: Use custom device name with priority:
-      // 1. Handshake name (if connected) - lookup by UUID via MAC mapping
-      // 2. Service discovery name (DNS-SD broadcast - before connection)
-      // 3. System WiFi Direct name (fallback)
       final uuid = _baseService.getUuidForMac(peer.deviceAddress);
       final connectedDevice = uuid != null
           ? _baseService.connectedDevices[uuid]
@@ -57,16 +50,17 @@ class P2PDeviceManager {
         'signalLevel': peer.signalLevel ?? -50,
         'lastSeen': DateTime.now().millisecondsSinceEpoch,
         'isConnected': isConnected,
-        'status': wifiDirectPeerStatusToString(
-          peer.status,
-        ), // Use helper function instead of .name
+        'status': wifiDirectPeerStatusToString(peer.status),
         'isEmergency':
             displayName.toLowerCase().contains('resqlink') ||
             displayName.toLowerCase().contains('emergency'),
+        'hopCount': 0, // Direct WiFi Direct connection
+        'isDirect': true,
+        'isMultiHop': false,
       };
     }
 
-    // Add ResQLink devices from discovery service (don't overwrite WiFi Direct devices)
+    // 2. Add ResQLink devices from discovery service (don't overwrite WiFi Direct devices)
     for (final device in _baseService.discoveredResQLinkDevices) {
       if (!deviceMap.containsKey(device.deviceId)) {
         deviceMap[device.deviceId] = {
@@ -79,6 +73,9 @@ class P2PDeviceManager {
           'lastSeen': device.lastSeen.millisecondsSinceEpoch,
           'isConnected': device.isConnected,
           'isEmergency': device.userName.toLowerCase().contains('emergency'),
+          'hopCount': 0,
+          'isDirect': true,
+          'isMultiHop': false,
         };
       } else {
         // Merge information if device exists in both lists
@@ -91,7 +88,7 @@ class P2PDeviceManager {
       }
     }
 
-    // Final step: Override device names with connected device names (real names from handshake)
+    // 3. Override device names with connected device names (real names from handshake)
     for (final connectedDevice in _baseService.connectedDevices.values) {
       if (deviceMap.containsKey(connectedDevice.deviceId)) {
         deviceMap[connectedDevice.deviceId] = {
@@ -103,6 +100,38 @@ class P2PDeviceManager {
         debugPrint(
           '🔄 Updated device name from connection: ${connectedDevice.userName} (${connectedDevice.deviceId})',
         );
+      }
+    }
+
+    // 4. ADD MESH DEVICES - devices discovered via multi-hop messages
+    final reachableDevices = _baseService.reachableDevices;
+    debugPrint('🌐 Adding ${reachableDevices.length} mesh-discovered devices');
+
+    for (final meshDevice in reachableDevices) {
+      final deviceId = meshDevice['deviceId'] as String;
+      final deviceName = meshDevice['deviceName'] as String;
+      final hopCount = meshDevice['hopCount'] as int;
+      final isDirect = meshDevice['isDirect'] as bool;
+      final isMultiHop = meshDevice['isMultiHop'] as bool;
+      final lastSeen = meshDevice['lastSeen'] as int;
+
+      // Only add if not already in list (direct connections take precedence)
+      if (!deviceMap.containsKey(deviceId)) {
+        deviceMap[deviceId] = {
+          'deviceId': deviceId,
+          'deviceName': '$deviceName ${isMultiHop ? "($hopCount hops)" : ""}',
+          'deviceAddress': deviceId,
+          'connectionType': 'mesh',
+          'isAvailable': true,
+          'signalLevel': -60 - (hopCount * 10), // Weaker signal for more hops
+          'lastSeen': lastSeen,
+          'isConnected': false,
+          'isEmergency': deviceName.toLowerCase().contains('emergency'),
+          'hopCount': hopCount,
+          'isDirect': isDirect,
+          'isMultiHop': isMultiHop,
+        };
+        debugPrint('🌐 Added mesh device: $deviceName ($hopCount hops)');
       }
     }
 

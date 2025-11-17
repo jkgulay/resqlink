@@ -803,7 +803,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // This maps display name to MAC address for message routing
     _p2pService.registerDevice(deviceId, userName);
     debugPrint(
-      "📝 Registered device: Display Name='$userName', MAC='$deviceId'",
+      "📝 Registered device: Display Name='$userName', UUID='$deviceId'",
     );
 
     // Prevent duplicate connection processing for the same device
@@ -825,8 +825,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (mounted) {
       // Create device map for navigation
       final device = {
-        'deviceId': deviceId, // MAC address as identifier
-        'deviceAddress': deviceId, // MAC address
+        'deviceId': deviceId, // UUID identifier
+        'deviceAddress': deviceId, // UUID mirror for compatibility
         'deviceName': userName, // Display name for UI
         'isConnected': true,
       };

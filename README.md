@@ -9,6 +9,7 @@
 - 📡 **Offline Messaging** — Send and receive emergency messages using Wi-Fi Direct, no internet required.
 - 📍 **Location Tracking** — Logs and stores GPS coordinates even when offline.
 - 💾 **Local Storage** — Uses SQLite for persistent local message and location storage.
+- 🔌 **Fully Offline** — No internet or cloud services required, works completely offline.
 - 🧭 **Crisis-Optimized UI** — Simple interface designed for fast, stress-free interaction during emergencies.
 
 ---
@@ -25,9 +26,9 @@
 ## 🛠 Built With
 
 - [Flutter](https://flutter.dev/) + Dart
-- [Firebase](https://firebase.google.com/) — Firestore, Authentication, Cloud Functions
-- SQLite (via sqflite plugin)
+- SQLite (via sqflite plugin) — Local data persistence
 - Wi-Fi Direct plugins (Android support)
+- Geolocator — GPS tracking
 
 ---
 
@@ -60,6 +61,7 @@ lib/
 ---
 
 ## 📈 Key Metrics (Future Integration)
+
 - Monthly Active Users (MAU)
 - Message delivery rate (offline and synced)
 - Sync success rate
@@ -69,7 +71,7 @@ lib/
 
 ## 📌 Status
 
-🚧 *This project is under active development as part of a university thesis.*
+🚧 _This project is under active development as part of a university thesis._
 
 Testing is being conducted in simulated offline environments. Real-world field testing and polish will follow in the next release cycle.
 

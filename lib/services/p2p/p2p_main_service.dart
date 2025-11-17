@@ -101,6 +101,12 @@ class P2PMainService extends P2PBaseService {
     _messageRouter.setIdentifierResolver(_identifierResolver);
     debugPrint('✅ IdentifierResolver registered with MessageRouter');
 
+    // Register P2P service for mesh device registry updates
+    _messageRouter.setP2PService(this);
+    debugPrint(
+      '✅ P2PBaseService registered with MessageRouter for mesh updates',
+    );
+
     debugPrint('✅ Core components initialized');
   }
 
@@ -153,8 +159,17 @@ class P2PMainService extends P2PBaseService {
         '🔗 Device connected via SocketProtocol: $userName ($deviceId)',
       );
       addConnectedDevice(deviceId, userName);
+      _broadcastGroupRoster();
     };
 
+    _socketProtocol.onDeviceSocketDisconnected = (deviceId) {
+      removeConnectedDevice(deviceId);
+      _broadcastGroupRoster();
+    };
+
+    _socketProtocol.onGroupStateReceived = (devices) {
+      applyGroupRoster(devices);
+    };
     _socketProtocol.onPongReceived = (deviceId, sequence) {
       _qualityMonitor.recordPingReceived(deviceId, sequence);
     };
@@ -698,6 +713,32 @@ ${_messageHandler.getMessageTrace().take(5).join('\n')}
   /// Get socket protocol for external access
   SocketProtocol get socketProtocol => _socketProtocol;
 
+  Future<void> _broadcastGroupRoster() async {
+    if (!_socketProtocol.isServer) return;
+
+    final roster = <Map<String, dynamic>>[];
+    if (deviceId != null && userName != null) {
+      roster.add({'deviceId': deviceId, 'userName': userName, 'isHost': true});
+    }
+
+    connectedDevices.forEach((uuid, device) {
+      roster.add({
+        'deviceId': uuid,
+        'userName': device.userName,
+        'isHost': device.isHost,
+      });
+    });
+
+    if (roster.isEmpty) return;
+
+    await _socketProtocol.broadcastSystemMessage({
+      'type': 'group_state',
+      'devices': roster,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+    debugPrint('📣 Broadcasted group roster (${roster.length} devices)');
+  }
+
   /// Open WiFi Direct settings
   Future<void> openWiFiDirectSettings() async {
     await _wifiDirectHandler.openWiFiDirectSettings();
@@ -713,9 +754,9 @@ ${_messageHandler.getMessageTrace().take(5).join('\n')}
   /// Get identifier resolver for external access
   IdentifierResolver get identifierResolver => _identifierResolver;
 
-  /// Register device with identifier resolver
-  void registerDevice(String macAddress, String displayName) {
-    _identifierResolver.registerDevice(macAddress, displayName);
+  /// Register device with identifier resolver (UUID + display name)
+  void registerDevice(String deviceId, String displayName) {
+    _identifierResolver.registerDevice(deviceId, displayName);
   }
 
   @override
