@@ -366,6 +366,8 @@ abstract class P2PBaseService with ChangeNotifier {
         _meshDeviceHopCount.remove(deviceId);
         debugPrint('🧹 Mesh registry: Removed stale device $deviceId');
       }
+      // Notify listeners so UI and pages update reachability immediately
+      notifyListeners();
     } catch (e) {
       debugPrint('❌ Error updating mesh device registry: $e');
     }
@@ -444,6 +446,25 @@ abstract class P2PBaseService with ChangeNotifier {
       notifyListeners();
       debugPrint('❌ Device disconnected: ${device.userName} ($deviceId)');
     }
+  }
+
+  /// Check if a device is reachable either directly or via mesh roster
+  bool isDeviceReachable(String? deviceId, {Duration? maxAge}) {
+    if (deviceId == null || deviceId.isEmpty) return false;
+
+    if (_connectedDevices.containsKey(deviceId)) {
+      return true;
+    }
+
+    final meshDevice = _meshDeviceRegistry[deviceId];
+    if (meshDevice == null) return false;
+
+    final lastSeen = _meshDeviceLastSeen[deviceId];
+    if (lastSeen == null) return false;
+
+    final freshnessWindow = maxAge ?? Duration(minutes: 5);
+    final isFresh = DateTime.now().difference(lastSeen) <= freshnessWindow;
+    return isFresh;
   }
 
   /// Apply group roster broadcast from host

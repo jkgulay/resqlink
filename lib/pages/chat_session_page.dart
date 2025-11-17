@@ -19,13 +19,14 @@ class ChatSessionPage extends StatefulWidget {
   final String sessionId;
   final String deviceName;
   final P2PMainService p2pService;
+  final String deviceId;
 
   const ChatSessionPage({
     super.key,
     required this.sessionId,
     required this.deviceName,
     required this.p2pService,
-    required String deviceId,
+    required this.deviceId,
   });
 
   @override
@@ -45,8 +46,10 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   Timer? _refreshTimer;
   Timer? _typingTimer;
   bool _isTyping = false;
-  String? _deviceId; // Store device ID for MessageRouter listener
+  String? _listenerDeviceId; // Device ID registered with MessageRouter
+  String? _sessionDeviceId; // Canonical device identifier for this chat
   int _queuedMessageCount = 0; // Track queued messages for this device
+  bool _isP2PListenerAttached = false;
 
   LocationModel? get _currentLocation => _locationStateService.currentLocation;
 
@@ -54,6 +57,9 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.p2pService.addListener(_handleP2PStateChanged);
+    _isP2PListenerAttached = true;
+    _sessionDeviceId = _safeTrim(widget.deviceId);
     _initialize();
   }
 
@@ -64,10 +70,17 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     _messageController.dispose();
     _scrollController.dispose();
     WidgetsBinding.instance.removeObserver(this);
+    if (_isP2PListenerAttached) {
+      widget.p2pService.removeListener(_handleP2PStateChanged);
+      _isP2PListenerAttached = false;
+    }
 
     // Unregister MessageRouter listener
-    if (_deviceId != null) {
-      widget.p2pService.messageRouter.unregisterDeviceListener(_deviceId!);
+    if (_listenerDeviceId != null) {
+      widget.p2pService.messageRouter.unregisterDeviceListener(
+        _listenerDeviceId!,
+      );
+      _listenerDeviceId = null;
     }
 
     // Clear global P2P listener
@@ -99,17 +112,93 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   }
 
   void _setupMessageRouterListener() {
-    // Extract device ID from session for MessageRouter
-    if (_chatSession != null) {
-      _deviceId = _chatSession!.deviceId;
-
-      // Register listener with MessageRouter for real-time messages
-      widget.p2pService.messageRouter.registerDeviceListener(
-        _deviceId!,
-        _onRouterMessage,
+    final targetDeviceId = _effectiveDeviceId;
+    if (targetDeviceId == null) {
+      debugPrint(
+        '⚠️ Unable to register MessageRouter listener - missing device ID for ${widget.sessionId}',
       );
+      return;
+    }
 
-      debugPrint('📱 Registered MessageRouter listener for device: $_deviceId');
+    if (_listenerDeviceId == targetDeviceId) {
+      return; // Already registered for this device
+    }
+
+    // Unregister old listener if the device identity changed
+    if (_listenerDeviceId != null && _listenerDeviceId != targetDeviceId) {
+      widget.p2pService.messageRouter.unregisterDeviceListener(
+        _listenerDeviceId!,
+      );
+    }
+
+    _listenerDeviceId = targetDeviceId;
+    widget.p2pService.messageRouter.registerDeviceListener(
+      targetDeviceId,
+      _onRouterMessage,
+    );
+
+    debugPrint(
+      '📱 Registered MessageRouter listener for device: $targetDeviceId',
+    );
+  }
+
+  String? _safeTrim(String? value) {
+    if (value == null) return null;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  String? _deriveDeviceIdFromSession(ChatSession session) {
+    const prefix = 'chat_';
+    if (session.id.startsWith(prefix) && session.id.length > prefix.length) {
+      return _safeTrim(session.id.substring(prefix.length));
+    }
+    return null;
+  }
+
+  String? _lookupSessionDeviceId(ChatSession session) {
+    final metadataDeviceId = session.metadata?['deviceId']?.toString();
+    final candidates = [
+      session.deviceId,
+      session.deviceAddress,
+      metadataDeviceId,
+      _deriveDeviceIdFromSession(session),
+    ];
+
+    for (final candidate in candidates) {
+      final trimmed = _safeTrim(candidate);
+      if (trimmed != null && trimmed != 'unknown') {
+        return trimmed;
+      }
+    }
+    return null;
+  }
+
+  String? get _effectiveDeviceId {
+    final direct = _safeTrim(_sessionDeviceId);
+    if (direct != null) {
+      return direct;
+    }
+
+    if (_chatSession != null) {
+      final sessionId = _lookupSessionDeviceId(_chatSession!);
+      if (sessionId != null) {
+        return sessionId;
+      }
+    }
+
+    return _safeTrim(widget.deviceId);
+  }
+
+  void _handleP2PStateChanged() {
+    if (!mounted) return;
+    final deviceId = _effectiveDeviceId;
+    if (deviceId == null) return;
+    final reachable = widget.p2pService.isDeviceReachable(deviceId);
+    if (_isConnected != reachable) {
+      setState(() {
+        _isConnected = reachable;
+      });
     }
   }
 
@@ -130,20 +219,28 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       final messages = await ChatRepository.getSessionMessages(
         widget.sessionId,
       );
+      final resolvedDeviceId = session != null
+          ? _lookupSessionDeviceId(session)
+          : _effectiveDeviceId;
+      final reachable =
+          resolvedDeviceId != null &&
+          widget.p2pService.isDeviceReachable(resolvedDeviceId);
 
       if (mounted) {
         setState(() {
           _chatSession = session;
           _messages = messages;
           _isLoading = false;
-          _isConnected = _chatSession?.isOnline ?? false;
+          _isConnected = reachable;
+          _sessionDeviceId =
+              _safeTrim(resolvedDeviceId) ??
+              _sessionDeviceId ??
+              _safeTrim(widget.deviceId);
         });
 
-        // Setup MessageRouter listener if not already done
-        if (_deviceId == null && _chatSession != null) {
-          _setupMessageRouterListener();
-        }
+        _setupMessageRouterListener();
 
+        _handleP2PStateChanged();
         // Update queued message count
         _updateQueuedMessageCount();
         _scrollToBottom();
@@ -214,18 +311,37 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
   /// Update queued message count for this device - DISABLED
   void _updateQueuedMessageCount() {
-    if (_deviceId != null) {
+    final deviceId = _effectiveDeviceId;
+    if (deviceId != null && mounted) {
       // Message queue functionality removed
-      if (mounted) {
-        setState(() {
-          _queuedMessageCount = 0; // Always 0 since queue is disabled
-        });
-      }
+      setState(() {
+        _queuedMessageCount = 0; // Always 0 since queue is disabled
+      });
     }
+  }
+
+  void _updateLocalMessageStatus(String messageId, MessageStatus status) {
+    final index = _messages.indexWhere((m) => m.messageId == messageId);
+    if (index == -1) return;
+    setState(() {
+      _messages[index] = _messages[index].copyWith(status: status);
+    });
   }
 
   Future<void> _sendMessage(String messageText, MessageType type) async {
     if (_chatSession == null || messageText.trim().isEmpty) return;
+
+    final targetDeviceId = _effectiveDeviceId;
+    if (targetDeviceId == null) {
+      debugPrint(
+        '❌ Unable to send message - missing device ID for session ${widget.sessionId}',
+      );
+      _showSnackBar(
+        'Missing device identifier. Please reopen or recreate this chat.',
+        isError: true,
+      );
+      return;
+    }
 
     try {
       final messageId = MessageModel.generateMessageId(
@@ -240,7 +356,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       // Create message with chat session ID
       final message = MessageModel(
         messageId: messageId,
-        endpointId: _chatSession!.deviceId,
+        endpointId: targetDeviceId,
         fromUser: widget.p2pService.userName ?? 'You',
         message: messageText.trim(),
         isMe: true,
@@ -264,52 +380,39 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       _scrollToBottom();
       _messageController.clear();
 
-      // Send via P2P if connected
-      if (_isConnected) {
-        try {
-          await widget.p2pService.sendMessage(
-            message: messageText.trim(),
-            type: type,
-            targetDeviceId: _chatSession!.deviceId,
-            senderName: widget.p2pService.userName ?? 'You',
-          );
+      final isReachable = widget.p2pService.isDeviceReachable(targetDeviceId);
 
-          // Update message status to sent
-          await MessageRepository.updateStatus(messageId, MessageStatus.sent);
-
-          // Update the message in UI to show sent status
-          final updatedMessage = message.copyWith(status: MessageStatus.sent);
+      if (!isReachable) {
+        await MessageRepository.updateStatus(messageId, MessageStatus.failed);
+        _updateLocalMessageStatus(messageId, MessageStatus.failed);
+        if (_isConnected) {
           setState(() {
-            final index = _messages.indexWhere((m) => m.messageId == messageId);
-            if (index != -1) {
-              _messages[index] = updatedMessage;
-            }
-          });
-        } catch (e) {
-          debugPrint('❌ Error sending P2P message: $e');
-          await MessageRepository.updateStatus(messageId, MessageStatus.failed);
-
-          // Update the message in UI to show failed status
-          final failedMessage = message.copyWith(status: MessageStatus.failed);
-          setState(() {
-            final index = _messages.indexWhere((m) => m.messageId == messageId);
-            if (index != -1) {
-              _messages[index] = failedMessage;
-            }
+            _isConnected = false;
           });
         }
-      } else {
-        // Mark as failed if not connected
-        await MessageRepository.updateStatus(messageId, MessageStatus.failed);
+        _showSnackBar('Device offline - message failed', isError: true);
+        return;
+      }
 
-        // Update the message in UI to show failed status
-        final failedMessage = message.copyWith(status: MessageStatus.failed);
-        setState(() {
-          final index = _messages.indexWhere((m) => m.messageId == messageId);
-          if (index != -1) {
-            _messages[index] = failedMessage;
-          }
-        });
+      try {
+        await widget.p2pService.sendMessage(
+          message: messageText.trim(),
+          type: type,
+          targetDeviceId: targetDeviceId,
+          senderName: widget.p2pService.userName ?? 'You',
+        );
+
+        await MessageRepository.updateStatus(messageId, MessageStatus.sent);
+        _updateLocalMessageStatus(messageId, MessageStatus.sent);
+        if (!_isConnected) {
+          setState(() {
+            _isConnected = true;
+          });
+        }
+      } catch (e) {
+        debugPrint('❌ Error sending P2P message: $e');
+        await MessageRepository.updateStatus(messageId, MessageStatus.failed);
+        _updateLocalMessageStatus(messageId, MessageStatus.failed);
       }
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
@@ -319,6 +422,18 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
   Future<void> _sendLocationMessage() async {
     if (_chatSession == null) return;
+
+    final targetDeviceId = _effectiveDeviceId;
+    if (targetDeviceId == null) {
+      debugPrint(
+        '❌ Unable to send location - missing device ID for session ${widget.sessionId}',
+      );
+      _showSnackBar(
+        'Missing device identifier. Please reopen or recreate this chat.',
+        isError: true,
+      );
+      return;
+    }
 
     // Show loading
     _showSnackBar('Getting GPS location...', isError: false);
@@ -379,7 +494,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
       final message = MessageModel(
         messageId: messageId,
-        endpointId: _chatSession!.deviceId,
+        endpointId: targetDeviceId,
         fromUser: widget.p2pService.userName ?? 'You',
         message: locationText,
         isMe: true,
@@ -412,7 +527,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             id: messageId,
             message: locationText,
             type: MessageType.location,
-            targetDeviceId: _chatSession!.deviceId,
+            targetDeviceId: targetDeviceId,
             senderName: widget.p2pService.userName ?? 'You',
             latitude: _currentLocation!.latitude,
             longitude: _currentLocation!.longitude,
@@ -447,6 +562,15 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   Future<void> _reconnectToDevice() async {
     if (_chatSession == null) return;
 
+    final targetDeviceId = _effectiveDeviceId;
+    if (targetDeviceId == null) {
+      _showSnackBar(
+        'Missing device identifier, cannot reconnect.',
+        isError: true,
+      );
+      return;
+    }
+
     try {
       _showSnackBar('Attempting to reconnect...', isError: false);
 
@@ -456,12 +580,12 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       final devices = widget.p2pService.discoveredDevices;
       Map<String, dynamic>? targetDevice;
 
-      if (devices.containsKey(_chatSession!.deviceId)) {
-        targetDevice = devices[_chatSession!.deviceId];
+      if (devices.containsKey(targetDeviceId)) {
+        targetDevice = devices[targetDeviceId];
       } else {
         for (final deviceData in devices.values) {
-          if (deviceData['deviceId'] == _chatSession!.deviceId ||
-              deviceData['endpointId'] == _chatSession!.deviceId) {
+          if (deviceData['deviceId'] == targetDeviceId ||
+              deviceData['endpointId'] == targetDeviceId) {
             targetDevice = deviceData;
             break;
           }
@@ -952,7 +1076,10 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildInfoRow('Name', _chatSession!.deviceName),
-            _buildInfoRow('Device ID', _chatSession!.deviceId),
+            _buildInfoRow(
+              'Device ID',
+              _effectiveDeviceId ?? _chatSession!.deviceId,
+            ),
             _buildInfoRow('Status', _isConnected ? 'Connected' : 'Offline'),
             if (_chatSession!.lastConnectionType != null)
               _buildInfoRow(
