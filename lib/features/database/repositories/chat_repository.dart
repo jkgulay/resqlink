@@ -185,6 +185,43 @@ class ChatRepository {
     }
   }
 
+  /// Update metadata key/values for a chat session (merges with existing data)
+  static Future<void> updateMetadata({
+    required String sessionId,
+    required Map<String, dynamic> values,
+  }) async {
+    try {
+      await DatabaseManager.transaction((txn) async {
+        final session = await txn.query(
+          _tableName,
+          where: 'id = ?',
+          whereArgs: [sessionId],
+          limit: 1,
+        );
+
+        if (session.isEmpty) {
+          return;
+        }
+
+        final existingMetadataRaw = session.first['metadata'] as String?;
+        final existingMetadata = existingMetadataRaw != null
+            ? Map<String, dynamic>.from(jsonDecode(existingMetadataRaw))
+            : <String, dynamic>{};
+
+        final updatedMetadata = {...existingMetadata, ...values};
+
+        await txn.update(
+          _tableName,
+          {'metadata': jsonEncode(updatedMetadata)},
+          where: 'id = ?',
+          whereArgs: [sessionId],
+        );
+      });
+    } catch (e) {
+      debugPrint('❌ Error updating chat metadata: $e');
+    }
+  }
+
   /// Get session by device ID (which should be the UUID)
   /// Also checks device_address for backward compatibility
   static Future<ChatSession?> getSessionByDeviceId(String deviceId) async {

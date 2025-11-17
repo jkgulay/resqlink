@@ -41,6 +41,115 @@ abstract class P2PBaseService with ChangeNotifier {
   final Map<String, int> _meshDeviceHopCount =
       {}; // UUID -> Number of hops away
 
+  String? _normalizeMacAddress(String? input) {
+    if (input == null) return null;
+    final cleaned = input.replaceAll(RegExp(r'[^0-9A-Fa-f]'), '');
+    if (cleaned.length != 12) return null;
+    final buffer = StringBuffer();
+    for (int i = 0; i < cleaned.length; i += 2) {
+      if (buffer.isNotEmpty) buffer.write(':');
+      buffer.write(cleaned.substring(i, i + 2).toUpperCase());
+    }
+    return buffer.toString();
+  }
+
+  /// Resolve any identifier (session ID, MAC, UUID) into a canonical UUID/MAC
+  String? resolveDeviceIdentifier(String? identifier) {
+    if (identifier == null) return null;
+    var normalized = identifier.trim();
+    if (normalized.isEmpty) return null;
+
+    if (normalized.startsWith('chat_')) {
+      normalized = normalized.substring(5);
+    }
+
+    final restored = _restoreIdentifierFormatting(normalized);
+    final candidates = <String>{normalized, restored};
+
+    for (final candidate in candidates) {
+      if (_connectedDevices.containsKey(candidate) ||
+          _meshDeviceRegistry.containsKey(candidate) ||
+          candidate == _deviceId) {
+        return candidate;
+      }
+    }
+
+    for (final candidate in candidates) {
+      final macAddress = _normalizeMacAddress(candidate);
+      if (macAddress == null) continue;
+
+      if (_macToUuidMapping.containsKey(macAddress)) {
+        return _macToUuidMapping[macAddress];
+      }
+
+      if (_connectedDevices.containsKey(macAddress) ||
+          _meshDeviceRegistry.containsKey(macAddress)) {
+        return macAddress;
+      }
+    }
+
+    return restored;
+  }
+
+  /// Convert placeholder identifiers (e.g., chat session IDs) back to UUID/MAC format
+  String _restoreIdentifierFormatting(String value) {
+    if (!value.contains('_')) {
+      return value;
+    }
+
+    final segments = value.split('_');
+
+    // UUIDs stored as chat_<uuid with underscores>
+    if (segments.length == 5 &&
+        segments[0].length == 8 &&
+        segments[1].length == 4 &&
+        segments[2].length == 4 &&
+        segments[3].length == 4 &&
+        segments[4].length == 12 &&
+        segments.every((part) => RegExp(r'^[0-9a-fA-F]+$').hasMatch(part))) {
+      final uuid = [
+        segments[0],
+        segments[1],
+        segments[2],
+        segments[3],
+        segments[4],
+      ].join('-');
+      return uuid;
+    }
+
+    // MAC addresses stored as chat_<aa_bb_cc_dd_ee_ff>
+    if (segments.length == 6 &&
+        segments.every(
+          (part) =>
+              part.length == 2 && RegExp(r'^[0-9a-fA-F]{2}$').hasMatch(part),
+        )) {
+      return segments.map((part) => part.toUpperCase()).join(':');
+    }
+
+    return value;
+  }
+
+  /// Check if a device is directly connected (WiFi Direct / socket peer)
+  bool isDeviceDirectlyConnected(String? deviceId) {
+    if (deviceId == null || deviceId.isEmpty) return false;
+
+    if (_connectedDevices.containsKey(deviceId)) {
+      return true;
+    }
+
+    final resolved = resolveDeviceIdentifier(deviceId);
+    if (resolved != null && _connectedDevices.containsKey(resolved)) {
+      return true;
+    }
+
+    final macVariant = _normalizeMacAddress(deviceId);
+    if (macVariant != null && _connectedDevices.containsKey(macVariant)) {
+      return true;
+    }
+
+    return false;
+  }
+
   // Timers
   Timer? _keepAliveTimer;
   Timer? _connectionWatchdog;
@@ -101,7 +210,11 @@ abstract class P2PBaseService with ChangeNotifier {
   }
 
   /// Get UUID for a given MAC address
-  String? getUuidForMac(String macAddress) => _macToUuidMapping[macAddress];
+  String? getUuidForMac(String macAddress) {
+    final normalized = _normalizeMacAddress(macAddress);
+    if (normalized == null) return null;
+    return _macToUuidMapping[normalized];
+  }
 
   // Emergency mode setter
   set emergencyMode(bool value) {
@@ -328,7 +441,7 @@ abstract class P2PBaseService with ChangeNotifier {
             createdAt: now,
           );
           debugPrint(
-            '🌐 Mesh registry: Added device $deviceId via multi-hop (${hopCount} hops)',
+            '🌐 Mesh registry: Added device $deviceId via multi-hop ($hopCount hops)',
           );
         } else {
           // Update existing device's last seen
@@ -381,8 +494,10 @@ abstract class P2PBaseService with ChangeNotifier {
   }) {
     final now = DateTime.now();
 
+    final normalizedId = _normalizeMacAddress(deviceId) ?? deviceId;
+
     // Check if device is already connected to prevent duplicate processing
-    final existingDevice = _connectedDevices[deviceId];
+    final existingDevice = _connectedDevices[normalizedId];
     bool isNewConnection = existingDevice == null;
     bool nameChanged = existingDevice?.userName != userName;
 
@@ -394,8 +509,8 @@ abstract class P2PBaseService with ChangeNotifier {
     }
 
     final device = DeviceModel(
-      id: deviceId,
-      deviceId: deviceId,
+      id: normalizedId,
+      deviceId: normalizedId,
       userName: userName,
       isHost: false,
       isOnline: true,
@@ -404,17 +519,27 @@ abstract class P2PBaseService with ChangeNotifier {
           existingDevice?.createdAt ?? now, // Preserve original creation time
     );
 
-    _connectedDevices[deviceId] = device;
+    _connectedDevices[normalizedId] = device;
 
     // Store MAC to UUID mapping if provided
     if (macAddress != null && macAddress.isNotEmpty) {
-      _macToUuidMapping[macAddress] = deviceId;
-      debugPrint('🔗 Mapped MAC $macAddress -> UUID $deviceId');
+      final normalizedMac = _normalizeMacAddress(macAddress);
+      if (normalizedMac != null) {
+        _macToUuidMapping[normalizedMac] = normalizedId;
+        if (_connectedDevices.containsKey(normalizedMac) &&
+            normalizedMac != normalizedId) {
+          _connectedDevices.remove(normalizedMac);
+          debugPrint(
+            '♻️ Removed temporary MAC entry $normalizedMac after resolving UUID $normalizedId',
+          );
+        }
+        debugPrint('🔗 Mapped MAC $normalizedMac -> UUID $normalizedId');
+      }
     }
 
     // Also update the discovered device with the correct name if it exists
     final discoveredIndex = _discoveredResQLinkDevices.indexWhere(
-      (d) => d.deviceId == deviceId,
+      (d) => d.deviceId == deviceId || d.deviceId == normalizedId,
     );
     if (discoveredIndex >= 0) {
       final discoveredDevice = _discoveredResQLinkDevices[discoveredIndex];
@@ -424,46 +549,73 @@ abstract class P2PBaseService with ChangeNotifier {
         lastSeen: now,
       );
       _discoveredResQLinkDevices[discoveredIndex] = updatedDevice;
-      debugPrint('📝 Updated discovered device name: $userName ($deviceId)');
+      debugPrint(
+        '📝 Updated discovered device name: $userName ($normalizedId)',
+      );
     }
 
     // Only call the connection callback for new connections
     if (isNewConnection) {
-      onDeviceConnected?.call(deviceId, userName);
-      debugPrint('✅ NEW device connected: $userName ($deviceId)');
+      onDeviceConnected?.call(normalizedId, userName);
+      debugPrint('✅ NEW device connected: $userName ($normalizedId)');
     } else if (nameChanged) {
-      debugPrint('🔄 Device name updated: $userName ($deviceId)');
+      debugPrint('🔄 Device name updated: $userName ($normalizedId)');
     }
+
+    // Ensure mesh registry records the fresh direct connection
+    _meshDeviceRegistry[normalizedId] = device;
+    _meshDeviceLastSeen[normalizedId] = now;
+    _meshDeviceHopCount[normalizedId] = 0;
 
     notifyListeners();
   }
 
   /// Remove connected device
   void removeConnectedDevice(String deviceId) {
-    final device = _connectedDevices.remove(deviceId);
+    final resolvedId = resolveDeviceIdentifier(deviceId) ?? deviceId;
+    final device =
+        _connectedDevices.remove(resolvedId) ??
+        (resolvedId == deviceId ? null : _connectedDevices.remove(deviceId));
     if (device != null) {
-      onDeviceDisconnected?.call(deviceId);
+      onDeviceDisconnected?.call(resolvedId);
       notifyListeners();
-      debugPrint('❌ Device disconnected: ${device.userName} ($deviceId)');
+      debugPrint('❌ Device disconnected: ${device.userName} ($resolvedId)');
     }
+
+    _meshDeviceRegistry.remove(resolvedId);
+    _meshDeviceLastSeen.remove(resolvedId);
+    _meshDeviceHopCount.remove(resolvedId);
   }
 
   /// Check if a device is reachable either directly or via mesh roster
   bool isDeviceReachable(String? deviceId, {Duration? maxAge}) {
-    if (deviceId == null || deviceId.isEmpty) return false;
+    final resolvedId = resolveDeviceIdentifier(deviceId);
+    if (resolvedId == null || resolvedId.isEmpty) return false;
 
-    if (_connectedDevices.containsKey(deviceId)) {
+    // Direct connection check
+    if (_connectedDevices.containsKey(resolvedId)) {
       return true;
     }
 
-    final meshDevice = _meshDeviceRegistry[deviceId];
-    if (meshDevice == null) return false;
+    // Mesh registry check
+    final meshDevice = _meshDeviceRegistry[resolvedId];
+    if (meshDevice == null) {
+      return false;
+    }
 
-    final lastSeen = _meshDeviceLastSeen[deviceId];
+    final lastSeen = _meshDeviceLastSeen[resolvedId];
     if (lastSeen == null) return false;
 
     final freshnessWindow = maxAge ?? Duration(minutes: 5);
     final isFresh = DateTime.now().difference(lastSeen) <= freshnessWindow;
+
+    if (isFresh) {
+      final hopCount = _meshDeviceHopCount[resolvedId] ?? 99;
+      debugPrint(
+        '✅ Device $resolvedId is reachable (hops: $hopCount, last seen: ${DateTime.now().difference(lastSeen).inSeconds}s ago)',
+      );
+    }
+
     return isFresh;
   }
 
@@ -492,7 +644,9 @@ abstract class P2PBaseService with ChangeNotifier {
 
       _meshDeviceRegistry[deviceId] = deviceModel;
       _meshDeviceLastSeen[deviceId] = now;
-      _meshDeviceHopCount[deviceId] = 0;
+      _meshDeviceHopCount[deviceId] = isHostDevice
+          ? 0
+          : 1; // Host is direct, others are 1 hop away
     }
 
     notifyListeners();

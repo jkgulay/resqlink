@@ -43,6 +43,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   List<MessageModel> _messages = [];
   bool _isLoading = true;
   bool _isConnected = false;
+  bool _isMeshReachable = false;
   Timer? _refreshTimer;
   Timer? _typingTimer;
   bool _isTyping = false;
@@ -52,6 +53,16 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   bool _isP2PListenerAttached = false;
 
   LocationModel? get _currentLocation => _locationStateService.currentLocation;
+
+  bool get _hasMeshRelay => !_isConnected && _isMeshReachable;
+
+  bool get _canSendMessages => _isConnected || _isMeshReachable;
+
+  String get _connectionStatusLabel => _isConnected
+      ? 'Direct link'
+      : _hasMeshRelay
+      ? 'Relay via mesh'
+      : _chatSession?.lastSeenText ?? 'Offline';
 
   @override
   void initState() {
@@ -148,6 +159,28 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     return trimmed.isEmpty ? null : trimmed;
   }
 
+  String? _resolveCanonicalDeviceId(String? value) {
+    final trimmed = _safeTrim(value);
+    if (trimmed == null) return null;
+    return widget.p2pService.resolveDeviceIdentifier(trimmed) ?? trimmed;
+  }
+
+  void _refreshConnectivityState() {
+    if (!mounted) return;
+    final deviceId = _effectiveDeviceId;
+    if (deviceId == null) return;
+
+    final direct = widget.p2pService.isDeviceDirectlyConnected(deviceId);
+    final reachable = widget.p2pService.isDeviceReachable(deviceId);
+
+    if (_isConnected != direct || _isMeshReachable != reachable) {
+      setState(() {
+        _isConnected = direct;
+        _isMeshReachable = reachable;
+      });
+    }
+  }
+
   String? _deriveDeviceIdFromSession(ChatSession session) {
     const prefix = 'chat_';
     if (session.id.startsWith(prefix) && session.id.length > prefix.length) {
@@ -175,31 +208,24 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   }
 
   String? get _effectiveDeviceId {
-    final direct = _safeTrim(_sessionDeviceId);
-    if (direct != null) {
-      return direct;
-    }
+    final candidates = <String?>[
+      _sessionDeviceId,
+      if (_chatSession != null) _lookupSessionDeviceId(_chatSession!),
+      widget.deviceId,
+    ];
 
-    if (_chatSession != null) {
-      final sessionId = _lookupSessionDeviceId(_chatSession!);
-      if (sessionId != null) {
-        return sessionId;
+    for (final candidate in candidates) {
+      final resolved = _resolveCanonicalDeviceId(candidate);
+      if (resolved != null) {
+        return resolved;
       }
     }
-
-    return _safeTrim(widget.deviceId);
+    return null;
   }
 
   void _handleP2PStateChanged() {
     if (!mounted) return;
-    final deviceId = _effectiveDeviceId;
-    if (deviceId == null) return;
-    final reachable = widget.p2pService.isDeviceReachable(deviceId);
-    if (_isConnected != reachable) {
-      setState(() {
-        _isConnected = reachable;
-      });
-    }
+    _refreshConnectivityState();
   }
 
   void _startPeriodicRefresh() {
@@ -222,25 +248,41 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       final resolvedDeviceId = session != null
           ? _lookupSessionDeviceId(session)
           : _effectiveDeviceId;
+      final canonicalDeviceId = _resolveCanonicalDeviceId(
+        resolvedDeviceId ?? widget.deviceId,
+      );
       final reachable =
-          resolvedDeviceId != null &&
-          widget.p2pService.isDeviceReachable(resolvedDeviceId);
+          canonicalDeviceId != null &&
+          widget.p2pService.isDeviceReachable(canonicalDeviceId);
+      final directConnected =
+          canonicalDeviceId != null &&
+          widget.p2pService.isDeviceDirectlyConnected(canonicalDeviceId);
+
+      if (session != null &&
+          canonicalDeviceId != null &&
+          session.metadata?['deviceId'] != canonicalDeviceId) {
+        await ChatRepository.updateMetadata(
+          sessionId: widget.sessionId,
+          values: {'deviceId': canonicalDeviceId},
+        );
+      }
 
       if (mounted) {
         setState(() {
           _chatSession = session;
           _messages = messages;
           _isLoading = false;
-          _isConnected = reachable;
+          _isConnected = directConnected;
+          _isMeshReachable = reachable;
           _sessionDeviceId =
-              _safeTrim(resolvedDeviceId) ??
+              canonicalDeviceId ??
               _sessionDeviceId ??
-              _safeTrim(widget.deviceId);
+              _resolveCanonicalDeviceId(widget.deviceId);
         });
 
         _setupMessageRouterListener();
 
-        _handleP2PStateChanged();
+        _refreshConnectivityState();
         // Update queued message count
         _updateQueuedMessageCount();
         _scrollToBottom();
@@ -260,6 +302,20 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   /// Handle messages from MessageRouter (real-time)
   void _onRouterMessage(MessageModel message) async {
     if (!mounted) return;
+    final sessionDeviceId = _effectiveDeviceId;
+    if (sessionDeviceId == null) {
+      debugPrint(
+        '⚠️ ChatSessionPage missing effective device ID; skipping message',
+      );
+      return;
+    }
+
+    if (!_shouldAttachMessageToSession(message, sessionDeviceId)) {
+      debugPrint(
+        'ℹ️ Message ignored for session ${widget.sessionId} (not targeted)',
+      );
+      return;
+    }
 
     // Format debug log based on message type
     String logMessage;
@@ -274,11 +330,34 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     }
     debugPrint(logMessage);
 
-    // Update message with chat session ID if not set
+    // Update message with chat session ID or corrected endpoint for broadcast copies
     MessageModel messageToAdd = message;
-    if (message.chatSessionId == null) {
-      messageToAdd = message.copyWith(chatSessionId: widget.sessionId);
+    final needsSessionBinding = message.chatSessionId != widget.sessionId;
+    final needsEndpointCorrection =
+        message.endpointId == 'broadcast' || message.endpointId == 'unknown';
+
+    if (needsSessionBinding || needsEndpointCorrection) {
+      final updatedEndpoint = needsEndpointCorrection
+          ? sessionDeviceId
+          : message.endpointId;
+
+      messageToAdd = message.copyWith(
+        chatSessionId: widget.sessionId,
+        endpointId: updatedEndpoint,
+      );
       await MessageRepository.insert(messageToAdd);
+
+      try {
+        await ChatRepository.updateConnection(
+          sessionId: widget.sessionId,
+          connectionType: ConnectionType.wifiDirect,
+          connectionTime: DateTime.now(),
+        );
+      } catch (e) {
+        debugPrint(
+          '⚠️ Failed to update connection metadata for ${widget.sessionId}: $e',
+        );
+      }
     }
 
     // Check if message is not already in our current messages list (avoid duplicates)
@@ -305,8 +384,38 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     // Mark messages as read
     await _markMessagesAsRead();
 
+    // Refresh connectivity state after receiving message
+    _refreshConnectivityState();
+
     // Update queued message count
     _updateQueuedMessageCount();
+  }
+
+  bool _shouldAttachMessageToSession(
+    MessageModel message,
+    String sessionDeviceId,
+  ) {
+    final isBroadcastMessage = _isBroadcastMessage(message);
+
+    if (isBroadcastMessage) {
+      // Sender should see their own broadcasts in every open chat, receivers only if target matches
+      if (message.isMe) {
+        return true;
+      }
+      return message.endpointId == sessionDeviceId ||
+          message.targetDeviceId == sessionDeviceId ||
+          message.deviceId == sessionDeviceId;
+    }
+
+    return message.endpointId == sessionDeviceId ||
+        message.targetDeviceId == sessionDeviceId ||
+        message.deviceId == sessionDeviceId;
+  }
+
+  bool _isBroadcastMessage(MessageModel message) {
+    return message.endpointId == 'broadcast' ||
+        message.targetDeviceId == 'broadcast' ||
+        message.endpointId == 'unknown';
   }
 
   /// Update queued message count for this device - DISABLED
@@ -385,12 +494,13 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       if (!isReachable) {
         await MessageRepository.updateStatus(messageId, MessageStatus.failed);
         _updateLocalMessageStatus(messageId, MessageStatus.failed);
-        if (_isConnected) {
+        if (mounted) {
           setState(() {
             _isConnected = false;
+            _isMeshReachable = false;
           });
         }
-        _showSnackBar('Device offline - message failed', isError: true);
+        _showSnackBar('Device unreachable - message failed', isError: true);
         return;
       }
 
@@ -404,11 +514,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
         await MessageRepository.updateStatus(messageId, MessageStatus.sent);
         _updateLocalMessageStatus(messageId, MessageStatus.sent);
-        if (!_isConnected) {
-          setState(() {
-            _isConnected = true;
-          });
-        }
+        _refreshConnectivityState();
       } catch (e) {
         debugPrint('❌ Error sending P2P message: $e');
         await MessageRepository.updateStatus(messageId, MessageStatus.failed);
@@ -520,8 +626,9 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       _scrollToBottom();
       _messageController.clear();
 
-      // Send via P2P if connected
-      if (_isConnected) {
+      final isReachable = widget.p2pService.isDeviceReachable(targetDeviceId);
+
+      if (isReachable) {
         try {
           await widget.p2pService.sendMessage(
             id: messageId,
@@ -544,6 +651,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             }
           });
 
+          _refreshConnectivityState();
           _showSnackBar('Location shared successfully', isError: false);
         } catch (e) {
           debugPrint('❌ Error sending P2P message: $e');
@@ -552,6 +660,12 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         }
       } else {
         _showSnackBar('Location queued (device offline)', isError: false);
+        if (mounted) {
+          setState(() {
+            _isConnected = false;
+            _isMeshReachable = false;
+          });
+        }
       }
     } catch (e) {
       debugPrint('❌ Error sending location: $e');
@@ -602,6 +716,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           );
           await _loadChatData();
           _showSnackBar('Reconnected successfully!', isError: false);
+          _refreshConnectivityState();
         } else {
           _showSnackBar('Failed to reconnect. Try creating a new connection.');
         }
@@ -699,6 +814,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   AppBar _buildAppBar() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isNarrow = screenWidth < 400;
+    final statusText = _connectionStatusLabel;
 
     return AppBar(
       elevation: 8,
@@ -747,6 +863,13 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                         ResQLinkTheme.safeGreen.withValues(alpha: 0.7),
                       ],
                     )
+                  : _hasMeshRelay
+                  ? LinearGradient(
+                      colors: [
+                        ResQLinkTheme.warningYellow,
+                        ResQLinkTheme.warningYellow.withValues(alpha: 0.7),
+                      ],
+                    )
                   : LinearGradient(
                       colors: [Colors.grey.shade700, Colors.grey.shade800],
                     ),
@@ -754,6 +877,8 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                 BoxShadow(
                   color: _isConnected
                       ? ResQLinkTheme.safeGreen.withValues(alpha: 0.4)
+                      : _hasMeshRelay
+                      ? ResQLinkTheme.warningYellow.withValues(alpha: 0.4)
                       : Colors.black.withValues(alpha: 0.3),
                   blurRadius: 6,
                 ),
@@ -799,14 +924,18 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                       decoration: BoxDecoration(
                         color: _isConnected
                             ? ResQLinkTheme.safeGreen
+                            : _hasMeshRelay
+                            ? ResQLinkTheme.warningYellow
                             : Colors.grey,
                         shape: BoxShape.circle,
-                        boxShadow: _isConnected
+                        boxShadow: (_isConnected || _hasMeshRelay)
                             ? [
                                 BoxShadow(
-                                  color: ResQLinkTheme.safeGreen.withValues(
-                                    alpha: 0.6,
-                                  ),
+                                  color:
+                                      (_isConnected
+                                              ? ResQLinkTheme.safeGreen
+                                              : ResQLinkTheme.warningYellow)
+                                          .withValues(alpha: 0.6),
                                   blurRadius: 4,
                                   spreadRadius: 1,
                                 ),
@@ -817,12 +946,12 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                     SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        _isConnected
-                            ? 'Online'
-                            : _chatSession?.lastSeenText ?? 'Offline',
+                        statusText,
                         style: GoogleFonts.poppins(
                           color: _isConnected
                               ? ResQLinkTheme.safeGreen
+                              : _hasMeshRelay
+                              ? ResQLinkTheme.warningYellow
                               : Colors.white60,
                           fontSize: 10,
                           fontWeight: FontWeight.w400,
@@ -864,7 +993,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         ],
       ),
       actions: [
-        if (!_isConnected)
+        if (!_isConnected && !_isMeshReachable)
           Container(
             margin: EdgeInsets.only(right: 4),
             decoration: BoxDecoration(
@@ -959,7 +1088,10 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
     return Column(
       children: [
-        if (!_isConnected || _queuedMessageCount > 0) _buildOfflineBanner(),
+        if ((!_isConnected && !_isMeshReachable) ||
+            _hasMeshRelay ||
+            _queuedMessageCount > 0)
+          _buildOfflineBanner(),
         Expanded(
           child: ChatView(
             messages: _messages,
@@ -971,21 +1103,31 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           onSendMessage: _sendMessage,
           onSendLocation: _sendLocationMessage,
           onTyping: _handleTyping,
-          enabled: _isConnected,
+          enabled: _canSendMessages,
         ),
       ],
     );
   }
 
   Widget _buildOfflineBanner() {
-    final isOffline = !_isConnected;
+    final isOffline = !_isConnected && !_isMeshReachable;
     final hasQueuedMessages = _queuedMessageCount > 0;
+    final hasRelay = _hasMeshRelay;
 
     String bannerText;
     IconData bannerIcon;
     Color bannerColor;
 
-    if (isOffline && hasQueuedMessages) {
+    if (hasRelay && hasQueuedMessages) {
+      bannerText =
+          'Mesh relay active - $_queuedMessageCount messages queued for transfer';
+      bannerIcon = Icons.device_hub;
+      bannerColor = ResQLinkTheme.warningYellow;
+    } else if (hasRelay) {
+      bannerText = 'Mesh relay active - delivery may be slower';
+      bannerIcon = Icons.device_hub;
+      bannerColor = ResQLinkTheme.warningYellow;
+    } else if (isOffline && hasQueuedMessages) {
       bannerText = 'Device offline - $_queuedMessageCount messages queued';
       bannerIcon = Icons.wifi_off;
       bannerColor = ResQLinkTheme.primaryRed;
@@ -1080,7 +1222,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
               'Device ID',
               _effectiveDeviceId ?? _chatSession!.deviceId,
             ),
-            _buildInfoRow('Status', _isConnected ? 'Connected' : 'Offline'),
+            _buildInfoRow('Status', _connectionStatusLabel),
             if (_chatSession!.lastConnectionType != null)
               _buildInfoRow(
                 'Last Connection',
