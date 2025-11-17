@@ -31,6 +31,8 @@ class SocketProtocol {
   // Callbacks
   Function(String deviceId, String userName)? onDeviceConnected;
   Function(String deviceId, int sequence)? onPongReceived;
+  Function(List<dynamic> devices)? onGroupStateReceived;
+  Function(String deviceId)? onDeviceSocketDisconnected;
 
   /// Initialize socket protocol with UUID
   void initialize(String deviceId, String userName) {
@@ -299,11 +301,23 @@ class SocketProtocol {
           _handlePong(data, socket);
         case 'ack':
           _handleAcknowledgment(data);
+        case 'group_state':
+          _handleGroupState(data);
         default:
           debugPrint('⚠️ Unknown message type: $type');
       }
     } catch (e) {
       debugPrint('❌ Error processing message: $e');
+    }
+  }
+
+  void _handleGroupState(Map<String, dynamic> data) {
+    final devices = data['devices'];
+    if (devices is List) {
+      debugPrint('👥 Received group roster with ${devices.length} device(s)');
+      onGroupStateReceived?.call(devices);
+    } else {
+      debugPrint('⚠️ group_state payload missing devices list');
     }
   }
 
@@ -381,8 +395,59 @@ class SocketProtocol {
       }
     });
 
-    // Route message
-    _messageRouter.routeRawMessage(jsonEncode(data), fromDevice);
+    // Check if this is a targeted message that needs relaying (Group Owner only)
+    final targetDeviceId = data['targetDeviceId'] as String?;
+    final isBroadcast = targetDeviceId == null || targetDeviceId == 'broadcast';
+
+    if (_serverSocket != null) {
+      // We are the group owner
+
+      if (isBroadcast) {
+        // BROADCAST: Forward to all clients except sender
+        debugPrint(
+          '📢 [Group Owner] Broadcasting message from $fromDevice to all clients',
+        );
+        for (final entry in _deviceSockets.entries) {
+          final clientId = entry.key;
+          final clientSocket = entry.value;
+
+          // Don't send back to sender
+          if (clientId != fromDevice) {
+            _sendToSocket(clientSocket, jsonEncode(data));
+          }
+        }
+
+        // Route to our own message router for local processing
+        _messageRouter.routeRawMessage(jsonEncode(data), fromDevice);
+      } else if (targetDeviceId == _deviceId) {
+        // Message is specifically for us (group owner)
+        debugPrint('📨 [Group Owner] Message is for us');
+        _messageRouter.routeRawMessage(jsonEncode(data), fromDevice);
+      } else if (_deviceSockets.containsKey(targetDeviceId)) {
+        // RELAY: Forward to specific client
+        debugPrint(
+          '🔀 [Group Owner] Relaying message from $fromDevice to $targetDeviceId',
+        );
+        final targetSocket = _deviceSockets[targetDeviceId]!;
+        _sendToSocket(targetSocket, jsonEncode(data));
+
+        // DO NOT route to our own message router - this is not our conversation
+        debugPrint(
+          '⏭️ [Group Owner] Skipping local save - message is between $fromDevice and $targetDeviceId',
+        );
+      } else {
+        debugPrint(
+          '⚠️ [Group Owner] Target device not connected: $targetDeviceId',
+        );
+        // Only route if it's for us, otherwise just log the error
+        if (targetDeviceId == _deviceId) {
+          _messageRouter.routeRawMessage(jsonEncode(data), fromDevice);
+        }
+      }
+    } else {
+      // We're a client - just route normally
+      _messageRouter.routeRawMessage(jsonEncode(data), fromDevice);
+    }
 
     // Send acknowledgment
     final messageId = data['messageId'] as String?;
@@ -470,13 +535,32 @@ class SocketProtocol {
       debugPrint('📤 Attempting to send message:');
       debugPrint('  Target: $targetDeviceId');
       debugPrint('  Connected devices: ${_deviceSockets.keys.toList()}');
+      debugPrint('  Role: ${_serverSocket != null ? "Group Owner" : "Client"}');
 
       // If target specified, send to specific device
-      if (targetDeviceId != null &&
-          _deviceSockets.containsKey(targetDeviceId)) {
-        debugPrint('✅ Sending to specific device: $targetDeviceId');
-        final socket = _deviceSockets[targetDeviceId]!;
-        return _sendToSocket(socket, message);
+      if (targetDeviceId != null) {
+        // GROUP OWNER: Direct send to target device
+        if (_deviceSockets.containsKey(targetDeviceId)) {
+          debugPrint(
+            '✅ [Group Owner] Sending directly to device: $targetDeviceId',
+          );
+          final socket = _deviceSockets[targetDeviceId]!;
+          return _sendToSocket(socket, message);
+        }
+
+        // CLIENT: Relay through group owner to reach other clients
+        if (_clientSocket != null) {
+          debugPrint(
+            '🔀 [Client] Relaying message through group owner to: $targetDeviceId',
+          );
+          // Message already contains targetDeviceId in JSON, group owner will route it
+          return _sendToSocket(_clientSocket!, message);
+        }
+
+        debugPrint(
+          '❌ Target device not found and no relay available: $targetDeviceId',
+        );
+        return false;
       }
 
       // Otherwise broadcast to all
@@ -533,7 +617,19 @@ class SocketProtocol {
     _clientSubscriptions.remove(client);
 
     // Remove from device sockets
-    _deviceSockets.removeWhere((_, socket) => socket == client);
+    String? disconnectedDeviceId;
+    _deviceSockets.removeWhere((deviceId, socket) {
+      final match = socket == client;
+      if (match) {
+        disconnectedDeviceId = deviceId;
+      }
+      return match;
+    });
+
+    if (disconnectedDeviceId != null) {
+      debugPrint('🔌 Device socket disconnected: $disconnectedDeviceId');
+      onDeviceSocketDisconnected?.call(disconnectedDeviceId!);
+    }
 
     // Clean up message buffer for this client
     _messageBuffers.remove(client);
@@ -600,6 +696,8 @@ class SocketProtocol {
   /// Get connection status
   bool get isConnected => _isRunning || _clientSocket != null;
 
+  bool get isServer => _serverSocket != null;
+
   /// Get connected device count
   int get connectedDeviceCount => _deviceSockets.length;
 
@@ -624,5 +722,13 @@ class SocketProtocol {
   /// Check if device is connected via WiFi Direct
   bool isWiFiDirectDevice(String deviceId) {
     return _wifiDirectDevices.containsKey(deviceId);
+  }
+
+  Future<void> broadcastSystemMessage(Map<String, dynamic> payload) async {
+    if (!isServer) return;
+    final message = jsonEncode(payload);
+    for (final client in _connectedClients) {
+      _sendToSocket(client, message);
+    }
   }
 }

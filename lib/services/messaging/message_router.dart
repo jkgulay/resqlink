@@ -9,6 +9,7 @@ import '../chat/session_deduplication_service.dart';
 import '../../utils/session_consistency_checker.dart';
 import '../p2p/managers/identifier_resolver.dart';
 import '../../widgets/message/notification_service.dart';
+import '../p2p/p2p_base_service.dart';
 
 class MessageRouter {
   static final MessageRouter _instance = MessageRouter._internal();
@@ -35,10 +36,19 @@ class MessageRouter {
   // Identifier resolver for display name to UUID mapping
   IdentifierResolver? _identifierResolver;
 
+  // P2P service reference for mesh registry updates
+  P2PBaseService? _p2pService;
+
   /// Set the identifier resolver (should be called by P2PMainService)
   void setIdentifierResolver(IdentifierResolver resolver) {
     _identifierResolver = resolver;
     debugPrint('✅ IdentifierResolver registered with MessageRouter');
+  }
+
+  /// Set P2P service reference for mesh updates
+  void setP2PService(P2PBaseService service) {
+    _p2pService = service;
+    debugPrint('✅ P2PBaseService registered with MessageRouter');
   }
 
   void registerDeviceConnection(String deviceId, String socketId) {
@@ -111,6 +121,11 @@ class MessageRouter {
       // Messages will be displayed in the correct chat session automatically
       await MessageRepository.insertMessage(message);
       debugPrint('✅ Message stored in database');
+
+      // Update mesh device registry with devices from route path
+      if (_p2pService != null) {
+        _p2pService!.updateMeshDeviceRegistry(message);
+      }
 
       // CRITICAL FIX: Update lastConnectionAt to keep session showing as "online"
       // This prevents the "disconnected" status when messages are actively being exchanged
@@ -293,10 +308,17 @@ class MessageRouter {
         return;
       }
 
-      // Get sender device ID from multiple sources
-      // PRIORITY: fromDevice (already resolved by socket protocol) > message payload
-      String? senderDeviceId =
-          fromDevice ?? data['deviceId'] ?? data['senderDeviceId'];
+      // Get sender device ID from payload first (per- message origin)
+      String? senderDeviceId = data['deviceId'] ?? data['senderDeviceId'];
+
+      // Fallback to socket identifier only if payload is missing sender info
+      if ((senderDeviceId == null || senderDeviceId.isEmpty) &&
+          fromDevice != null &&
+          fromDevice.isNotEmpty) {
+        senderDeviceId = fromDevice;
+      }
+
+      final myDeviceId = _p2pService?.deviceId;
 
       // Validate sender has some identifier
       if (senderDeviceId == null || senderDeviceId.isEmpty) {
@@ -355,17 +377,45 @@ class MessageRouter {
         );
       }
 
+      // Determine whether this payload originated from the current device
+      final isMessageFromCurrentDevice =
+          myDeviceId != null && senderDeviceId == myDeviceId;
+
+      // CRITICAL: Determine the correct endpointId for chat session routing
+      // endpointId represents "the other participant" in the conversation
+      String chatPartnerId;
+
+      if (isMessageFromCurrentDevice) {
+        // Relayed copy of our own message (e.g., owner echo)
+        if (targetDeviceId == null ||
+            targetDeviceId == 'broadcast' ||
+            targetDeviceId == 'unknown') {
+          chatPartnerId = 'broadcast';
+        } else {
+          chatPartnerId = targetDeviceId;
+        }
+        debugPrint(
+          '🔄 Relayed sent message - chat partner: $chatPartnerId (target)',
+        );
+      } else {
+        // Incoming message from another device
+        chatPartnerId = senderDeviceId;
+        debugPrint(
+          '📨 Incoming message - chat partner: $chatPartnerId (sender)',
+        );
+      }
+
       final messageModel = MessageModel(
         messageId:
             data['messageId'] ?? MessageModel.generateMessageId(senderDeviceId),
 
-        // ARCHITECTURE: endpointId = UUID (routing), fromUser = display name (UI)
-        endpointId: senderDeviceId, // Sender's UUID (routing identifier)
+        // ARCHITECTURE: endpointId = chat partner UUID (routing), fromUser = display name (UI)
+        endpointId: chatPartnerId, // The OTHER participant in this conversation
         fromUser: senderName, // Sender's display name (UI only)
-        deviceId: senderDeviceId, // Same as endpointId (legacy)
+        deviceId: senderDeviceId, // Original sender UUID (legacy)
         targetDeviceId: targetDeviceId, // Recipient UUID or 'broadcast'
         message: data['message'] ?? '',
-        isMe: false, // This is an incoming message
+        isMe: isMessageFromCurrentDevice,
         isEmergency: data['isEmergency'] ?? false,
         timestamp: DateTime.now().millisecondsSinceEpoch,
         messageType: MessageType.values.firstWhere(
@@ -382,6 +432,7 @@ class MessageRouter {
       debugPrint('📨 Created message model:');
       debugPrint('  Sender: $senderName ($senderDeviceId)');
       debugPrint('  Target: $targetDeviceId');
+      debugPrint('  Chat Partner (endpointId): $chatPartnerId');
       debugPrint('  Message: ${messageModel.message}');
 
       await routeMessage(messageModel);

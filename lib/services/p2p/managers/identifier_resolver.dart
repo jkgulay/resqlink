@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'mac_address_manager.dart';
-
 
 class IdentifierResolver {
   // Singleton
@@ -8,51 +6,52 @@ class IdentifierResolver {
   factory IdentifierResolver() => _instance;
   IdentifierResolver._internal();
 
-  // Store device registry: MAC -> Display Name mapping
-  final Map<String, String> _macToDisplayName = {};
-  final Map<String, String> _displayNameToMac = {};
+  // Store device registry: UUID -> Display Name mapping
+  final Map<String, String> _deviceIdToDisplayName = {};
+  final Map<String, String> _displayNameToDeviceId = {};
 
-  /// Register a device with its MAC address and display name
-  void registerDevice(String macAddress, String displayName) {
-    if (!MacAddressManager.isValidMac(macAddress)) {
-      debugPrint('⚠️ Cannot register device with invalid MAC: $macAddress');
+  /// Register a device with its UUID and display name
+  void registerDevice(String deviceId, String displayName) {
+    if (deviceId.isEmpty) {
+      debugPrint('⚠️ Cannot register device with empty UUID');
       return;
     }
 
-    _macToDisplayName[macAddress] = displayName;
-    _displayNameToMac[displayName] = macAddress;
+    _deviceIdToDisplayName[deviceId] = displayName;
+    _displayNameToDeviceId[displayName] = deviceId;
 
-    debugPrint('✅ Registered device: $displayName -> $macAddress');
+    debugPrint('✅ Registered device: $displayName -> $deviceId');
   }
 
-  /// Get display name for a MAC address
-  String? getDisplayName(String macAddress) {
-    return _macToDisplayName[macAddress];
+  /// Get display name for a UUID
+  String? getDisplayName(String deviceId) {
+    return _deviceIdToDisplayName[deviceId];
   }
 
-  /// Get MAC address for a display name
-  String? getMacAddress(String displayName) {
-    return _displayNameToMac[displayName];
+  /// Get device ID for a display name
+  String? getDeviceId(String displayName) {
+    return _displayNameToDeviceId[displayName];
   }
 
-  /// Resolve any identifier to a valid MAC address
-  /// Priority: Direct MAC > Display Name lookup > Reject
-  String? resolveToMac(String? identifier) {
+  /// Resolve any identifier to a valid UUID
+  /// Priority: Direct UUID > Display name lookup > Reject
+  String? resolveToDeviceId(String? identifier) {
     if (identifier == null || identifier.isEmpty) {
       debugPrint('⚠️ Cannot resolve null/empty identifier');
       return null;
     }
 
-    // Check if already a valid MAC
-    if (MacAddressManager.isValidMac(identifier)) {
+    // If it's already a known UUID, return it immediately
+    if (_deviceIdToDisplayName.containsKey(identifier) ||
+        _isLikelyUuid(identifier)) {
       return identifier;
     }
 
     // Try to resolve as display name
-    final mac = _displayNameToMac[identifier];
-    if (mac != null && MacAddressManager.isValidMac(mac)) {
-      debugPrint('✅ Resolved display name "$identifier" to MAC: $mac');
-      return mac;
+    final resolvedId = _displayNameToDeviceId[identifier];
+    if (resolvedId != null) {
+      debugPrint('✅ Resolved display name "$identifier" to UUID: $resolvedId');
+      return resolvedId;
     }
 
     // Check if it's an IP address that needs resolution
@@ -65,18 +64,14 @@ class IdentifierResolver {
     return null;
   }
 
-  /// Validate that an identifier is or can be resolved to a valid MAC
+  /// Validate that an identifier is or can be resolved to a valid UUID
   bool isValidIdentifier(String? identifier) {
-    return resolveToMac(identifier) != null;
+    return resolveToDeviceId(identifier) != null;
   }
 
-  /// Get display name or fallback to MAC if not registered
-  String getDisplayNameOrMac(String macAddress) {
-    if (!MacAddressManager.isValidMac(macAddress)) {
-      return macAddress; // Return as-is if invalid
-    }
-
-    return _macToDisplayName[macAddress] ?? macAddress;
+  /// Get display name or fallback to UUID if not registered
+  String getDisplayNameOrId(String deviceId) {
+    return _deviceIdToDisplayName[deviceId] ?? deviceId;
   }
 
   /// Check if string is an IP address
@@ -85,80 +80,87 @@ class IdentifierResolver {
     return ipPattern.hasMatch(value);
   }
 
+  bool _isLikelyUuid(String value) {
+    final uuidPattern = RegExp(r'^[0-9a-fA-F-]{16,}$');
+    return uuidPattern.hasMatch(value);
+  }
+
   /// Validate device identifier before any operation
-  /// Returns validated MAC address or null if invalid
+  /// Returns validated UUID or null if invalid
   String? validateDeviceIdentifier({
     required String? identifier,
     required String operation,
     String? context,
   }) {
     if (identifier == null || identifier.isEmpty) {
-      debugPrint('❌ $operation failed: identifier is null/empty ${context ?? ""}');
-      return null;
-    }
-
-    // Reject placeholder MACs
-    if (identifier == '02:00:00:00:00:00') {
-      debugPrint('❌ $operation blocked: placeholder MAC not allowed ${context ?? ""}');
+      debugPrint(
+        '❌ $operation failed: identifier is null/empty ${context ?? ""}',
+      );
       return null;
     }
 
     // Reject IP addresses
     if (_isIpAddress(identifier)) {
-      debugPrint('❌ $operation blocked: IP addresses not allowed as identifiers ${context ?? ""}');
-      debugPrint('   Use MAC address resolution before calling $operation');
+      debugPrint(
+        '❌ $operation blocked: IP addresses not allowed as identifiers ${context ?? ""}',
+      );
+      debugPrint('   Use UUID resolution before calling $operation');
       return null;
     }
 
-    // Try to resolve to MAC
-    final mac = resolveToMac(identifier);
-    if (mac == null) {
-      debugPrint('❌ $operation blocked: cannot resolve "$identifier" to valid MAC ${context ?? ""}');
+    // Try to resolve to UUID
+    final deviceId = resolveToDeviceId(identifier);
+    if (deviceId == null) {
+      debugPrint(
+        '❌ $operation blocked: cannot resolve "$identifier" to valid UUID ${context ?? ""}',
+      );
       return null;
     }
 
-    return mac;
+    return deviceId;
   }
 
   /// Clear all registered devices
   void clearRegistry() {
-    _macToDisplayName.clear();
-    _displayNameToMac.clear();
+    _deviceIdToDisplayName.clear();
+    _displayNameToDeviceId.clear();
     debugPrint('🧹 Cleared identifier registry');
   }
 
   /// Get registry statistics
   Map<String, dynamic> getStats() {
     return {
-      'registeredDevices': _macToDisplayName.length,
-      'macToName': Map.from(_macToDisplayName),
-      'nameToMac': Map.from(_displayNameToMac),
+      'registeredDevices': _deviceIdToDisplayName.length,
+      'deviceIdToName': Map.from(_deviceIdToDisplayName),
+      'nameToDeviceId': Map.from(_displayNameToDeviceId),
     };
   }
 
-  /// Update display name for existing MAC
-  void updateDisplayName(String macAddress, String newDisplayName) {
-    if (!MacAddressManager.isValidMac(macAddress)) {
-      debugPrint('⚠️ Cannot update display name for invalid MAC: $macAddress');
+  /// Update display name for existing UUID
+  void updateDisplayName(String deviceId, String newDisplayName) {
+    if (deviceId.isEmpty) {
+      debugPrint('⚠️ Cannot update display name for empty UUID');
       return;
     }
 
     // Remove old display name mapping if exists
-    final oldDisplayName = _macToDisplayName[macAddress];
+    final oldDisplayName = _deviceIdToDisplayName[deviceId];
     if (oldDisplayName != null) {
-      _displayNameToMac.remove(oldDisplayName);
+      _displayNameToDeviceId.remove(oldDisplayName);
     }
 
     // Register new display name
-    registerDevice(macAddress, newDisplayName);
-    debugPrint('🔄 Updated display name for $macAddress: $oldDisplayName -> $newDisplayName');
+    registerDevice(deviceId, newDisplayName);
+    debugPrint(
+      '🔄 Updated display name for $deviceId: $oldDisplayName -> $newDisplayName',
+    );
   }
 
   /// Bulk register devices from a map
-  void registerDevices(Map<String, String> macToNameMap) {
-    macToNameMap.forEach((mac, name) {
-      registerDevice(mac, name);
+  void registerDevices(Map<String, String> deviceIdToNameMap) {
+    deviceIdToNameMap.forEach((deviceId, name) {
+      registerDevice(deviceId, name);
     });
-    debugPrint('✅ Bulk registered ${macToNameMap.length} devices');
+    debugPrint('✅ Bulk registered ${deviceIdToNameMap.length} devices');
   }
 }

@@ -139,53 +139,58 @@ class DeviceList extends StatelessWidget {
     );
   }
 
-  /*Widget _buildEmptyState(BuildContext context) {
-    return _buildEmptyStateContent(context);
-  }*/
-
   Widget _buildEmptyStateContent(BuildContext context) {
-    return Container(
-      padding: ResponsiveSpacing.padding(context, horizontal: 32, vertical: 48),
-      child: Column(
-        children: [
-          Icon(
-            Icons.devices_outlined,
-            size: ResponsiveUtils.isMobile(context) ? 64 : 80,
-            color: ResQLinkTheme.offlineGray,
-          ),
-          SizedBox(height: ResponsiveSpacing.lg(context)),
-          ResponsiveTextWidget(
-            'No Devices Found',
-            styleBuilder: (context) =>
-                ResponsiveText.heading3(context).copyWith(
-                  color: ResQLinkTheme.offlineGray,
-                  fontWeight: FontWeight.bold,
-                ),
-            textAlign: TextAlign.center,
-          ),
-          SizedBox(height: ResponsiveSpacing.sm(context)),
-          ResponsiveTextWidget(
-            controller.isScanning
-                ? 'Searching for WiFi Direct groups...'
-                : 'Tap "Join WiFi Direct Group" to discover nearby groups',
-            styleBuilder: (context) => ResponsiveText.bodyMedium(
-              context,
-            ).copyWith(color: ResQLinkTheme.offlineGray.withValues(alpha: 0.8)),
-            textAlign: TextAlign.center,
-            maxLines: 3,
-          ),
-          if (controller.isScanning) ...[
-            SizedBox(height: ResponsiveSpacing.lg(context)),
-            SizedBox(
-              width: 32,
-              height: 32,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: ResQLinkTheme.primaryBlue,
-              ),
+    return Center(
+      child: Container(
+        padding: ResponsiveSpacing.padding(
+          context,
+          horizontal: 32,
+          vertical: 48,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.devices_outlined,
+              size: ResponsiveUtils.isMobile(context) ? 64 : 80,
+              color: ResQLinkTheme.offlineGray,
             ),
+            SizedBox(height: ResponsiveSpacing.lg(context)),
+            ResponsiveTextWidget(
+              'No Devices Found',
+              styleBuilder: (context) =>
+                  ResponsiveText.heading3(context).copyWith(
+                    color: ResQLinkTheme.offlineGray,
+                    fontWeight: FontWeight.bold,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: ResponsiveSpacing.sm(context)),
+            ResponsiveTextWidget(
+              controller.isScanning
+                  ? 'Searching for WiFi Direct groups...'
+                  : 'Tap "Join WiFi Direct Group" to discover nearby groups',
+              styleBuilder: (context) =>
+                  ResponsiveText.bodyMedium(context).copyWith(
+                    color: ResQLinkTheme.offlineGray.withValues(alpha: 0.8),
+                  ),
+              textAlign: TextAlign.center,
+              maxLines: 3,
+            ),
+            if (controller.isScanning) ...[
+              SizedBox(height: ResponsiveSpacing.lg(context)),
+              SizedBox(
+                width: 32,
+                height: 32,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: ResQLinkTheme.primaryBlue,
+                ),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

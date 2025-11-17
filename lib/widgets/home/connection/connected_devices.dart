@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/controllers/home_controller.dart';
+import 'package:resqlink/models/device_model.dart';
+import 'package:resqlink/services/p2p/p2p_base_service.dart';
 import 'package:resqlink/utils/responsive_helper.dart';
 
 class ConnectedDevices extends StatelessWidget {
@@ -79,8 +81,74 @@ class ConnectedDevices extends StatelessWidget {
     final badgeSize = ResponsiveHelper.getSubtitleSize(context, narrow: 10.0);
     final spacing = ResponsiveHelper.getContentSpacing(context);
 
+    final p2pService = controller.p2pService;
+    final isGroupOwner =
+        p2pService.currentRole == P2PRole.host ||
+        (p2pService.wifiDirectService?.isGroupOwner ?? false);
+    final myDeviceId = p2pService.deviceId;
+
+    final Map<String, DeviceModel> devicesMap = {};
+
+    void addDevice(DeviceModel device, {bool markAsHost = false}) {
+      final deviceKey = device.deviceId;
+      if (deviceKey.isEmpty || deviceKey == myDeviceId) {
+        return;
+      }
+
+      final existing = devicesMap[deviceKey];
+      final shouldOverrideExisting =
+          existing == null ||
+          (existing.discoveryMethod == 'mesh' &&
+              device.discoveryMethod != 'mesh');
+
+      if (shouldOverrideExisting) {
+        devicesMap[deviceKey] = markAsHost
+            ? device.copyWith(isHost: true)
+            : device;
+      } else if (markAsHost && !existing.isHost) {
+        devicesMap[deviceKey] = existing.copyWith(isHost: true);
+      }
+    }
+
+    final connectedDevices = p2pService.connectedDevices.values.toList();
+
+    if (isGroupOwner) {
+      for (final device in connectedDevices) {
+        addDevice(device.copyWith(isHost: false));
+      }
+    } else {
+      if (connectedDevices.isNotEmpty) {
+        // First direct connection is the group owner when we're a client
+        addDevice(
+          connectedDevices.first.copyWith(isHost: true),
+          markAsHost: true,
+        );
+        for (final device in connectedDevices.skip(1)) {
+          addDevice(device.copyWith(isHost: false));
+        }
+      }
+    }
+
+    // Include mesh-discovered devices so clients can see the full group
+    p2pService.meshDevices.values.forEach(addDevice);
+
+    final devicesToShow = devicesMap.values.toList()
+      ..sort(
+        (a, b) => a.userName.toLowerCase().compareTo(b.userName.toLowerCase()),
+      );
+
+    if (devicesToShow.isEmpty) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          'No connected devices yet',
+          style: TextStyle(color: Colors.white70, fontSize: deviceNameSize),
+        ),
+      );
+    }
+
     return Column(
-      children: controller.p2pService.connectedDevices.values
+      children: devicesToShow
           .map(
             (device) => Padding(
               padding: EdgeInsets.symmetric(vertical: spacing * 0.25),
@@ -93,19 +161,14 @@ class ConnectedDevices extends StatelessWidget {
                   ),
                   SizedBox(width: spacing),
                   Expanded(
-                    child: FutureBuilder<String>(
-                      future: _getDisplayName(device),
-                      builder: (context, snapshot) {
-                        return Text(
-                          snapshot.data ?? device.userName,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            fontSize: deviceNameSize,
-                            color: Colors.white,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        );
-                      },
+                    child: Text(
+                      device.userName,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        fontSize: deviceNameSize,
+                        color: Colors.white,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   Container(
@@ -156,13 +219,5 @@ class ConnectedDevices extends StatelessWidget {
           )
           .toList(),
     );
-  }
-
-  Future<String> _getDisplayName(
-    dynamic device, [
-    String? fallbackDeviceName,
-  ]) async {
-    // Return the device's name directly - this is for displaying OTHER connected devices
-    return fallbackDeviceName ?? device.userName;
   }
 }

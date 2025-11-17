@@ -33,6 +33,14 @@ abstract class P2PBaseService with ChangeNotifier {
   final List<MessageModel> _messageHistory = [];
   final Map<String, String> _macToUuidMapping = {}; // MAC -> UUID mapping
 
+  // Mesh network device registry - tracks ALL devices seen in the network
+  final Map<String, DeviceModel> _meshDeviceRegistry =
+      {}; // UUID -> DeviceModel
+  final Map<String, DateTime> _meshDeviceLastSeen =
+      {}; // UUID -> Last seen timestamp
+  final Map<String, int> _meshDeviceHopCount =
+      {}; // UUID -> Number of hops away
+
   // Timers
   Timer? _keepAliveTimer;
   Timer? _connectionWatchdog;
@@ -60,6 +68,37 @@ abstract class P2PBaseService with ChangeNotifier {
   List<DeviceModel> get discoveredResQLinkDevices =>
       List.from(_discoveredResQLinkDevices);
   List<MessageModel> get messageHistory => List.from(_messageHistory);
+
+  /// Get all devices known in the mesh network (including multi-hop)
+  Map<String, DeviceModel> get meshDevices => Map.from(_meshDeviceRegistry);
+
+  /// Get devices reachable via multi-hop (sorted by hop count)
+  List<Map<String, dynamic>> get reachableDevices {
+    final devices = <Map<String, dynamic>>[];
+    for (final entry in _meshDeviceRegistry.entries) {
+      final deviceId = entry.key;
+      final device = entry.value;
+      final hopCount = _meshDeviceHopCount[deviceId] ?? 99;
+      final lastSeen = _meshDeviceLastSeen[deviceId];
+      final isStale =
+          lastSeen != null && DateTime.now().difference(lastSeen).inMinutes > 5;
+
+      if (!isStale) {
+        devices.add({
+          'deviceId': deviceId,
+          'deviceName': device.userName,
+          'hopCount': hopCount,
+          'isDirect': hopCount == 0,
+          'isMultiHop': hopCount > 0,
+          'lastSeen': lastSeen?.millisecondsSinceEpoch ?? 0,
+        });
+      }
+    }
+
+    // Sort by hop count (direct connections first)
+    devices.sort((a, b) => a['hopCount'].compareTo(b['hopCount']));
+    return devices;
+  }
 
   /// Get UUID for a given MAC address
   String? getUuidForMac(String macAddress) => _macToUuidMapping[macAddress];
@@ -240,6 +279,98 @@ abstract class P2PBaseService with ChangeNotifier {
     return _processedMessageIds.contains(messageId);
   }
 
+  /// Update mesh device registry from received message
+  /// This tracks ALL devices we've seen in the network, not just direct neighbors
+  void updateMeshDeviceRegistry(MessageModel message) {
+    try {
+      final routePath = message.routePath ?? [];
+      final now = DateTime.now();
+
+      // Register the sender (direct neighbor, hop count = 0)
+      if (message.deviceId != null && message.deviceId!.isNotEmpty) {
+        final senderId = message.deviceId!;
+        final senderName = message.fromUser;
+
+        if (!_meshDeviceRegistry.containsKey(senderId)) {
+          _meshDeviceRegistry[senderId] = DeviceModel(
+            id: senderId,
+            deviceId: senderId,
+            userName: senderName,
+            isHost: false,
+            isOnline: true,
+            lastSeen: now,
+            createdAt: now,
+          );
+          debugPrint(
+            '🌐 Mesh registry: Added sender $senderName ($senderId) - DIRECT',
+          );
+        }
+        _meshDeviceLastSeen[senderId] = now;
+        _meshDeviceHopCount[senderId] = 0; // Direct connection
+      }
+
+      // Register all devices in the route path (multi-hop)
+      for (int i = 0; i < routePath.length; i++) {
+        final deviceId = routePath[i];
+        if (deviceId.isEmpty || deviceId == _deviceId) continue;
+
+        final hopCount = routePath.length - i; // Distance from current device
+
+        if (!_meshDeviceRegistry.containsKey(deviceId)) {
+          // New device discovered via multi-hop
+          _meshDeviceRegistry[deviceId] = DeviceModel(
+            id: deviceId,
+            deviceId: deviceId,
+            userName: 'Device ${deviceId.substring(0, 8)}', // Placeholder name
+            isHost: false,
+            isOnline: true,
+            lastSeen: now,
+            createdAt: now,
+          );
+          debugPrint(
+            '🌐 Mesh registry: Added device $deviceId via multi-hop (${hopCount} hops)',
+          );
+        } else {
+          // Update existing device's last seen
+          _meshDeviceLastSeen[deviceId] = now;
+
+          // Update hop count if this path is shorter
+          final currentHops = _meshDeviceHopCount[deviceId] ?? 99;
+          if (hopCount < currentHops) {
+            _meshDeviceHopCount[deviceId] = hopCount;
+            debugPrint(
+              '🌐 Mesh registry: Updated $deviceId hop count: $currentHops → $hopCount',
+            );
+          }
+        }
+
+        _meshDeviceLastSeen[deviceId] = now;
+        if (!_meshDeviceHopCount.containsKey(deviceId) ||
+            hopCount < _meshDeviceHopCount[deviceId]!) {
+          _meshDeviceHopCount[deviceId] = hopCount;
+        }
+      }
+
+      // Cleanup stale devices (not seen in 10 minutes)
+      final staleThreshold = now.subtract(Duration(minutes: 10));
+      final staleDevices = <String>[];
+      _meshDeviceLastSeen.forEach((deviceId, lastSeen) {
+        if (lastSeen.isBefore(staleThreshold)) {
+          staleDevices.add(deviceId);
+        }
+      });
+
+      for (final deviceId in staleDevices) {
+        _meshDeviceRegistry.remove(deviceId);
+        _meshDeviceLastSeen.remove(deviceId);
+        _meshDeviceHopCount.remove(deviceId);
+        debugPrint('🧹 Mesh registry: Removed stale device $deviceId');
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating mesh device registry: $e');
+    }
+  }
+
   /// Add connected device with deduplication
   void addConnectedDevice(
     String deviceId,
@@ -313,6 +444,38 @@ abstract class P2PBaseService with ChangeNotifier {
       notifyListeners();
       debugPrint('❌ Device disconnected: ${device.userName} ($deviceId)');
     }
+  }
+
+  /// Apply group roster broadcast from host
+  void applyGroupRoster(List<dynamic> roster) {
+    final now = DateTime.now();
+    for (final entry in roster) {
+      if (entry is! Map) continue;
+      final deviceId = entry['deviceId']?.toString() ?? '';
+      if (deviceId.isEmpty || deviceId == _deviceId) continue;
+
+      final userName = entry['userName']?.toString() ?? 'Unknown Device';
+      final isHostDevice = entry['isHost'] == true;
+
+      final deviceModel = DeviceModel(
+        id: deviceId,
+        deviceId: deviceId,
+        userName: userName,
+        isHost: isHostDevice,
+        isOnline: true,
+        lastSeen: now,
+        createdAt: now,
+        discoveryMethod: 'group_roster',
+        isConnected: true,
+      );
+
+      _meshDeviceRegistry[deviceId] = deviceModel;
+      _meshDeviceLastSeen[deviceId] = now;
+      _meshDeviceHopCount[deviceId] = 0;
+    }
+
+    notifyListeners();
+    debugPrint('👥 Applied group roster with ${roster.length} entries');
   }
 
   /// Update connection status
