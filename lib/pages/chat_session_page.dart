@@ -44,6 +44,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   bool _isLoading = true;
   bool _isConnected = false;
   bool _isMeshReachable = false;
+  int _meshHopCount = 0; // Hop count for mesh relay
   Timer? _refreshTimer;
   Timer? _typingTimer;
   bool _isTyping = false;
@@ -61,7 +62,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   String get _connectionStatusLabel => _isConnected
       ? 'Direct link'
       : _hasMeshRelay
-      ? 'Relay via mesh'
+      ? 'Relay via mesh ($_meshHopCount ${_meshHopCount == 1 ? 'hop' : 'hops'})'
       : _chatSession?.lastSeenText ?? 'Offline';
 
   @override
@@ -71,6 +72,14 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     widget.p2pService.addListener(_handleP2PStateChanged);
     _isP2PListenerAttached = true;
     _sessionDeviceId = _safeTrim(widget.deviceId);
+
+    // Immediate connectivity check
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _refreshConnectivityState();
+      }
+    });
+
     _initialize();
   }
 
@@ -115,6 +124,31 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     _setupMessageRouterListener();
     _markMessagesAsRead();
     _startPeriodicRefresh();
+    _startMeshMonitoring();
+  }
+
+  void _startMeshMonitoring() {
+    // Monitor mesh registry every 2 seconds for real-time updates
+    Timer.periodic(Duration(seconds: 2), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      final deviceId = _effectiveDeviceId;
+      if (deviceId == null) return;
+
+      // Check if device is in mesh registry
+      final inMesh = widget.p2pService.meshDevices.containsKey(deviceId);
+
+      // If device appeared in mesh and we thought it was offline, update immediately
+      if (inMesh && !_isMeshReachable) {
+        debugPrint(
+          '🔔 MESH CONNECTIVITY DETECTED! Device $deviceId now reachable via mesh',
+        );
+        _refreshConnectivityState();
+      }
+    });
   }
 
   void _setupMessageListener() {
@@ -168,16 +202,37 @@ class _ChatSessionPageState extends State<ChatSessionPage>
   void _refreshConnectivityState() {
     if (!mounted) return;
     final deviceId = _effectiveDeviceId;
-    if (deviceId == null) return;
+    if (deviceId == null) {
+      debugPrint('⚠️ _refreshConnectivityState: No effective device ID');
+      return;
+    }
 
+    debugPrint(
+      '🔄 Refreshing connectivity for device: $deviceId (${widget.deviceName})',
+    );
     final direct = widget.p2pService.isDeviceDirectlyConnected(deviceId);
     final reachable = widget.p2pService.isDeviceReachable(deviceId);
+    final hopCount = widget.p2pService.meshDeviceHopCount[deviceId] ?? 0;
+    final inMeshRegistry = widget.p2pService.meshDevices.containsKey(deviceId);
 
-    if (_isConnected != direct || _isMeshReachable != reachable) {
+    debugPrint(
+      '   Direct: $direct, Reachable: $reachable, InMesh: $inMeshRegistry, Hops: $hopCount',
+    );
+    debugPrint(
+      '   Current state - Connected: $_isConnected, MeshReachable: $_isMeshReachable, HopCount: $_meshHopCount',
+    );
+
+    if (_isConnected != direct ||
+        _isMeshReachable != reachable ||
+        _meshHopCount != hopCount) {
+      debugPrint('   ⚡ State changed! Updating UI...');
       setState(() {
         _isConnected = direct;
         _isMeshReachable = reachable;
+        _meshHopCount = hopCount;
       });
+    } else {
+      debugPrint('   ℹ️ No change in connectivity state');
     }
   }
 
@@ -225,14 +280,23 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
   void _handleP2PStateChanged() {
     if (!mounted) return;
+    debugPrint(
+      '📡 P2P state changed - refreshing connectivity for ${widget.deviceName}',
+    );
     _refreshConnectivityState();
+
+    // Double refresh after short delay to catch async mesh registry updates
+    Future.delayed(Duration(milliseconds: 200)).then((_) {
+      if (mounted) _refreshConnectivityState();
+    });
   }
 
   void _startPeriodicRefresh() {
     _refreshTimer?.cancel();
-    _refreshTimer = Timer.periodic(Duration(seconds: 10), (_) {
+    _refreshTimer = Timer.periodic(Duration(seconds: 3), (_) {
       if (mounted) {
         _loadChatData();
+        _refreshConnectivityState();
       }
     });
   }
@@ -346,18 +410,6 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         endpointId: updatedEndpoint,
       );
       await MessageRepository.insert(messageToAdd);
-
-      try {
-        await ChatRepository.updateConnection(
-          sessionId: widget.sessionId,
-          connectionType: ConnectionType.wifiDirect,
-          connectionTime: DateTime.now(),
-        );
-      } catch (e) {
-        debugPrint(
-          '⚠️ Failed to update connection metadata for ${widget.sessionId}: $e',
-        );
-      }
     }
 
     // Check if message is not already in our current messages list (avoid duplicates)
@@ -384,8 +436,19 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     // Mark messages as read
     await _markMessagesAsRead();
 
+    // Record heartbeat so session shows as online
+    await _recordSessionConnection();
+
     // Refresh connectivity state after receiving message
+    debugPrint(
+      '✅ Message received from ${message.fromUser} - device IS reachable, refreshing status',
+    );
     _refreshConnectivityState();
+
+    // Double refresh to ensure UI updates
+    Future.delayed(Duration(milliseconds: 100)).then((_) {
+      if (mounted) _refreshConnectivityState();
+    });
 
     // Update queued message count
     _updateQueuedMessageCount();
@@ -429,6 +492,23 @@ class _ChatSessionPageState extends State<ChatSessionPage>
     }
   }
 
+  Future<void> _recordSessionConnection() async {
+    try {
+      final connectionType = _isConnected
+          ? ConnectionType.wifiDirect
+          : ConnectionType.unknown;
+      await ChatRepository.updateConnection(
+        sessionId: widget.sessionId,
+        connectionType: connectionType,
+        connectionTime: DateTime.now(),
+      );
+    } catch (e) {
+      debugPrint(
+        '⚠️ Failed to update connection metadata for ${widget.sessionId}: $e',
+      );
+    }
+  }
+
   void _updateLocalMessageStatus(String messageId, MessageStatus status) {
     final index = _messages.indexWhere((m) => m.messageId == messageId);
     if (index == -1) return;
@@ -462,6 +542,12 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       // DO NOT regenerate from display names - that causes duplicate sessions!
       String chatSessionId = widget.sessionId;
 
+      // Check reachability BEFORE creating message (for correct initial status)
+      final isReachable = widget.p2pService.isDeviceReachable(targetDeviceId);
+      final initialStatus = isReachable
+          ? MessageStatus.pending
+          : MessageStatus.failed;
+
       // Create message with chat session ID
       final message = MessageModel(
         messageId: messageId,
@@ -473,7 +559,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         timestamp: timestamp.millisecondsSinceEpoch,
         messageType: type,
         type: type.name,
-        status: MessageStatus.pending,
+        status: initialStatus,
         chatSessionId: chatSessionId,
         connectionType: widget.p2pService.connectionType,
         deviceId: null,
@@ -489,11 +575,8 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       _scrollToBottom();
       _messageController.clear();
 
-      final isReachable = widget.p2pService.isDeviceReachable(targetDeviceId);
-
       if (!isReachable) {
-        await MessageRepository.updateStatus(messageId, MessageStatus.failed);
-        _updateLocalMessageStatus(messageId, MessageStatus.failed);
+        // Already set to failed status above, just show error
         if (mounted) {
           setState(() {
             _isConnected = false;
@@ -514,7 +597,16 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
         await MessageRepository.updateStatus(messageId, MessageStatus.sent);
         _updateLocalMessageStatus(messageId, MessageStatus.sent);
+
+        debugPrint(
+          '✅ Message sent successfully - device IS reachable, refreshing status',
+        );
         _refreshConnectivityState();
+
+        // Double refresh to ensure UI updates
+        Future.delayed(Duration(milliseconds: 100)).then((_) {
+          if (mounted) _refreshConnectivityState();
+        });
       } catch (e) {
         debugPrint('❌ Error sending P2P message: $e');
         await MessageRepository.updateStatus(messageId, MessageStatus.failed);
@@ -598,6 +690,12 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       );
       final timestamp = DateTime.now();
 
+      // Check reachability BEFORE creating message
+      final isReachable = widget.p2pService.isDeviceReachable(targetDeviceId);
+      final initialStatus = isReachable
+          ? MessageStatus.pending
+          : MessageStatus.failed;
+
       final message = MessageModel(
         messageId: messageId,
         endpointId: targetDeviceId,
@@ -608,7 +706,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         timestamp: timestamp.millisecondsSinceEpoch,
         messageType: MessageType.location,
         type: MessageType.location.name,
-        status: MessageStatus.pending,
+        status: initialStatus,
         chatSessionId: widget.sessionId,
         connectionType: widget.p2pService.connectionType,
         deviceId: widget.p2pService.deviceId,
@@ -625,8 +723,6 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       });
       _scrollToBottom();
       _messageController.clear();
-
-      final isReachable = widget.p2pService.isDeviceReachable(targetDeviceId);
 
       if (isReachable) {
         try {
@@ -866,8 +962,8 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                   : _hasMeshRelay
                   ? LinearGradient(
                       colors: [
-                        ResQLinkTheme.warningYellow,
-                        ResQLinkTheme.warningYellow.withValues(alpha: 0.7),
+                        Colors.orange,
+                        Colors.orange.withValues(alpha: 0.7),
                       ],
                     )
                   : LinearGradient(
@@ -878,7 +974,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                   color: _isConnected
                       ? ResQLinkTheme.safeGreen.withValues(alpha: 0.4)
                       : _hasMeshRelay
-                      ? ResQLinkTheme.warningYellow.withValues(alpha: 0.4)
+                      ? Colors.orange.withValues(alpha: 0.4)
                       : Colors.black.withValues(alpha: 0.3),
                   blurRadius: 6,
                 ),
@@ -925,7 +1021,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                         color: _isConnected
                             ? ResQLinkTheme.safeGreen
                             : _hasMeshRelay
-                            ? ResQLinkTheme.warningYellow
+                            ? Colors.orange
                             : Colors.grey,
                         shape: BoxShape.circle,
                         boxShadow: (_isConnected || _hasMeshRelay)
@@ -934,7 +1030,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                                   color:
                                       (_isConnected
                                               ? ResQLinkTheme.safeGreen
-                                              : ResQLinkTheme.warningYellow)
+                                              : Colors.orange)
                                           .withValues(alpha: 0.6),
                                   blurRadius: 4,
                                   spreadRadius: 1,
@@ -951,7 +1047,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                           color: _isConnected
                               ? ResQLinkTheme.safeGreen
                               : _hasMeshRelay
-                              ? ResQLinkTheme.warningYellow
+                              ? Colors.orange
                               : Colors.white60,
                           fontSize: 10,
                           fontWeight: FontWeight.w400,

@@ -141,24 +141,6 @@ class SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Future<void> _toggleMultiHop(bool value) async {
-    if (!mounted) return;
-    await context.read<SettingsService>().setMultiHop(value);
-
-    // Apply to P2P service if available
-    if (widget.p2pService != null) {
-      debugPrint('Multi-hop ${value ? 'enabled' : 'disabled'}');
-    }
-
-    if (!mounted) return;
-    _showMessage(
-      value
-          ? 'Multi-hop message relaying enabled'
-          : 'Multi-hop message relaying disabled',
-      isSuccess: true,
-    );
-  }
-
   Future<void> _mergeDuplicateSessions() async {
     final confirm = await _showConfirmationDialog(
       title: 'Merge Duplicate Sessions',
@@ -384,9 +366,6 @@ class SettingsPageState extends State<SettingsPage> {
                           delegate: SliverChildListDelegate([
                             _buildSectionHeader('Statistics'),
                             _buildStatisticsCard(),
-                            SizedBox(height: 24),
-                            _buildSectionHeader('Connectivity'),
-                            _buildConnectivitySection(settings),
                             SizedBox(height: 24),
                             _buildSectionHeader('Location Services'),
                             _buildLocationSection(settings),
@@ -740,50 +719,6 @@ class SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
-
-  Widget _buildConnectivitySection(SettingsService settings) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Color(0xFF1E3E62).withValues(alpha: 0.9),
-            Color(0xFF0B192C).withValues(alpha: 0.7),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Color(0xFF1E3A5F), width: 2.5),
-        boxShadow: [
-          BoxShadow(
-            color: Color(0xFF1E3A5F).withValues(alpha: 0.5),
-            blurRadius: 20,
-            offset: Offset(0, 4),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.6),
-            blurRadius: 16,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          _buildEnhancedSwitchTile(
-            title: 'Multi-hop Relaying',
-            subtitle: 'Allow messages to relay through other devices',
-            icon: Icons.device_hub,
-            value: settings.multiHopEnabled,
-            onChanged: _toggleMultiHop,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Connection mode section removed - pure WiFi Direct only
-
-  // Connection mode setting removed - pure WiFi Direct only
 
   Widget _buildLocationSection(SettingsService settings) {
     return Container(

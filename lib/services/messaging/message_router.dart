@@ -4,6 +4,7 @@ import '../../models/message_model.dart';
 import '../../models/chat_session_model.dart';
 import '../../features/database/repositories/message_repository.dart';
 import '../../features/database/repositories/chat_repository.dart';
+import '../../utils/session_id_helper.dart';
 
 import '../chat/session_deduplication_service.dart';
 import '../../utils/session_consistency_checker.dart';
@@ -124,7 +125,13 @@ class MessageRouter {
 
       // Update mesh device registry with devices from route path
       if (_p2pService != null) {
+        debugPrint(
+          '🌐 Updating mesh registry from message (sender: ${message.deviceId}, route: ${message.routePath})',
+        );
         _p2pService!.updateMeshDeviceRegistry(message);
+        debugPrint('✅ Mesh registry updated');
+      } else {
+        debugPrint('⚠️ P2P service not set, cannot update mesh registry');
       }
 
       // CRITICAL FIX: Update lastConnectionAt to keep session showing as "online"
@@ -369,9 +376,17 @@ class MessageRouter {
       // CRITICAL: Generate session ID from device UUID (endpointId), NOT display names
       // This ensures messages always go to the correct stable session
       String? chatSessionId = data['chatSessionId'];
-      if (chatSessionId == null || chatSessionId.isEmpty) {
-        // Use UUID-based session ID for stability
-        chatSessionId = 'chat_${senderDeviceId.replaceAll('-', '_')}';
+      final senderSession = await ChatRepository.getSessionByDeviceId(
+        senderDeviceId,
+      );
+
+      if (senderSession != null) {
+        chatSessionId = senderSession.id;
+        debugPrint(
+          '📍 Found existing session ID: $chatSessionId for device: $senderDeviceId',
+        );
+      } else if (chatSessionId == null || chatSessionId.isEmpty) {
+        chatSessionId = SessionIdHelper.buildSessionId(senderDeviceId);
         debugPrint(
           '📍 Generated UUID-based session ID: $chatSessionId for device: $senderDeviceId',
         );

@@ -181,6 +181,12 @@ abstract class P2PBaseService with ChangeNotifier {
   /// Get all devices known in the mesh network (including multi-hop)
   Map<String, DeviceModel> get meshDevices => Map.from(_meshDeviceRegistry);
 
+  /// Get hop count map for mesh devices
+  Map<String, int> get meshDeviceHopCount => Map.from(_meshDeviceHopCount);
+
+  /// Get last seen timestamp map for mesh devices
+  Map<String, DateTime> get meshDeviceLastSeen => Map.from(_meshDeviceLastSeen);
+
   /// Get devices reachable via multi-hop (sorted by hop count)
   List<Map<String, dynamic>> get reachableDevices {
     final devices = <Map<String, dynamic>>[];
@@ -399,10 +405,44 @@ abstract class P2PBaseService with ChangeNotifier {
       final routePath = message.routePath ?? [];
       final now = DateTime.now();
 
-      // Register the sender (direct neighbor, hop count = 0)
+      // Register the sender with proper hop count calculation
       if (message.deviceId != null && message.deviceId!.isNotEmpty) {
         final senderId = message.deviceId!;
         final senderName = message.fromUser;
+
+        // CRITICAL FIX: Calculate hop count based on route path
+        // Route path tells us which devices relayed this message
+        // Empty route path = direct connection (0 hops)
+        // Non-empty route path = relayed message (count relay devices)
+        int? senderHopCount;
+        if (routePath.isNotEmpty) {
+          // Message was relayed through intermediate devices
+          // Route path format: [relay1, relay2, ..., sender]
+          // Hop count = number of relay devices (excluding ourselves and the sender)
+          final relayDevices = routePath
+              .where((id) => id != _deviceId && id != senderId)
+              .toList();
+          senderHopCount =
+              relayDevices.length +
+              1; // +1 because sender is 1 hop beyond last relay
+          debugPrint(
+            '🌐 Mesh registry: Sender $senderName via relay ($senderHopCount hops, path: ${routePath.join(" → ")})',
+          );
+        } else if (_connectedDevices.containsKey(senderId)) {
+          // Empty route path + sender is directly connected = 0 hops
+          senderHopCount = 0;
+          debugPrint(
+            '🌐 Mesh registry: Sender $senderName DIRECTLY connected (0 hops)',
+          );
+        } else {
+          // Empty route path but sender NOT directly connected
+          // This happens when Device 1 (group owner) sends to Device 3 (client)
+          // Device 3 receives message with empty route path because it came directly from Device 1
+          // But we DON'T update hop count here - trust the group roster instead!
+          debugPrint(
+            '🌐 Mesh registry: Received message from $senderName with empty route path (not directly connected) - keeping existing hop count',
+          );
+        }
 
         if (!_meshDeviceRegistry.containsKey(senderId)) {
           _meshDeviceRegistry[senderId] = DeviceModel(
@@ -414,12 +454,31 @@ abstract class P2PBaseService with ChangeNotifier {
             lastSeen: now,
             createdAt: now,
           );
+          if (senderHopCount != null) {
+            _meshDeviceHopCount[senderId] = senderHopCount;
+          }
           debugPrint(
-            '🌐 Mesh registry: Added sender $senderName ($senderId) - DIRECT',
+            '🌐 Mesh registry: Added sender $senderName ($senderId) - ${senderHopCount == null
+                ? "hop count TBD"
+                : senderHopCount == 0
+                ? "DIRECT"
+                : "$senderHopCount hops"}',
           );
         }
         _meshDeviceLastSeen[senderId] = now;
-        _meshDeviceHopCount[senderId] = 0; // Direct connection
+
+        // Only update hop count if we calculated one from route path
+        if (senderHopCount != null) {
+          final currentHops = _meshDeviceHopCount[senderId] ?? 99;
+          if (senderHopCount < currentHops) {
+            _meshDeviceHopCount[senderId] = senderHopCount;
+            if (currentHops != 99) {
+              debugPrint(
+                '🌐 Mesh registry: Updated $senderName hop count: $currentHops → $senderHopCount',
+              );
+            }
+          }
+        }
       }
 
       // Register all devices in the route path (multi-hop)
@@ -590,29 +649,58 @@ abstract class P2PBaseService with ChangeNotifier {
   /// Check if a device is reachable either directly or via mesh roster
   bool isDeviceReachable(String? deviceId, {Duration? maxAge}) {
     final resolvedId = resolveDeviceIdentifier(deviceId);
-    if (resolvedId == null || resolvedId.isEmpty) return false;
+    if (resolvedId == null || resolvedId.isEmpty) {
+      debugPrint('⚠️ isDeviceReachable: Invalid device ID: $deviceId');
+      return false;
+    }
 
     // Direct connection check
     if (_connectedDevices.containsKey(resolvedId)) {
+      debugPrint('✅ Device $resolvedId is reachable (DIRECT connection)');
       return true;
     }
 
     // Mesh registry check
     final meshDevice = _meshDeviceRegistry[resolvedId];
     if (meshDevice == null) {
+      debugPrint(
+        '❌ Device $resolvedId NOT in mesh registry (${_meshDeviceRegistry.length} devices tracked)',
+      );
+      // Log all devices in mesh registry for debugging
+      if (_meshDeviceRegistry.isNotEmpty) {
+        debugPrint('   Mesh registry devices:');
+        _meshDeviceRegistry.forEach((id, device) {
+          final hopCount = _meshDeviceHopCount[id] ?? 99;
+          final lastSeen = _meshDeviceLastSeen[id];
+          final age = lastSeen != null
+              ? DateTime.now().difference(lastSeen).inSeconds
+              : -1;
+          debugPrint(
+            '     - ${device.userName} ($id): $hopCount hops, ${age}s ago',
+          );
+        });
+      }
       return false;
     }
 
     final lastSeen = _meshDeviceLastSeen[resolvedId];
-    if (lastSeen == null) return false;
+    if (lastSeen == null) {
+      debugPrint('❌ Device $resolvedId in registry but no lastSeen timestamp');
+      return false;
+    }
 
     final freshnessWindow = maxAge ?? Duration(minutes: 5);
-    final isFresh = DateTime.now().difference(lastSeen) <= freshnessWindow;
+    final age = DateTime.now().difference(lastSeen);
+    final isFresh = age <= freshnessWindow;
 
     if (isFresh) {
       final hopCount = _meshDeviceHopCount[resolvedId] ?? 99;
       debugPrint(
-        '✅ Device $resolvedId is reachable (hops: $hopCount, last seen: ${DateTime.now().difference(lastSeen).inSeconds}s ago)',
+        '✅ Device $resolvedId is reachable via MESH (hops: $hopCount, last seen: ${age.inSeconds}s ago)',
+      );
+    } else {
+      debugPrint(
+        '❌ Device $resolvedId is STALE (last seen: ${age.inSeconds}s ago, threshold: ${freshnessWindow.inSeconds}s)',
       );
     }
 
@@ -622,6 +710,17 @@ abstract class P2PBaseService with ChangeNotifier {
   /// Apply group roster broadcast from host
   void applyGroupRoster(List<dynamic> roster) {
     final now = DateTime.now();
+    bool hasChanges = false;
+
+    debugPrint(
+      '👥 ═══════════════════════════════════════════════════════════',
+    );
+    debugPrint('👥 APPLYING GROUP ROSTER (${roster.length} devices)');
+    debugPrint('👥 My Device ID: $_deviceId');
+    debugPrint(
+      '👥 ═══════════════════════════════════════════════════════════',
+    );
+
     for (final entry in roster) {
       if (entry is! Map) continue;
       final deviceId = entry['deviceId']?.toString() ?? '';
@@ -629,6 +728,23 @@ abstract class P2PBaseService with ChangeNotifier {
 
       final userName = entry['userName']?.toString() ?? 'Unknown Device';
       final isHostDevice = entry['isHost'] == true;
+      final hopCount = isHostDevice
+          ? 0
+          : 1; // Host is direct, others are 1 hop away
+
+      // Check if this is a new device or hop count changed
+      final existingHopCount = _meshDeviceHopCount[deviceId];
+      if (existingHopCount != hopCount ||
+          !_meshDeviceRegistry.containsKey(deviceId)) {
+        hasChanges = true;
+      }
+
+      debugPrint('👥 Adding to mesh registry:');
+      debugPrint('   - Device ID (UUID): $deviceId');
+      debugPrint('   - User Name: $userName');
+      debugPrint('   - Is Host: $isHostDevice');
+      debugPrint('   - Hop Count: $hopCount');
+      debugPrint('   - Previous Hop Count: $existingHopCount');
 
       final deviceModel = DeviceModel(
         id: deviceId,
@@ -639,18 +755,42 @@ abstract class P2PBaseService with ChangeNotifier {
         lastSeen: now,
         createdAt: now,
         discoveryMethod: 'group_roster',
-        isConnected: true,
+        isConnected: isHostDevice, // Only host is directly connected
       );
 
       _meshDeviceRegistry[deviceId] = deviceModel;
       _meshDeviceLastSeen[deviceId] = now;
-      _meshDeviceHopCount[deviceId] = isHostDevice
-          ? 0
-          : 1; // Host is direct, others are 1 hop away
+      _meshDeviceHopCount[deviceId] = hopCount;
+
+      // Add/update in discovered ResQLink devices list
+      final discoveredIndex = _discoveredResQLinkDevices.indexWhere(
+        (d) => d.deviceId == deviceId,
+      );
+
+      if (discoveredIndex >= 0) {
+        _discoveredResQLinkDevices[discoveredIndex] = deviceModel;
+      } else {
+        _discoveredResQLinkDevices.add(deviceModel);
+      }
     }
 
-    notifyListeners();
-    debugPrint('👥 Applied group roster with ${roster.length} entries');
+    if (hasChanges) {
+      debugPrint(
+        '👥 ═══════════════════════════════════════════════════════════',
+      );
+      debugPrint('👥 GROUP ROSTER APPLIED - MESH REGISTRY NOW CONTAINS:');
+      for (final entry in _meshDeviceRegistry.entries) {
+        final hops = _meshDeviceHopCount[entry.key] ?? 99;
+        debugPrint('   ✅ ${entry.value.userName} (${entry.key}) - $hops hops');
+      }
+      debugPrint(
+        '👥 ═══════════════════════════════════════════════════════════',
+      );
+      notifyListeners();
+      debugPrint('👥 Notified all listeners - UI should update now!');
+    } else {
+      debugPrint('👥 No changes detected in group roster - skipping UI update');
+    }
   }
 
   /// Update connection status

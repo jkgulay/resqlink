@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../../features/database/repositories/chat_repository.dart';
 import '../../features/database/core/database_manager.dart';
+import '../../utils/session_id_helper.dart';
 
 /// Service to identify and merge duplicate chat sessions
 /// UPDATED: Now uses MAC address-based deduplication (deviceAddress)
@@ -19,7 +20,9 @@ class SessionDeduplicationService {
       final totalMerged = await ChatRepository.cleanupDuplicateSessions();
 
       if (totalMerged > 0) {
-        debugPrint('✅ Session deduplication completed: $totalMerged sessions merged');
+        debugPrint(
+          '✅ Session deduplication completed: $totalMerged sessions merged',
+        );
       } else {
         debugPrint('ℹ️ No duplicate sessions found');
       }
@@ -32,7 +35,9 @@ class SessionDeduplicationService {
   }
 
   /// Check if a specific device has duplicate sessions by MAC address
-  static Future<List<String>> findDuplicateSessionsForDevice(String deviceAddress) async {
+  static Future<List<String>> findDuplicateSessionsForDevice(
+    String deviceAddress,
+  ) async {
     try {
       final db = await DatabaseManager.database;
 
@@ -55,8 +60,12 @@ class SessionDeduplicationService {
     try {
       final db = await DatabaseManager.database;
 
-      final totalSessions = await db.rawQuery('SELECT COUNT(*) as count FROM chat_sessions');
-      final totalMessages = await db.rawQuery('SELECT COUNT(*) as count FROM messages');
+      final totalSessions = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM chat_sessions',
+      );
+      final totalMessages = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM messages',
+      );
 
       // Find potential duplicates by device address (MAC address)
       final deviceGroups = await db.rawQuery('''
@@ -78,7 +87,7 @@ class SessionDeduplicationService {
 
         final stableId = deviceAddress ?? deviceId;
         if (stableId != null) {
-          final correctId = 'chat_${stableId.replaceAll(':', '_')}';
+          final correctId = SessionIdHelper.buildSessionId(stableId);
           if (currentId != correctId) {
             needsMigration++;
           }

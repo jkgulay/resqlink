@@ -11,6 +11,9 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onBackPressed;
   final Function(String) onMenuAction;
   final VoidCallback? onReconnect;
+  final bool? isConnected;
+  final bool? isMeshReachable;
+  final int? meshHopCount;
 
   const ChatAppBar({
     super.key,
@@ -21,6 +24,9 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.onBackPressed,
     required this.onMenuAction,
     this.onReconnect,
+    this.isConnected,
+    this.isMeshReachable,
+    this.meshHopCount,
   });
 
   @override
@@ -77,9 +83,29 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   Widget _buildTitle(BuildContext context) {
     if (isChatView) {
-      final isConnected = p2pService.connectedDevices.containsKey(
-        selectedEndpointId,
-      );
+      // Use passed connectivity state if available, otherwise fall back to checking connectedDevices
+      final directConnection =
+          isConnected ??
+          p2pService.connectedDevices.containsKey(selectedEndpointId);
+      final meshReachable = isMeshReachable ?? false;
+      final hopCount = meshHopCount ?? 0;
+      final hasMeshRelay = !directConnection && meshReachable;
+
+      // Determine status text and color
+      final String statusText;
+      final Color statusColor;
+
+      if (directConnection) {
+        statusText = 'Direct link';
+        statusColor = ResQLinkTheme.safeGreen;
+      } else if (hasMeshRelay) {
+        statusText =
+            'Relay via mesh ($hopCount ${hopCount == 1 ? 'hop' : 'hops'})';
+        statusColor = Colors.orange; // Yellow/orange for mesh relay
+      } else {
+        statusText = 'Offline';
+        statusColor = Colors.grey;
+      }
 
       return Row(
         children: [
@@ -87,11 +113,18 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
           Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: isConnected
+              gradient: directConnection
                   ? LinearGradient(
                       colors: [
                         ResQLinkTheme.safeGreen,
                         ResQLinkTheme.safeGreen.withValues(alpha: 0.7),
+                      ],
+                    )
+                  : hasMeshRelay
+                  ? LinearGradient(
+                      colors: [
+                        Colors.orange,
+                        Colors.orange.withValues(alpha: 0.7),
                       ],
                     )
                   : LinearGradient(
@@ -99,8 +132,10 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                     ),
               boxShadow: [
                 BoxShadow(
-                  color: isConnected
+                  color: directConnection
                       ? ResQLinkTheme.safeGreen.withValues(alpha: 0.4)
+                      : hasMeshRelay
+                      ? Colors.orange.withValues(alpha: 0.4)
                       : Colors.black.withValues(alpha: 0.3),
                   blurRadius: 6,
                 ),
@@ -147,7 +182,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                 SizedBox(height: 2),
                 GestureDetector(
                   onTap: () {
-                    if (!isConnected &&
+                    if (!directConnection &&
                         selectedEndpointId != null &&
                         onReconnect != null) {
                       onReconnect!();
@@ -160,16 +195,12 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                         width: 8,
                         height: 8,
                         decoration: BoxDecoration(
-                          color: isConnected
-                              ? ResQLinkTheme.safeGreen
-                              : Colors.grey,
+                          color: statusColor,
                           shape: BoxShape.circle,
-                          boxShadow: isConnected
+                          boxShadow: (directConnection || hasMeshRelay)
                               ? [
                                   BoxShadow(
-                                    color: ResQLinkTheme.safeGreen.withValues(
-                                      alpha: 0.6,
-                                    ),
+                                    color: statusColor.withValues(alpha: 0.6),
                                     blurRadius: 4,
                                     spreadRadius: 1,
                                   ),
@@ -180,11 +211,11 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                       SizedBox(width: 6),
                       Expanded(
                         child: ResponsiveTextWidget(
-                          isConnected ? 'Online' : 'Offline',
+                          statusText,
                           styleBuilder: (context) =>
                               ResponsiveText.caption(context).copyWith(
-                                color: isConnected
-                                    ? ResQLinkTheme.safeGreen
+                                color: (directConnection || hasMeshRelay)
+                                    ? statusColor
                                     : Colors.white60,
                                 fontSize: 10,
                                 fontFamily: 'Poppins',
@@ -231,30 +262,6 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   List<Widget> _buildActions(BuildContext context) {
     final actions = <Widget>[];
-    final isConnected = p2pService.connectedDevices.containsKey(
-      selectedEndpointId,
-    );
-
-    if (isChatView && selectedEndpointId != null && !isConnected) {
-      actions.add(
-        Container(
-          margin: EdgeInsets.only(right: 4),
-          decoration: BoxDecoration(
-            color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.2),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: ResQLinkTheme.primaryBlue.withValues(alpha: 0.5),
-              width: 1,
-            ),
-          ),
-          child: IconButton(
-            icon: Icon(Icons.refresh, color: ResQLinkTheme.primaryBlue),
-            onPressed: onReconnect,
-            tooltip: 'Reconnect',
-          ),
-        ),
-      );
-    }
 
     actions.add(
       PopupMenuButton<String>(

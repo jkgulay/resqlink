@@ -5,6 +5,7 @@ import '../../../models/message_model.dart';
 import '../../database/repositories/chat_repository.dart';
 import '../../database/repositories/message_repository.dart';
 import '../../p2p/events/p2p_event_bus.dart';
+import '../../../utils/session_id_helper.dart';
 
 /// Service for managing chat operations with state management
 class ChatService extends ChangeNotifier {
@@ -226,11 +227,17 @@ class ChatService extends ChangeNotifier {
       final success = await MessageRepository.insert(messageModel);
 
       if (success > 0) {
-        // Add to local cache
-        _sessionMessages.putIfAbsent(sessionId, () => []).add(messageModel);
+        // Update message status to 'sent' immediately since we don't queue anymore
+        final updatedMessage = messageModel.copyWith(
+          status: MessageStatus.sent,
+        );
+        await MessageRepository.updateStatus(messageId, MessageStatus.sent);
+
+        // Add to local cache with 'sent' status
+        _sessionMessages.putIfAbsent(sessionId, () => []).add(updatedMessage);
 
         // Notify stream listeners
-        _messageStreamControllers[sessionId]?.add(messageModel);
+        _messageStreamControllers[sessionId]?.add(updatedMessage);
 
         // Update session summary
         await loadSessions();
@@ -394,7 +401,7 @@ class ChatService extends ChangeNotifier {
         );
       } else {
         // Create MAC-based session ID for new conversation
-        sessionId = 'chat_${event.fromDeviceId.replaceAll(':', '_')}';
+        sessionId = SessionIdHelper.buildSessionId(event.fromDeviceId);
         debugPrint(
           '📍 Creating new session: $sessionId for device (MAC): ${event.fromDeviceId}',
         );

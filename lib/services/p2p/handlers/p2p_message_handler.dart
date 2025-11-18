@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../p2p_base_service.dart';
 import '../../../models/message_model.dart';
 import '../../../features/database/repositories/message_repository.dart';
+import '../../../utils/session_id_helper.dart';
 import '../../messaging/message_router.dart';
 import '../../settings_service.dart';
 import 'p2p_wifi_direct_handler.dart';
@@ -50,9 +51,7 @@ class P2PMessageHandler {
       if (existingTimestamp != null) {
         final timeDiff = now.difference(existingTimestamp).inSeconds;
         if (timeDiff < 5) {
-          debugPrint(
-            '⚠️ Duplicate WiFi Direct message blocked: $messageHash',
-          );
+          debugPrint('⚠️ Duplicate WiFi Direct message blocked: $messageHash');
           return;
         }
       }
@@ -112,9 +111,7 @@ class P2PMessageHandler {
     final finalDeviceId = deviceId;
 
     if (finalDeviceId != null) {
-      debugPrint(
-        '🤝 Processing WiFi Direct handshake from $userName',
-      );
+      debugPrint('🤝 Processing WiFi Direct handshake from $userName');
       debugPrint('📱 Using UUID identifier: $finalDeviceId');
 
       // Register device (async)
@@ -143,9 +140,7 @@ class P2PMessageHandler {
     final finalDeviceId = deviceId;
 
     if (finalDeviceId != null) {
-      debugPrint(
-        '🤝 Processing WiFi Direct handshake response from $userName',
-      );
+      debugPrint('🤝 Processing WiFi Direct handshake response from $userName');
       debugPrint('📱 Using UUID identifier: $finalDeviceId');
 
       // Register device (async)
@@ -202,7 +197,8 @@ class P2PMessageHandler {
     try {
       _addMessageTrace('Sending message: $message (type: ${type.name})');
 
-      final actualSenderName = _baseService.userName ?? senderName ?? 'Unknown User';
+      final actualSenderName =
+          _baseService.userName ?? senderName ?? 'Unknown User';
       debugPrint('📤 Sending message: "$message" from: $actualSenderName');
 
       // Create message model
@@ -229,7 +225,74 @@ class P2PMessageHandler {
               longitude: longitude,
             );
 
-      // Note: Database insertion is handled by the UI layer (chat_session_page)
+      // CRITICAL FIX: For broadcast messages (emergency/SOS), save to database for each reachable device
+      // so they appear in chat sessions with relay devices
+      if (targetDeviceId == null) {
+        debugPrint(
+          '💾 Saving broadcast message to database for reachable devices...',
+        );
+
+        // Get all reachable devices (direct + mesh relay)
+        final reachableDevices = <String, String>{};
+
+        // Add directly connected devices
+        _baseService.connectedDevices.forEach((deviceId, device) {
+          reachableDevices[deviceId] = device.userName;
+        });
+
+        // Add mesh-reachable devices
+        _baseService.meshDevices.forEach((deviceId, device) {
+          if (!reachableDevices.containsKey(deviceId)) {
+            reachableDevices[deviceId] = device.userName;
+          }
+        });
+
+        debugPrint(
+          '📤 Broadcasting to ${reachableDevices.length} reachable device(s)',
+        );
+
+        // Save message to each device's chat session
+        for (final entry in reachableDevices.entries) {
+          final deviceId = entry.key;
+          final deviceName = entry.value;
+
+          try {
+            // Generate session ID for this device
+            final sessionId = SessionIdHelper.buildSessionId(deviceId);
+
+            // Create message for this specific device
+            final deviceMessage = MessageModel(
+              messageId: '${messageModel.messageId}_$deviceId',
+              endpointId: deviceId,
+              fromUser: actualSenderName,
+              message: message,
+              isMe: true,
+              isEmergency:
+                  type == MessageType.emergency || type == MessageType.sos,
+              timestamp: messageModel.timestamp,
+              messageType: type,
+              type: type.name,
+              status: MessageStatus.pending,
+              chatSessionId: sessionId,
+              latitude: latitude,
+              longitude: longitude,
+              deviceId: deviceId,
+            );
+
+            // Insert to database
+            await MessageRepository.insert(deviceMessage);
+            debugPrint(
+              '✅ Broadcast saved to session for $deviceName ($deviceId)',
+            );
+          } catch (e) {
+            debugPrint(
+              '❌ Failed to save broadcast to session for $deviceName: $e',
+            );
+          }
+        }
+      }
+
+      // Note: For direct messages, database insertion is handled by the UI layer (chat_session_page)
       // to avoid duplicate messages
       _baseService.saveMessageToHistory(messageModel);
 
@@ -252,9 +315,13 @@ class P2PMessageHandler {
 
       // Check if connected and has actual peer connections
       if (!_baseService.isConnected || _baseService.connectedDevices.isEmpty) {
-        debugPrint('📥 Device not connected or no peers available, message will not be sent');
+        debugPrint(
+          '📥 Device not connected or no peers available, message will not be sent',
+        );
         debugPrint('  - Connection status: ${_baseService.isConnected}');
-        debugPrint('  - Connected devices: ${_baseService.connectedDevices.length}');
+        debugPrint(
+          '  - Connected devices: ${_baseService.connectedDevices.length}',
+        );
 
         await MessageRepository.updateMessageStatus(
           messageModel.messageId!,
@@ -277,7 +344,9 @@ class P2PMessageHandler {
 
         // Fallback to socket protocol if WiFi Direct failed
         if (!success) {
-          debugPrint('⚠️ WiFi Direct send failed, attempting socket protocol fallback...');
+          debugPrint(
+            '⚠️ WiFi Direct send failed, attempting socket protocol fallback...',
+          );
           if (targetDeviceId != null) {
             success = await _socketProtocol.sendMessage(
               messageJson,
@@ -307,6 +376,34 @@ class P2PMessageHandler {
           messageModel.messageId!,
           MessageStatus.sent,
         );
+
+        // CRITICAL FIX: Update status for all broadcast message copies
+        if (targetDeviceId == null) {
+          // Get all reachable devices again to update their message status
+          final reachableDeviceIds = <String>{
+            ..._baseService.connectedDevices.keys,
+            ..._baseService.meshDevices.keys,
+          };
+
+          for (final deviceId in reachableDeviceIds) {
+            final deviceMessageId = '${messageModel.messageId}_$deviceId';
+            try {
+              await MessageRepository.updateMessageStatus(
+                deviceMessageId,
+                MessageStatus.sent,
+              );
+            } catch (e) {
+              debugPrint(
+                '⚠️ Failed to update status for broadcast copy $deviceMessageId: $e',
+              );
+            }
+          }
+
+          debugPrint(
+            '✅ Broadcast message status updated for ${reachableDeviceIds.length} device(s)',
+          );
+        }
+
         _addMessageTrace(
           'Message sent successfully: ${messageModel.messageId}',
         );
@@ -317,6 +414,28 @@ class P2PMessageHandler {
           messageModel.messageId!,
           MessageStatus.failed,
         );
+
+        // CRITICAL FIX: Update status for all broadcast message copies
+        if (targetDeviceId == null) {
+          final reachableDeviceIds = <String>{
+            ..._baseService.connectedDevices.keys,
+            ..._baseService.meshDevices.keys,
+          };
+
+          for (final deviceId in reachableDeviceIds) {
+            final deviceMessageId = '${messageModel.messageId}_$deviceId';
+            try {
+              await MessageRepository.updateMessageStatus(
+                deviceMessageId,
+                MessageStatus.failed,
+              );
+            } catch (e) {
+              debugPrint(
+                '⚠️ Failed to update status for broadcast copy $deviceMessageId: $e',
+              );
+            }
+          }
+        }
 
         _addMessageTrace('Message send failed');
         throw Exception('Message send failed');
@@ -374,7 +493,9 @@ class P2PMessageHandler {
       // Check if we've already forwarded this message (prevent loops)
       final routePath = message.routePath ?? [];
       if (routePath.contains(_baseService.deviceId)) {
-        debugPrint('🔄 We already forwarded this message, skipping to prevent loop');
+        debugPrint(
+          '🔄 We already forwarded this message, skipping to prevent loop',
+        );
         return;
       }
 
@@ -388,7 +509,9 @@ class P2PMessageHandler {
         return;
       }
 
-      debugPrint('🔁 Forwarding message to ${otherDevices.length} device(s) (TTL: $currentTtl → ${currentTtl - 1})');
+      debugPrint(
+        '🔁 Forwarding message to ${otherDevices.length} device(s) (TTL: $currentTtl → ${currentTtl - 1})',
+      );
 
       // Create forwarded message with decremented TTL and updated route path
       final updatedRoutePath = [...routePath, _baseService.deviceId!];
@@ -397,7 +520,7 @@ class P2PMessageHandler {
         'messageId': message.messageId,
         'message': message.message,
         'senderName': message.fromUser,
-        'deviceId': message.deviceId,  // Original sender
+        'deviceId': message.deviceId, // Original sender
         'targetDeviceId': message.targetDeviceId,
         'messageType': message.messageType.name,
         'timestamp': message.timestamp,
@@ -413,24 +536,38 @@ class P2PMessageHandler {
 
       // Try WiFi Direct first if available
       if (_wifiDirectHandler.wifiDirectService != null) {
-        forwardSuccess = await _wifiDirectHandler.sendMessage(forwardedMessageJson);
+        forwardSuccess = await _wifiDirectHandler.sendMessage(
+          forwardedMessageJson,
+        );
         debugPrint('📡 WiFi Direct forward result: $forwardSuccess');
 
         // Fallback to socket protocol if WiFi Direct failed
         if (!forwardSuccess) {
-          debugPrint('⚠️ WiFi Direct forward failed, attempting socket protocol fallback...');
-          forwardSuccess = await _socketProtocol.broadcastMessage(forwardedMessageJson);
+          debugPrint(
+            '⚠️ WiFi Direct forward failed, attempting socket protocol fallback...',
+          );
+          forwardSuccess = await _socketProtocol.broadcastMessage(
+            forwardedMessageJson,
+          );
           debugPrint('📡 Socket protocol forward result: $forwardSuccess');
         }
       } else {
         // Use socket protocol directly if WiFi Direct not available
-        debugPrint('📡 Using socket protocol for forwarding (WiFi Direct unavailable)');
-        forwardSuccess = await _socketProtocol.broadcastMessage(forwardedMessageJson);
+        debugPrint(
+          '📡 Using socket protocol for forwarding (WiFi Direct unavailable)',
+        );
+        forwardSuccess = await _socketProtocol.broadcastMessage(
+          forwardedMessageJson,
+        );
       }
 
       if (forwardSuccess) {
-        debugPrint('✅ Message forwarded successfully (hops: ${updatedRoutePath.length})');
-        _addMessageTrace('Forwarded message ${message.messageId} (TTL: ${currentTtl - 1})');
+        debugPrint(
+          '✅ Message forwarded successfully (hops: ${updatedRoutePath.length})',
+        );
+        _addMessageTrace(
+          'Forwarded message ${message.messageId} (TTL: ${currentTtl - 1})',
+        );
       } else {
         debugPrint('❌ Failed to forward message');
       }

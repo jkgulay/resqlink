@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../features/database/core/database_manager.dart';
 import '../services/chat/session_deduplication_service.dart';
+import 'session_id_helper.dart';
 
 /// Utility to check and ensure session consistency across the codebase
 class SessionConsistencyChecker {
@@ -27,7 +28,9 @@ class SessionConsistencyChecker {
 
         // Expected ID is based on MAC address (deviceAddress or deviceId)
         final stableId = deviceAddress ?? deviceId;
-        final expectedId = stableId != null ? 'chat_${stableId.replaceAll(':', '_')}' : null;
+        final expectedId = stableId != null
+            ? SessionIdHelper.buildSessionId(stableId)
+            : null;
 
         if (expectedId != null && sessionId == expectedId) {
           correctFormatCount++;
@@ -100,10 +103,11 @@ class SessionConsistencyChecker {
       };
 
       // 6. Overall health score
-      final totalIssues = oldFormatCount +
-                          orphanedMessages.length +
-                          duplicateDevices.length +
-                          (messagesWithoutSession.first['count'] as int? ?? 0);
+      final totalIssues =
+          oldFormatCount +
+          orphanedMessages.length +
+          duplicateDevices.length +
+          (messagesWithoutSession.first['count'] as int? ?? 0);
 
       results['healthScore'] = {
         'totalIssues': totalIssues,
@@ -125,7 +129,8 @@ class SessionConsistencyChecker {
       debugPrint('🔧 Starting automatic inconsistency fixes...');
 
       // 1. Run session deduplication
-      final mergedCount = await SessionDeduplicationService.deduplicateAllSessions();
+      final mergedCount =
+          await SessionDeduplicationService.deduplicateAllSessions();
       debugPrint('🔄 Merged $mergedCount duplicate sessions');
 
       // 2. Fix orphaned messages
@@ -158,11 +163,12 @@ class SessionConsistencyChecker {
       ''');
 
       for (final message in orphanedMessages) {
-        final deviceId = message['deviceId'] as String? ?? message['endpointId'] as String?;
+        final deviceId =
+            message['deviceId'] as String? ?? message['endpointId'] as String?;
         if (deviceId == null) continue;
 
         // Generate correct session ID from MAC address
-        final correctSessionId = 'chat_${deviceId.replaceAll(':', '_')}';
+        final correctSessionId = SessionIdHelper.buildSessionId(deviceId);
 
         await db.update(
           'messages',
@@ -210,11 +216,12 @@ class SessionConsistencyChecker {
       );
 
       for (final message in messagesWithoutSession) {
-        final deviceId = message['deviceId'] as String? ?? message['endpointId'] as String?;
+        final deviceId =
+            message['deviceId'] as String? ?? message['endpointId'] as String?;
         if (deviceId == null) continue;
 
         // Generate session ID from MAC address
-        final sessionId = 'chat_${deviceId.replaceAll(':', '_')}';
+        final sessionId = SessionIdHelper.buildSessionId(deviceId);
 
         await db.update(
           'messages',
@@ -224,7 +231,9 @@ class SessionConsistencyChecker {
         );
       }
 
-      debugPrint('🔧 Updated ${messagesWithoutSession.length} messages with session IDs');
+      debugPrint(
+        '🔧 Updated ${messagesWithoutSession.length} messages with session IDs',
+      );
     } catch (e) {
       debugPrint('❌ Error updating message session IDs: $e');
     }
@@ -245,22 +254,30 @@ class SessionConsistencyChecker {
   static List<String> _getRecommendations(Map<String, dynamic> results) {
     final recommendations = <String>[];
 
-    final sessionFormatCheck = results['sessionFormatCheck'] as Map<String, dynamic>?;
+    final sessionFormatCheck =
+        results['sessionFormatCheck'] as Map<String, dynamic>?;
     if ((sessionFormatCheck?['oldFormat'] as int? ?? 0) > 0) {
-      recommendations.add('Run SessionDeduplicationService.deduplicateAllSessions() to fix session ID formats');
+      recommendations.add(
+        'Run SessionDeduplicationService.deduplicateAllSessions() to fix session ID formats',
+      );
     }
 
-    final orphanedMessages = results['orphanedMessages'] as Map<String, dynamic>?;
+    final orphanedMessages =
+        results['orphanedMessages'] as Map<String, dynamic>?;
     if ((orphanedMessages?['count'] as int? ?? 0) > 0) {
-      recommendations.add('Fix orphaned messages by running SessionConsistencyChecker.fixInconsistencies()');
+      recommendations.add(
+        'Fix orphaned messages by running SessionConsistencyChecker.fixInconsistencies()',
+      );
     }
 
-    final duplicateDevices = results['duplicateDevices'] as Map<String, dynamic>?;
+    final duplicateDevices =
+        results['duplicateDevices'] as Map<String, dynamic>?;
     if ((duplicateDevices?['count'] as int? ?? 0) > 0) {
       recommendations.add('Merge duplicate device sessions');
     }
 
-    final messagesWithoutSession = results['messagesWithoutSession'] as Map<String, dynamic>?;
+    final messagesWithoutSession =
+        results['messagesWithoutSession'] as Map<String, dynamic>?;
     if ((messagesWithoutSession?['count'] as int? ?? 0) > 0) {
       recommendations.add('Assign session IDs to messages without sessions');
     }
@@ -275,15 +292,18 @@ class SessionConsistencyChecker {
   /// Print formatted report
   static void printReport(Map<String, dynamic> results) {
     debugPrint('\n📊 SESSION CONSISTENCY REPORT');
-    debugPrint('='*50);
+    debugPrint('=' * 50);
 
     final healthScore = results['healthScore'] as Map<String, dynamic>?;
     if (healthScore != null) {
-      debugPrint('🏥 Health Score: ${healthScore['severity']} (${healthScore['totalIssues']} issues)');
+      debugPrint(
+        '🏥 Health Score: ${healthScore['severity']} (${healthScore['totalIssues']} issues)',
+      );
       debugPrint('');
     }
 
-    final sessionFormatCheck = results['sessionFormatCheck'] as Map<String, dynamic>?;
+    final sessionFormatCheck =
+        results['sessionFormatCheck'] as Map<String, dynamic>?;
     if (sessionFormatCheck != null) {
       debugPrint('📝 Session Format Check:');
       debugPrint('  - Total Sessions: ${sessionFormatCheck['totalSessions']}');
@@ -292,7 +312,8 @@ class SessionConsistencyChecker {
       debugPrint('');
     }
 
-    final recommendations = results['healthScore']?['recommendations'] as List<String>?;
+    final recommendations =
+        results['healthScore']?['recommendations'] as List<String>?;
     if (recommendations != null && recommendations.isNotEmpty) {
       debugPrint('💡 Recommendations:');
       for (final rec in recommendations) {
@@ -301,6 +322,6 @@ class SessionConsistencyChecker {
       debugPrint('');
     }
 
-    debugPrint('='*50);
+    debugPrint('=' * 50);
   }
 }

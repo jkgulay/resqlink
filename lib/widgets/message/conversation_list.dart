@@ -11,6 +11,8 @@ class MessageSummary {
   final int messageCount;
   final int unreadCount;
   final bool isConnected;
+  final bool isMeshReachable;
+  final int meshHopCount;
 
   MessageSummary({
     required this.endpointId,
@@ -19,7 +21,12 @@ class MessageSummary {
     required this.messageCount,
     required this.unreadCount,
     required this.isConnected,
+    this.isMeshReachable = false,
+    this.meshHopCount = 0,
   });
+
+  bool get isReachable => isConnected || isMeshReachable;
+  bool get hasMeshRelay => !isConnected && isMeshReachable;
 }
 
 class ConversationList extends StatelessWidget {
@@ -131,11 +138,13 @@ class ConversationCard extends StatelessWidget {
                     CircleAvatar(
                       backgroundColor: conversation.isConnected
                           ? ResQLinkTheme.safeGreen
+                          : conversation.hasMeshRelay
+                          ? Colors.orange
                           : ResQLinkTheme.offlineGray,
                       radius: 24,
                       child: Icon(Icons.person, color: Colors.white, size: 24),
                     ),
-                    if (conversation.isConnected)
+                    if (conversation.isReachable)
                       Positioned(
                         right: 0,
                         bottom: 0,
@@ -143,7 +152,9 @@ class ConversationCard extends StatelessWidget {
                           width: 12,
                           height: 12,
                           decoration: BoxDecoration(
-                            color: ResQLinkTheme.safeGreen,
+                            color: conversation.isConnected
+                                ? ResQLinkTheme.safeGreen
+                                : Colors.orange,
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 2),
                           ),

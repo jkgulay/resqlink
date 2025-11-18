@@ -13,10 +13,33 @@ class DeviceList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Filter devices with valid UUIDs
+    // Get connected device IDs to filter them out from discovered devices
+    final connectedDeviceIds = <String>{};
+    final p2pService = controller.p2pService;
+
+    // Add directly connected devices
+    for (var id in p2pService.connectedDevices.keys) {
+      connectedDeviceIds.add(id);
+    }
+
+    // Add mesh devices
+    for (var id in p2pService.meshDevices.keys) {
+      connectedDeviceIds.add(id);
+    }
+
+    // Filter devices with valid UUIDs AND exclude already connected devices
     final validDevices = controller.discoveredDevices.where((device) {
       final deviceId = device['deviceId'] ?? device['deviceAddress'];
-      return deviceId != null && deviceId.toString().isNotEmpty;
+      if (deviceId == null || deviceId.toString().isEmpty) {
+        return false;
+      }
+
+      // Exclude if device is already connected/in mesh registry
+      if (connectedDeviceIds.contains(deviceId.toString())) {
+        return false;
+      }
+
+      return true;
     }).toList();
 
     return Container(
