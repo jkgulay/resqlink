@@ -23,12 +23,20 @@ class P2PDeviceManager {
 
   Map<String, Map<String, dynamic>> get discoveredDevices {
     final deviceMap = <String, Map<String, dynamic>>{};
+    final seenMacAddresses =
+        <String>{}; // Track MAC addresses to prevent duplicates
 
     // 1. Add WiFi Direct peers (direct neighbors)
     for (final peer in (_wifiDirectService?.discoveredPeers ?? <dynamic>[])) {
       final isConnected = peer.status == WiFiDirectPeerStatus.connected;
 
+      // CRITICAL: Use UUID as primary key if available, otherwise use MAC
       final uuid = _baseService.getUuidForMac(peer.deviceAddress);
+      final deviceKey = uuid ?? peer.deviceAddress; // Prefer UUID over MAC
+
+      // Track MAC address to prevent duplicates
+      seenMacAddresses.add(peer.deviceAddress);
+
       final connectedDevice = uuid != null
           ? _baseService.connectedDevices[uuid]
           : null;
@@ -40,8 +48,8 @@ class P2PDeviceManager {
           customNameFromDiscovery ??
           peer.deviceName;
 
-      deviceMap[peer.deviceAddress] = {
-        'deviceId': peer.deviceAddress,
+      deviceMap[deviceKey] = {
+        'deviceId': deviceKey, // Use consistent UUID key
         'deviceName': displayName,
         'deviceAddress': peer.deviceAddress,
         'connectionType': 'wifi_direct',
@@ -62,6 +70,15 @@ class P2PDeviceManager {
 
     // 2. Add ResQLink devices from discovery service (don't overwrite WiFi Direct devices)
     for (final device in _baseService.discoveredResQLinkDevices) {
+      // Skip if we've already added this device via WiFi Direct using its MAC address
+      if (device.deviceAddress != null &&
+          seenMacAddresses.contains(device.deviceAddress)) {
+        debugPrint(
+          '⏭️ Skipping duplicate device: ${device.userName} (already added via WiFi Direct)',
+        );
+        continue;
+      }
+
       if (!deviceMap.containsKey(device.deviceId)) {
         deviceMap[device.deviceId] = {
           'deviceId': device.deviceId,
@@ -88,22 +105,8 @@ class P2PDeviceManager {
       }
     }
 
-    // 3. Override device names with connected device names (real names from handshake)
-    for (final connectedDevice in _baseService.connectedDevices.values) {
-      if (deviceMap.containsKey(connectedDevice.deviceId)) {
-        deviceMap[connectedDevice.deviceId] = {
-          ...deviceMap[connectedDevice.deviceId]!,
-          'deviceName': connectedDevice.userName,
-          'isConnected': true,
-          'isOnline': connectedDevice.isOnline,
-        };
-        debugPrint(
-          '🔄 Updated device name from connection: ${connectedDevice.userName} (${connectedDevice.deviceId})',
-        );
-      }
-    }
-
-    // 4. ADD MESH DEVICES - devices discovered via multi-hop messages
+    // 3. ADD MESH DEVICES - devices discovered via multi-hop messages
+    // DO THIS BEFORE updating connected devices so they can be marked as connected
     final reachableDevices = _baseService.reachableDevices;
     debugPrint('🌐 Adding ${reachableDevices.length} mesh-discovered devices');
 
@@ -126,12 +129,63 @@ class P2PDeviceManager {
           'signalLevel': -60 - (hopCount * 10), // Weaker signal for more hops
           'lastSeen': lastSeen,
           'isConnected': false,
+          'isMeshReachable': true, // Mark as mesh-reachable for UI
           'isEmergency': deviceName.toLowerCase().contains('emergency'),
           'hopCount': hopCount,
           'isDirect': isDirect,
           'isMultiHop': isMultiHop,
         };
         debugPrint('🌐 Added mesh device: $deviceName ($hopCount hops)');
+      }
+    }
+
+    // 4. Override device info with connected device data (real names from handshake)
+    // This runs AFTER mesh devices are added so they get marked as connected
+    for (final connectedDevice in _baseService.connectedDevices.values) {
+      if (deviceMap.containsKey(connectedDevice.deviceId)) {
+        deviceMap[connectedDevice.deviceId] = {
+          ...deviceMap[connectedDevice.deviceId]!,
+          'deviceName': connectedDevice.userName,
+          'isConnected': true,
+          'isOnline': connectedDevice.isOnline,
+        };
+        debugPrint(
+          '🔄 Updated device from connectedDevices: ${connectedDevice.userName} (${connectedDevice.deviceId}) - isConnected=true',
+        );
+      }
+    }
+
+    // 5. Add devices from mesh registry (multi-hop reachable via group roster)
+    // These are devices reachable through relays but not directly connected
+    for (final entry in _baseService.meshDevices.entries) {
+      final deviceId = entry.key;
+      final meshDevice = entry.value;
+
+      // Only add if not already in deviceMap (direct connections take precedence)
+      if (!deviceMap.containsKey(deviceId)) {
+        final hopCount = _baseService.meshDeviceHopCount[deviceId] ?? 99;
+        final lastSeen = _baseService.meshDeviceLastSeen[deviceId];
+
+        deviceMap[deviceId] = {
+          'deviceId': deviceId,
+          'deviceName': '${meshDevice.userName} ($hopCount hops)',
+          'deviceAddress': deviceId,
+          'connectionType': 'mesh',
+          'isAvailable': true,
+          'signalLevel': -60 - (hopCount * 10),
+          'lastSeen': lastSeen?.millisecondsSinceEpoch ?? 0,
+          'isConnected': false, // Multi-hop, not directly connected
+          'isMeshReachable': true, // But reachable via mesh
+          'isEmergency': meshDevice.userName.toLowerCase().contains(
+            'emergency',
+          ),
+          'hopCount': hopCount,
+          'isDirect': false,
+          'isMultiHop': hopCount > 1,
+        };
+        debugPrint(
+          '🔗 Added mesh registry device: ${meshDevice.userName} ($hopCount hops) - reachable via relay',
+        );
       }
     }
 

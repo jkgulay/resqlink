@@ -255,9 +255,17 @@ class P2PMainService extends P2PBaseService {
     // Start connection quality monitoring
     _qualityMonitor.startMonitoring();
 
+    // Broadcast group roster IMMEDIATELY if we're the group owner
+    // This ensures clients have topology info right away
+    _broadcastGroupRoster();
+    debugPrint('📣 Initial group roster broadcast sent');
+
     // Check for system connections every 15 seconds
     _monitoringTimer = Timer.periodic(Duration(seconds: 15), (_) {
       checkForSystemConnections();
+      // Broadcast group roster periodically if we're the group owner
+      // This ensures all clients know about mesh topology
+      _broadcastGroupRoster();
     });
 
     // Send pings to connected devices every 10 seconds for RTT tracking
@@ -265,7 +273,7 @@ class P2PMainService extends P2PBaseService {
       _sendPingToConnectedDevices();
     });
 
-    debugPrint('✅ Enhanced monitoring started');
+    debugPrint('✅ Enhanced monitoring started with immediate roster broadcast');
   }
 
   /// Send ping messages to all connected devices for quality monitoring
@@ -716,6 +724,20 @@ ${_messageHandler.getMessageTrace().take(5).join('\n')}
   Future<void> _broadcastGroupRoster() async {
     if (!_socketProtocol.isServer) return;
 
+    // ═══════════════════════════════════════════════════════════════
+    // GROUP ROSTER BROADCAST
+    // The group owner (Device 1) broadcasts the list of all connected
+    // devices to all clients. This allows Device 2 and Device 3 to know
+    // about each other even though they're not directly connected.
+    //
+    // Flow:
+    // 1. Device 1 (group owner) sees Device 2 and Device 3 directly
+    // 2. Device 1 broadcasts roster: [Device 1 (host), Device 2, Device 3]
+    // 3. Device 3 receives roster → adds Device 2 to mesh registry (1 hop)
+    // 4. Device 2 receives roster → adds Device 3 to mesh registry (1 hop)
+    // 5. Now Device 2 and Device 3 know they can communicate via Device 1
+    // ═══════════════════════════════════════════════════════════════
+
     final roster = <Map<String, dynamic>>[];
     if (deviceId != null && userName != null) {
       roster.add({'deviceId': deviceId, 'userName': userName, 'isHost': true});
@@ -729,14 +751,32 @@ ${_messageHandler.getMessageTrace().take(5).join('\n')}
       });
     });
 
-    if (roster.isEmpty) return;
+    if (roster.isEmpty) {
+      debugPrint('📣 No devices to broadcast in roster - skipping');
+      return;
+    }
+
+    debugPrint(
+      '📣 ═══════════════════════════════════════════════════════════',
+    );
+    debugPrint('📣 BROADCASTING GROUP ROSTER (${roster.length} devices):');
+    for (final device in roster) {
+      debugPrint(
+        '   - ${device['userName']} (${device['deviceId']}) ${device['isHost'] == true ? "[HOST]" : "[CLIENT]"}',
+      );
+    }
+    debugPrint(
+      '📣 ═══════════════════════════════════════════════════════════',
+    );
 
     await _socketProtocol.broadcastSystemMessage({
       'type': 'group_state',
       'devices': roster,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
-    debugPrint('📣 Broadcasted group roster (${roster.length} devices)');
+    debugPrint(
+      '📣 Group roster broadcast sent to ${_socketProtocol.connectedDeviceCount} connected clients',
+    );
   }
 
   /// Open WiFi Direct settings

@@ -105,7 +105,6 @@ class DeviceInfo extends StatelessWidget {
   }
 
   Future<String> _getDisplayName() async {
-    // Return the device's name directly - this is for displaying OTHER devices
-    return device['deviceName'] ?? 'Unknown Device';
+   return device['deviceName'] ?? 'Unknown Device';
   }
 }

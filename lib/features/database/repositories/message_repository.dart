@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import '../../../models/message_model.dart';
 import '../core/database_manager.dart';
 import 'chat_repository.dart';
+import '../../../utils/session_id_helper.dart';
 
 class MessageRepository {
   static const String _tableName = 'messages';
@@ -18,8 +19,12 @@ class MessageRepository {
   static const Duration _deduplicationWindow = Duration(minutes: 5);
 
   /// Insert a new message with optimized transaction handling
-  static Future<int> insert(MessageModel message, {String? currentUserId}) async {
-    final messageId = message.messageId ?? 'msg_${DateTime.now().millisecondsSinceEpoch}';
+  static Future<int> insert(
+    MessageModel message, {
+    String? currentUserId,
+  }) async {
+    final messageId =
+        message.messageId ?? 'msg_${DateTime.now().millisecondsSinceEpoch}';
 
     // Check for duplicate processing
     if (_processingMessageIds.contains(messageId)) {
@@ -39,12 +44,15 @@ class MessageRepository {
     try {
       return await DatabaseManager.transaction((txn) async {
         String? chatSessionId = message.chatSessionId;
-        if (chatSessionId == null && message.endpointId != 'broadcast') {
-          chatSessionId = 'chat_${message.endpointId.replaceAll(':', '_')}';
+        if ((chatSessionId == null || chatSessionId.isEmpty) &&
+            message.endpointId != 'broadcast') {
+          chatSessionId = SessionIdHelper.buildSessionId(message.endpointId);
         }
 
         final messageMap = {
-          'messageId': message.messageId ?? 'msg_${DateTime.now().millisecondsSinceEpoch}',
+          'messageId':
+              message.messageId ??
+              'msg_${DateTime.now().millisecondsSinceEpoch}',
           'endpointId': message.endpointId,
           'fromUser': message.fromUser,
           'message': message.message,
@@ -58,7 +66,9 @@ class MessageRepository {
           'routePath': message.routePath?.join(','),
           'ttl': message.ttl,
           'connectionType': message.connectionType,
-          'deviceInfo': message.deviceInfo != null ? jsonEncode(message.deviceInfo!) : null,
+          'deviceInfo': message.deviceInfo != null
+              ? jsonEncode(message.deviceInfo!)
+              : null,
           'targetDeviceId': message.targetDeviceId,
           'messageType': message.messageType.index,
           'chatSessionId': chatSessionId,
@@ -72,15 +82,19 @@ class MessageRepository {
           // Note: createdAt has database default, no need to set
         };
 
-        final id = await txn.insert(_tableName, messageMap).timeout(const Duration(seconds: 1)); // Reduced timeout
+        final id = await txn
+            .insert(_tableName, messageMap)
+            .timeout(const Duration(seconds: 1)); // Reduced timeout
 
         // Update chat session counts directly in transaction to avoid separate calls
         if (chatSessionId != null) {
           // Direct update without separate query to prevent deadlocks
-          await txn.rawUpdate(
-            'UPDATE chat_sessions SET message_count = message_count + 1, unread_count = unread_count + ?, last_message_at = ? WHERE id = ?',
-            [message.isMe ? 0 : 1, message.timestamp, chatSessionId]
-          ).timeout(const Duration(seconds: 1));
+          await txn
+              .rawUpdate(
+                'UPDATE chat_sessions SET message_count = message_count + 1, unread_count = unread_count + ?, last_message_at = ? WHERE id = ?',
+                [message.isMe ? 0 : 1, message.timestamp, chatSessionId],
+              )
+              .timeout(const Duration(seconds: 1));
         }
 
         // Mark as successfully processed
@@ -99,7 +113,9 @@ class MessageRepository {
   /// Clean up old entries from deduplication cache
   static void _cleanupOldEntries() {
     final cutoff = DateTime.now().subtract(_deduplicationWindow);
-    _recentlyProcessed.removeWhere((messageId, timestamp) => timestamp.isBefore(cutoff));
+    _recentlyProcessed.removeWhere(
+      (messageId, timestamp) => timestamp.isBefore(cutoff),
+    );
   }
 
   /// Get messages for a specific chat session with pagination (optimized with timeout)
@@ -111,14 +127,16 @@ class MessageRepository {
   }) async {
     try {
       final db = await DatabaseManager.database;
-      final results = await db.query(
-        _tableName,
-        where: 'chatSessionId = ?',
-        whereArgs: [sessionId],
-        orderBy: 'timestamp ${ascending ? 'ASC' : 'DESC'}',
-        limit: limit,
-        offset: offset,
-      ).timeout(const Duration(seconds: 3));
+      final results = await db
+          .query(
+            _tableName,
+            where: 'chatSessionId = ?',
+            whereArgs: [sessionId],
+            orderBy: 'timestamp ${ascending ? 'ASC' : 'DESC'}',
+            limit: limit,
+            offset: offset,
+          )
+          .timeout(const Duration(seconds: 3));
 
       return results.map((row) => MessageModel.fromMap(row)).toList();
     } catch (e) {
@@ -149,7 +167,10 @@ class MessageRepository {
   }
 
   /// Update message status
-  static Future<bool> updateStatus(String messageId, MessageStatus status) async {
+  static Future<bool> updateStatus(
+    String messageId,
+    MessageStatus status,
+  ) async {
     try {
       final db = await DatabaseManager.database;
       final result = await db.update(
@@ -195,7 +216,9 @@ class MessageRepository {
 
       // Add message type filter
       if (messageTypes != null && messageTypes.isNotEmpty) {
-        final typeConditions = messageTypes.map((_) => 'messageType = ?').join(' OR ');
+        final typeConditions = messageTypes
+            .map((_) => 'messageType = ?')
+            .join(' OR ');
         whereConditions.add('($typeConditions)');
         whereArgs.addAll(messageTypes.map((type) => type.index));
       }
@@ -257,7 +280,9 @@ class MessageRepository {
   }
 
   /// Get pending messages (for retry logic)
-  static Future<List<MessageModel>> getPendingMessages({String? deviceId}) async {
+  static Future<List<MessageModel>> getPendingMessages({
+    String? deviceId,
+  }) async {
     try {
       final db = await DatabaseManager.database;
       final whereConditions = ['status = ?'];
@@ -325,14 +350,16 @@ class MessageRepository {
   static Future<bool> deleteMessagesForEndpoint(String endpointId) async {
     try {
       final db = await DatabaseManager.database;
-      final sessionId = 'chat_${endpointId.replaceAll(':', '_')}';
+      final sessionId = SessionIdHelper.buildSessionId(endpointId);
 
       final deletedCount = await db.delete(
         _tableName,
         where: 'chatSessionId = ? OR endpointId = ?',
         whereArgs: [sessionId, endpointId],
       );
-      debugPrint('🗑️ Deleted $deletedCount messages for endpoint: $endpointId (session: $sessionId)');
+      debugPrint(
+        '🗑️ Deleted $deletedCount messages for endpoint: $endpointId (session: $sessionId)',
+      );
       return true;
     } catch (e) {
       debugPrint('❌ Error deleting messages for endpoint: $e');
@@ -345,7 +372,8 @@ class MessageRepository {
     try {
       final db = await DatabaseManager.database;
 
-      final stats = await db.rawQuery('''
+      final stats = await db.rawQuery(
+        '''
         SELECT
           COUNT(*) as total_count,
           COUNT(CASE WHEN isMe = 1 THEN 1 END) as sent_count,
@@ -358,12 +386,14 @@ class MessageRepository {
           MAX(timestamp) as last_message_time
         FROM $_tableName
         WHERE chatSessionId = ?
-      ''', [
-        MessageType.location.index,
-        MessageStatus.pending.index,
-        MessageStatus.failed.index,
-        sessionId,
-      ]);
+      ''',
+        [
+          MessageType.location.index,
+          MessageStatus.pending.index,
+          MessageStatus.failed.index,
+          sessionId,
+        ],
+      );
 
       if (stats.isNotEmpty) {
         return Map<String, dynamic>.from(stats.first);
@@ -386,17 +416,21 @@ class MessageRepository {
         'sessionId': sessionId,
         'deviceName': session?.deviceName ?? 'Unknown',
         'messageCount': messages.length,
-        'messages': messages.map((m) => {
-          'timestamp': m.timestamp,
-          'fromUser': m.fromUser,
-          'message': m.message,
-          'type': m.type,
-          'isMe': m.isMe,
-          'isEmergency': m.isEmergency,
-          'latitude': m.latitude,
-          'longitude': m.longitude,
-          'connectionType': m.connectionType,
-        }).toList(),
+        'messages': messages
+            .map(
+              (m) => {
+                'timestamp': m.timestamp,
+                'fromUser': m.fromUser,
+                'message': m.message,
+                'type': m.type,
+                'isMe': m.isMe,
+                'isEmergency': m.isEmergency,
+                'latitude': m.latitude,
+                'longitude': m.longitude,
+                'connectionType': m.connectionType,
+              },
+            )
+            .toList(),
       };
     } catch (e) {
       debugPrint('❌ Error exporting messages: $e');
@@ -412,10 +446,12 @@ class MessageRepository {
       return await DatabaseManager.transaction((txn) async {
         final placeholders = List.filled(messageIds.length, '?').join(',');
 
-        await txn.rawUpdate(
-          'UPDATE $_tableName SET synced = 1 WHERE messageId IN ($placeholders)',
-          messageIds,
-        ).timeout(const Duration(seconds: 2));
+        await txn
+            .rawUpdate(
+              'UPDATE $_tableName SET synced = 1 WHERE messageId IN ($placeholders)',
+              messageIds,
+            )
+            .timeout(const Duration(seconds: 2));
 
         return true;
       });
@@ -429,11 +465,14 @@ class MessageRepository {
   static Future<int> getUnreadCount(String sessionId) async {
     try {
       final db = await DatabaseManager.database;
-      final result = await db.rawQuery('''
+      final result = await db.rawQuery(
+        '''
         SELECT COUNT(*) as count
         FROM $_tableName
         WHERE chatSessionId = ? AND isMe = 0 AND synced = 0
-      ''', [sessionId]);
+      ''',
+        [sessionId],
+      );
 
       return Sqflite.firstIntValue(result) ?? 0;
     } catch (e) {
@@ -445,7 +484,9 @@ class MessageRepository {
   /// Clean up failed messages older than specified duration
   static Future<int> cleanupFailedMessages({Duration? olderThan}) async {
     try {
-      final cutoffDate = DateTime.now().subtract(olderThan ?? const Duration(days: 7));
+      final cutoffDate = DateTime.now().subtract(
+        olderThan ?? const Duration(days: 7),
+      );
       final db = await DatabaseManager.database;
 
       final result = await db.delete(
@@ -464,7 +505,6 @@ class MessageRepository {
       return 0;
     }
   }
-
 
   static Future<MessageModel?> getById(String messageId) async {
     try {
@@ -505,7 +545,10 @@ class MessageRepository {
   }
 
   /// Get messages by user ID
-  static Future<List<MessageModel>> getByUserId(String userId, {int limit = 50}) async {
+  static Future<List<MessageModel>> getByUserId(
+    String userId, {
+    int limit = 50,
+  }) async {
     try {
       final db = await DatabaseManager.database;
       final results = await db.query(
@@ -552,7 +595,11 @@ class MessageRepository {
       await DatabaseManager.transaction((txn) async {
         for (final message in messages) {
           final messageMap = _messageToMap(message);
-          await txn.insert(_tableName, messageMap, conflictAlgorithm: ConflictAlgorithm.replace);
+          await txn.insert(
+            _tableName,
+            messageMap,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
         }
       });
 
@@ -637,7 +684,10 @@ class MessageRepository {
   }
 
   /// Update last retry time for a message
-  static Future<void> updateLastRetryTime(String messageId, int timestamp) async {
+  static Future<void> updateLastRetryTime(
+    String messageId,
+    int timestamp,
+  ) async {
     try {
       final db = await DatabaseManager.database;
       await db.update(
@@ -751,7 +801,8 @@ class MessageRepository {
   /// Helper method to convert MessageModel to Map
   static Map<String, dynamic> _messageToMap(MessageModel message) {
     return {
-      'messageId': message.messageId ?? 'msg_${DateTime.now().millisecondsSinceEpoch}',
+      'messageId':
+          message.messageId ?? 'msg_${DateTime.now().millisecondsSinceEpoch}',
       'endpointId': message.endpointId,
       'fromUser': message.fromUser,
       'message': message.message,
@@ -768,7 +819,9 @@ class MessageRepository {
       'routePath': message.routePath?.join(','),
       'ttl': message.ttl ?? 5,
       'connectionType': message.connectionType,
-      'deviceInfo': message.deviceInfo != null ? jsonEncode(message.deviceInfo!) : null,
+      'deviceInfo': message.deviceInfo != null
+          ? jsonEncode(message.deviceInfo!)
+          : null,
       'targetDeviceId': message.targetDeviceId,
       'messageType': message.messageType.index,
       'chatSessionId': message.chatSessionId,
@@ -780,7 +833,14 @@ class MessageRepository {
   }
 
   // Additional compatibility methods for legacy code
-  static Future<void> insertMessage(MessageModel message, {String? currentUserId}) => insert(message);
-  static Future<void> updateMessageStatus(String messageId, MessageStatus status) => updateStatus(messageId, status);
-  static Future<void> markMessageSynced(String messageId) => markSynced(messageId);
+  static Future<void> insertMessage(
+    MessageModel message, {
+    String? currentUserId,
+  }) => insert(message);
+  static Future<void> updateMessageStatus(
+    String messageId,
+    MessageStatus status,
+  ) => updateStatus(messageId, status);
+  static Future<void> markMessageSynced(String messageId) =>
+      markSynced(messageId);
 }

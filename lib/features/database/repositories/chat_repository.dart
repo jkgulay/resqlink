@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../../models/chat_session_model.dart';
 import '../../../models/message_model.dart';
 import '../core/database_manager.dart';
+import '../../../utils/session_id_helper.dart';
 
 /// Repository for chat session operations
 class ChatRepository {
@@ -34,7 +35,8 @@ class ChatRepository {
       }
 
       // Session ID is now based on the stable device identifier (UUID)
-      final sessionId = 'chat_${stableDeviceId.replaceAll(':', '_')}';
+      final sessionId = SessionIdHelper.buildSessionId(stableDeviceId);
+      final legacyIds = SessionIdHelper.legacySessionIds(stableDeviceId);
 
       debugPrint(
         '✅ Creating/updating session with validated UUID: $stableDeviceId',
@@ -51,10 +53,16 @@ class ChatRepository {
       );
 
       // Check for existing session using ONLY deviceAddress (UUID)
+      final whereClauses = StringBuffer('device_address = ? OR device_id = ?');
+      if (legacyIds.isNotEmpty) {
+        final placeholders = List.filled(legacyIds.length, '?').join(', ');
+        whereClauses.write(' OR id IN ($placeholders)');
+      }
+
       final existingSession = await db.query(
         _tableName,
-        where: 'device_address = ? OR device_id = ? OR id = ?',
-        whereArgs: [stableDeviceId, stableDeviceId, sessionId],
+        where: whereClauses.toString(),
+        whereArgs: [stableDeviceId, stableDeviceId, ...legacyIds],
         limit: 1,
       );
 
@@ -806,19 +814,19 @@ class ChatRepository {
             final id = session['device_id'] as String?;
             if (addr != null && addr.isNotEmpty) {
               finalDeviceAddress = addr;
-              foundSessionId = 'chat_${addr.replaceAll(':', '_')}';
+              foundSessionId = SessionIdHelper.buildSessionId(addr);
               break;
             } else if (id != null && id.isNotEmpty) {
               finalDeviceAddress = id;
-              foundSessionId = 'chat_${id.replaceAll(':', '_')}';
+              foundSessionId = SessionIdHelper.buildSessionId(id);
               break;
             }
           }
           stableSessionId = foundSessionId ?? (keepSession['id'] as String);
         } else {
           finalDeviceAddress = deviceKey;
-          stableSessionId =
-              'chat_${deviceKey.replaceAll(':', '_').replaceAll('name:', '')}';
+          final normalizedKey = deviceKey.replaceAll('name:', '');
+          stableSessionId = SessionIdHelper.buildSessionId(normalizedKey);
         }
 
         final existingId = keepSession['id'] as String;

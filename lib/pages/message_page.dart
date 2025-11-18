@@ -66,6 +66,13 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   Timer? _loadConversationsDebounce;
   bool _isLoadingConversations = false;
 
+  // Connectivity status tracking (for chat view)
+  bool _isConnected = false;
+  bool _isMeshReachable = false;
+  int _meshHopCount = 0; // Hop count for mesh relay
+  Timer? _meshMonitoringTimer;
+  Timer? _connectivityRefreshTimer;
+
   // Current user info - use consistent 'local' to match session generation across the app
   String get _currentUserId => 'local';
   LocationModel? get _currentLocation => widget.currentLocation;
@@ -105,6 +112,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void dispose() {
     _refreshTimer?.cancel();
     _typingTimer?.cancel();
+    _meshMonitoringTimer?.cancel();
+    _connectivityRefreshTimer?.cancel();
     // Queue processing timer removal - no longer needed
     _loadConversationsDebounce?.cancel();
 
@@ -119,6 +128,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       _syncService.dispose();
       widget.p2pService.removeListener(_onP2PUpdate);
       widget.p2pService.removeListener(_onP2PConnectionChanged);
+      widget.p2pService.removeListener(_handleP2PStateChanged);
     } catch (e) {
       debugPrint('Error disposing services: $e');
     }
@@ -148,6 +158,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       };
 
       widget.p2pService.addListener(_onP2PUpdate);
+      widget.p2pService.addListener(_handleP2PStateChanged);
       // Note: Use event bus or message router for message handling instead of direct callback
       // widget.p2pService.onMessageReceived = _onMessageReceived;
 
@@ -156,6 +167,15 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       if (!mounted) return;
 
       _startAdaptiveRefresh();
+      _startMeshMonitoring();
+      _startPeriodicConnectivityRefresh();
+
+      // Initial connectivity check after first frame
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _selectedEndpointId != null) {
+          _refreshConnectivityState();
+        }
+      });
     } catch (e) {
       debugPrint('❌ Error initializing MessagePage: $e');
       if (mounted) {
@@ -205,6 +225,15 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             debugPrint(
               '✅ Added message to conversation without database reload',
             );
+
+            // Message received proves device is reachable - refresh connectivity
+            debugPrint(
+              '✅ Message received - device IS reachable, refreshing status',
+            );
+            _refreshConnectivityState();
+            Future.delayed(Duration(milliseconds: 100)).then((_) {
+              if (mounted) _refreshConnectivityState();
+            });
           } else {
             debugPrint('⚠️ Duplicate message blocked in conversation view');
           }
@@ -247,7 +276,90 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   void _onP2PConnectionChanged() {
     if (!mounted) return;
     _loadConversations();
+    if (_isChatView && _selectedEndpointId != null) {
+      _refreshConnectivityState();
+    }
     setState(() {});
+  }
+
+  void _handleP2PStateChanged() {
+    if (!mounted) return;
+    if (_isChatView && _selectedEndpointId != null) {
+      debugPrint(
+        '📡 P2P state changed - refreshing connectivity for $_selectedDeviceName',
+      );
+      _refreshConnectivityState();
+      // Double-refresh with delay to catch async updates
+      Future.delayed(Duration(milliseconds: 200)).then((_) {
+        if (mounted) _refreshConnectivityState();
+      });
+    }
+  }
+
+  void _refreshConnectivityState() {
+    if (!mounted || _selectedEndpointId == null) return;
+
+    final deviceId = _selectedEndpointId!;
+    debugPrint(
+      '🔄 Refreshing connectivity for device: $deviceId ($_selectedDeviceName)',
+    );
+
+    final direct = widget.p2pService.isDeviceDirectlyConnected(deviceId);
+    final reachable = widget.p2pService.isDeviceReachable(deviceId);
+    final hopCount = widget.p2pService.meshDeviceHopCount[deviceId] ?? 0;
+    final inMeshRegistry = widget.p2pService.meshDevices.containsKey(deviceId);
+
+    debugPrint(
+      '   Direct: $direct, Reachable: $reachable, InMesh: $inMeshRegistry, Hops: $hopCount',
+    );
+
+    if (_isConnected != direct ||
+        _isMeshReachable != reachable ||
+        _meshHopCount != hopCount) {
+      debugPrint('   ⚡ State changed! Updating UI...');
+      setState(() {
+        _isConnected = direct;
+        _isMeshReachable = reachable;
+        _meshHopCount = hopCount;
+      });
+    }
+  }
+
+  void _startMeshMonitoring() {
+    _meshMonitoringTimer?.cancel();
+    _meshMonitoringTimer = Timer.periodic(Duration(seconds: 2), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      if (!_isChatView || _selectedEndpointId == null) return;
+
+      final deviceId = _selectedEndpointId!;
+      final inMesh = widget.p2pService.meshDevices.containsKey(deviceId);
+
+      // If device appeared in mesh and we thought it was offline, update immediately
+      if (inMesh && !_isMeshReachable) {
+        debugPrint(
+          '🔔 MESH CONNECTIVITY DETECTED! Device $deviceId now reachable via mesh',
+        );
+        _refreshConnectivityState();
+      }
+    });
+  }
+
+  void _startPeriodicConnectivityRefresh() {
+    _connectivityRefreshTimer?.cancel();
+    _connectivityRefreshTimer = Timer.periodic(Duration(seconds: 3), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      if (_isChatView && _selectedEndpointId != null) {
+        _refreshConnectivityState();
+      }
+    });
   }
 
   // Message queue processing methods removed
@@ -283,13 +395,22 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     );
 
     if (!existingConversation) {
+      final isDirectlyConnected = widget.p2pService.connectedDevices
+          .containsKey(deviceId);
+      final isMeshReachable =
+          !isDirectlyConnected &&
+          widget.p2pService.meshDevices.containsKey(deviceId);
+      final hopCount = widget.p2pService.meshDeviceHopCount[deviceId] ?? 0;
+
       final newConversation = MessageSummary(
         endpointId: deviceId,
         deviceName: deviceName,
         lastMessage: null,
         messageCount: 0,
         unreadCount: 0,
-        isConnected: true,
+        isConnected: isDirectlyConnected,
+        isMeshReachable: isMeshReachable,
+        meshHopCount: hopCount,
       );
 
       setState(() {
@@ -347,26 +468,46 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           final existing = conversationMap[endpointId]!;
           // Simple check: only replace if new name is clearly better (avoid heavy scoring)
           if (_isSimpleNameBetter(deviceName, existing.deviceName)) {
+            final isDirectlyConnected = connectedDevices.containsKey(
+              endpointId,
+            );
+            final isMeshReachable =
+                !isDirectlyConnected &&
+                widget.p2pService.meshDevices.containsKey(endpointId);
+            final hopCount =
+                widget.p2pService.meshDeviceHopCount[endpointId] ?? 0;
+
             conversationMap[endpointId] = MessageSummary(
               endpointId: endpointId,
               deviceName: deviceName,
               lastMessage: null,
               messageCount: 0,
               unreadCount: 0,
-              isConnected: connectedDevices.containsKey(endpointId),
+              isConnected: isDirectlyConnected,
+              isMeshReachable: isMeshReachable,
+              meshHopCount: hopCount,
             );
             debugPrint(
               '🔄 Updated session name: $deviceName (was: ${existing.deviceName})',
             );
           }
         } else {
+          final isDirectlyConnected = connectedDevices.containsKey(endpointId);
+          final isMeshReachable =
+              !isDirectlyConnected &&
+              widget.p2pService.meshDevices.containsKey(endpointId);
+          final hopCount =
+              widget.p2pService.meshDeviceHopCount[endpointId] ?? 0;
+
           conversationMap[endpointId] = MessageSummary(
             endpointId: endpointId,
             deviceName: deviceName,
             lastMessage: null,
             messageCount: 0,
             unreadCount: 0,
-            isConnected: connectedDevices.containsKey(endpointId),
+            isConnected: isDirectlyConnected,
+            isMeshReachable: isMeshReachable,
+            meshHopCount: hopCount,
           );
           debugPrint(
             '🗄️ Loaded persistent session: $deviceName ($endpointId)',
@@ -403,13 +544,22 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               .where((m) => !m.synced && !m.isMe)
               .length;
 
+          final isDirectlyConnected = connectedDevices.containsKey(endpointId);
+          final isMeshReachable =
+              !isDirectlyConnected &&
+              widget.p2pService.meshDevices.containsKey(endpointId);
+          final hopCount =
+              widget.p2pService.meshDeviceHopCount[endpointId] ?? 0;
+
           conversationMap[endpointId] = MessageSummary(
             endpointId: endpointId,
             deviceName: deviceName,
             lastMessage: message,
             messageCount: endpointMessages.length,
             unreadCount: unreadCount,
-            isConnected: connectedDevices.containsKey(endpointId),
+            isConnected: isDirectlyConnected,
+            isMeshReachable: isMeshReachable,
+            meshHopCount: hopCount,
           );
         } else {
           final currentSummary = conversationMap[endpointId]!;
@@ -435,6 +585,15 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                 ? deviceName
                 : currentSummary.deviceName;
 
+            final isDirectlyConnected = connectedDevices.containsKey(
+              endpointId,
+            );
+            final isMeshReachable =
+                !isDirectlyConnected &&
+                widget.p2pService.meshDevices.containsKey(endpointId);
+            final hopCount =
+                widget.p2pService.meshDeviceHopCount[endpointId] ?? 0;
+
             conversationMap[endpointId] = MessageSummary(
               endpointId: endpointId,
               deviceName: bestDeviceName,
@@ -443,7 +602,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                   : currentSummary.lastMessage,
               messageCount: endpointMessages.length,
               unreadCount: unreadCount,
-              isConnected: connectedDevices.containsKey(endpointId),
+              isConnected: isDirectlyConnected,
+              isMeshReachable: isMeshReachable,
+              meshHopCount: hopCount,
             );
 
             if (shouldUpdateName) {
@@ -606,12 +767,16 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       final senderName = widget.p2pService.userName ?? 'Unknown User';
 
       // Check connection status
+      // Check both direct connection AND mesh reachability
       final isConnected = widget.p2pService.connectedDevices.containsKey(
         _selectedEndpointId,
       );
-      final connectionInfo = isConnected
-          ? 'connected'
-          : 'disconnected (will queue)';
+      final isReachable = widget.p2pService.isDeviceReachable(
+        _selectedEndpointId!,
+      );
+      final connectionInfo = isReachable
+          ? (isConnected ? 'directly connected' : 'mesh reachable')
+          : 'unreachable (will queue)';
 
       debugPrint(
         '📤 Sending message to $_selectedEndpointId ($connectionInfo): "$messageText"',
@@ -630,7 +795,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         longitude: _currentLocation?.longitude,
         messageId: messageId,
         type: type.name,
-        status: isConnected ? MessageStatus.sent : MessageStatus.pending,
+        status: isReachable ? MessageStatus.pending : MessageStatus.failed,
         deviceId: widget.p2pService.deviceId,
       );
 
@@ -666,12 +831,37 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         senderName: senderName, // CRITICAL: Include actual sender name
       );
 
-      if (isConnected) {
-        debugPrint('✅ Message sent immediately to connected device');
-        _showSuccessMessage('Message sent');
+      if (isReachable) {
+        // Update status to sent after successful transmission
+        await MessageRepository.updateStatus(messageId, MessageStatus.sent);
+        if (mounted) {
+          setState(() {
+            final index = _selectedConversationMessages.indexWhere(
+              (m) => m.messageId == messageId,
+            );
+            if (index != -1) {
+              _selectedConversationMessages[index] = dbMessage.copyWith(
+                status: MessageStatus.sent,
+              );
+            }
+          });
+        }
+
+        debugPrint(
+          '✅ Message sent successfully to ${isConnected ? "directly connected" : "mesh-reachable"} device',
+        );
+        _showSuccessMessage(
+          isConnected ? 'Message sent' : 'Message sent via mesh',
+        );
+
+        // Message sent successfully proves device is reachable - refresh connectivity
+        _refreshConnectivityState();
+        Future.delayed(Duration(milliseconds: 100)).then((_) {
+          if (mounted) _refreshConnectivityState();
+        });
       } else {
-        debugPrint('📥 Message queued for later delivery');
-        _showSuccessMessage('Message queued (device offline)');
+        debugPrint('📥 Message failed - device unreachable');
+        _showErrorMessage('Device unreachable - message failed');
       }
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
@@ -736,6 +926,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       final isConnected = widget.p2pService.connectedDevices.containsKey(
         _selectedEndpointId,
       );
+      final isReachable = widget.p2pService.isDeviceReachable(
+        _selectedEndpointId!,
+      );
 
       final dbMessage = MessageModel(
         endpointId: _selectedEndpointId!,
@@ -749,7 +942,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         longitude: longitude,
         messageId: messageId,
         type: MessageType.location.name,
-        status: isConnected ? MessageStatus.sent : MessageStatus.pending,
+        status: isReachable ? MessageStatus.pending : MessageStatus.failed,
         deviceId: widget.p2pService.deviceId,
       );
 
@@ -776,11 +969,27 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       );
 
       if (mounted) {
-        _showSuccessMessage(
-          isConnected
-              ? 'Location shared successfully'
-              : 'Location queued (device offline)',
-        );
+        if (isReachable) {
+          // Update status to sent after successful transmission
+          await MessageRepository.updateStatus(messageId, MessageStatus.sent);
+          setState(() {
+            final index = _selectedConversationMessages.indexWhere(
+              (m) => m.messageId == messageId,
+            );
+            if (index != -1) {
+              _selectedConversationMessages[index] = dbMessage.copyWith(
+                status: MessageStatus.sent,
+              );
+            }
+          });
+          _showSuccessMessage(
+            isConnected
+                ? 'Location shared successfully'
+                : 'Location shared via mesh',
+          );
+        } else {
+          _showSuccessMessage('Device unreachable - location failed');
+        }
       }
     } catch (e) {
       debugPrint('❌ Error sending location: $e');
@@ -798,6 +1007,17 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       _isChatView = true;
     });
     _loadMessagesForDevice(endpointId);
+
+    // Refresh connectivity state when opening conversation
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _refreshConnectivityState();
+        // Double-refresh to catch async updates
+        Future.delayed(Duration(milliseconds: 100)).then((_) {
+          if (mounted) _refreshConnectivityState();
+        });
+      }
+    });
   }
 
   void selectDevice(String deviceId, String deviceName) {
@@ -1011,6 +1231,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           selectedDeviceName: _selectedDeviceName,
           selectedEndpointId: _selectedEndpointId,
           p2pService: widget.p2pService,
+          isConnected: _isConnected,
+          isMeshReachable: _isMeshReachable,
+          meshHopCount: _meshHopCount,
           onBackPressed: () => setState(() {
             _isChatView = false;
             _selectedEndpointId = null;
