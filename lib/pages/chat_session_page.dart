@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../utils/offline_fonts.dart';
 import '../models/chat_session_model.dart';
 import '../models/message_model.dart';
 import '../features/database/repositories/chat_repository.dart';
 import '../features/database/repositories/message_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
 import '../services/location_state_service.dart';
+import '../services/identity_service.dart';
 import '../utils/resqlink_theme.dart';
 import '../utils/responsive_utils.dart';
 import '../widgets/message/chat_view.dart';
@@ -548,11 +549,15 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           ? MessageStatus.pending
           : MessageStatus.failed;
 
+      // CRITICAL FIX: Get fresh username from IdentityService
+      final identityService = IdentityService();
+      final currentUserName = await identityService.getDisplayName();
+
       // Create message with chat session ID
       final message = MessageModel(
         messageId: messageId,
         endpointId: targetDeviceId,
-        fromUser: widget.p2pService.userName ?? 'You',
+        fromUser: currentUserName,
         message: messageText.trim(),
         isMe: true,
         isEmergency: type == MessageType.emergency || type == MessageType.sos,
@@ -588,11 +593,15 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       }
 
       try {
+        // CRITICAL FIX: Get fresh username for senderName parameter
+        final identityService = IdentityService();
+        final currentUserName = await identityService.getDisplayName();
+
         await widget.p2pService.sendMessage(
           message: messageText.trim(),
           type: type,
           targetDeviceId: targetDeviceId,
-          senderName: widget.p2pService.userName ?? 'You',
+          senderName: currentUserName,
         );
 
         await MessageRepository.updateStatus(messageId, MessageStatus.sent);
@@ -696,10 +705,14 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           ? MessageStatus.pending
           : MessageStatus.failed;
 
+      // CRITICAL FIX: Get fresh username from IdentityService
+      final identityService = IdentityService();
+      final currentUserName = await identityService.getDisplayName();
+
       final message = MessageModel(
         messageId: messageId,
         endpointId: targetDeviceId,
-        fromUser: widget.p2pService.userName ?? 'You',
+        fromUser: currentUserName,
         message: locationText,
         isMe: true,
         isEmergency: false,
@@ -726,12 +739,16 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
       if (isReachable) {
         try {
+          // CRITICAL FIX: Get fresh username for senderName parameter
+          final identityService = IdentityService();
+          final currentUserName = await identityService.getDisplayName();
+
           await widget.p2pService.sendMessage(
             id: messageId,
             message: locationText,
             type: MessageType.location,
             targetDeviceId: targetDeviceId,
-            senderName: widget.p2pService.userName ?? 'You',
+            senderName: currentUserName,
             latitude: _currentLocation!.latitude,
             longitude: _currentLocation!.longitude,
           );
@@ -858,7 +875,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       SnackBar(
         content: Text(
           message,
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white,
             fontWeight: FontWeight.w600,
             fontSize: 14,
@@ -987,7 +1004,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                 widget.deviceName.isNotEmpty
                     ? widget.deviceName[0].toUpperCase()
                     : 'D',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
                   fontSize: 16,
@@ -1003,7 +1020,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
               children: [
                 Text(
                   widget.deviceName,
-                  style: GoogleFonts.poppins(
+                  style: OfflineFonts.poppins(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
                     fontSize: 16,
@@ -1043,7 +1060,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                     Expanded(
                       child: Text(
                         statusText,
-                        style: GoogleFonts.poppins(
+                        style: OfflineFonts.poppins(
                           color: _isConnected
                               ? ResQLinkTheme.safeGreen
                               : _hasMeshRelay
@@ -1079,7 +1096,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
               ),
               child: Text(
                 '$_queuedMessageCount',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white,
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
@@ -1131,7 +1148,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                   SizedBox(width: 8),
                   Text(
                     'Device Info',
-                    style: GoogleFonts.poppins(
+                    style: OfflineFonts.poppins(
                       color: Colors.white,
                       fontWeight: FontWeight.w500,
                     ),
@@ -1147,7 +1164,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                   SizedBox(width: 8),
                   Text(
                     'Clear Chat',
-                    style: GoogleFonts.poppins(
+                    style: OfflineFonts.poppins(
                       color: Colors.white,
                       fontWeight: FontWeight.w500,
                     ),
@@ -1163,7 +1180,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
                   SizedBox(width: 8),
                   Text(
                     'Block Device',
-                    style: GoogleFonts.poppins(
+                    style: OfflineFonts.poppins(
                       color: ResQLinkTheme.primaryRed,
                       fontWeight: FontWeight.w500,
                     ),
@@ -1281,7 +1298,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             Expanded(
               child: Text(
                 bannerText,
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white,
                   fontWeight: FontWeight.w500,
                   fontSize: 13,
@@ -1303,7 +1320,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         backgroundColor: ResQLinkTheme.cardDark,
         title: Text(
           'Device Information',
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white,
             fontWeight: FontWeight.w600,
             fontSize: 18,
@@ -1338,7 +1355,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             onPressed: () => Navigator.pop(context),
             child: Text(
               'Close',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white70,
                 fontWeight: FontWeight.w500,
               ),
@@ -1359,7 +1376,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             width: 100,
             child: Text(
               '$label:',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white70,
                 fontWeight: FontWeight.w500,
                 fontSize: 14,
@@ -1369,7 +1386,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
           Expanded(
             child: Text(
               value,
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white,
                 fontWeight: FontWeight.w400,
                 fontSize: 14,
@@ -1403,7 +1420,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         backgroundColor: ResQLinkTheme.cardDark,
         title: Text(
           'Clear Chat History',
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white,
             fontWeight: FontWeight.w600,
             fontSize: 18,
@@ -1411,7 +1428,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         ),
         content: Text(
           'Are you sure you want to clear all messages in this chat? This action cannot be undone.',
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white70,
             fontSize: 14,
             fontWeight: FontWeight.w400,
@@ -1422,7 +1439,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             onPressed: () => Navigator.pop(context),
             child: Text(
               'Cancel',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white70,
                 fontWeight: FontWeight.w500,
               ),
@@ -1439,7 +1456,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             },
             child: Text(
               'Clear',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: ResQLinkTheme.primaryRed,
                 fontWeight: FontWeight.w700,
               ),
@@ -1457,7 +1474,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         backgroundColor: ResQLinkTheme.cardDark,
         title: Text(
           'Block Device',
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white,
             fontWeight: FontWeight.w600,
             fontSize: 18,
@@ -1465,7 +1482,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         ),
         content: Text(
           'Are you sure you want to block this device? You will no longer receive messages from this device.',
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white70,
             fontSize: 14,
             fontWeight: FontWeight.w400,
@@ -1476,7 +1493,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             onPressed: () => Navigator.pop(context),
             child: Text(
               'Cancel',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white70,
                 fontWeight: FontWeight.w500,
               ),
@@ -1494,7 +1511,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
             },
             child: Text(
               'Block',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: ResQLinkTheme.primaryRed,
                 fontWeight: FontWeight.w700,
               ),

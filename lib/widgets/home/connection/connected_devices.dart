@@ -3,6 +3,7 @@ import 'package:resqlink/controllers/home_controller.dart';
 import 'package:resqlink/models/device_model.dart';
 import 'package:resqlink/services/p2p/p2p_base_service.dart';
 import 'package:resqlink/utils/responsive_helper.dart';
+import 'package:resqlink/features/database/repositories/chat_repository.dart';
 
 class ConnectedDevices extends StatelessWidget {
   final HomeController controller;
@@ -161,14 +162,19 @@ class ConnectedDevices extends StatelessWidget {
                   ),
                   SizedBox(width: spacing),
                   Expanded(
-                    child: Text(
-                      device.userName,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w500,
-                        fontSize: deviceNameSize,
-                        color: Colors.white,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+                    child: FutureBuilder<String>(
+                      future: _getDeviceDisplayNameStatic(device),
+                      builder: (context, snapshot) {
+                        return Text(
+                          snapshot.data ?? device.userName,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w500,
+                            fontSize: deviceNameSize,
+                            color: Colors.white,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        );
+                      },
                     ),
                   ),
                   Container(
@@ -201,17 +207,20 @@ class ConnectedDevices extends StatelessWidget {
                     ),
                     onPressed: () {
                       if (onDeviceChatTap != null) {
-                        final deviceMap = {
-                          'deviceId': device.deviceId,
-                          'deviceName': device.userName,
-                          'isHost': device.isHost,
-                        };
-                        onDeviceChatTap!(deviceMap);
+                        // CRITICAL: Get fresh device name before navigation
+                        _getDeviceDisplayNameStatic(device).then((freshName) {
+                          final deviceMap = {
+                            'deviceId': device.deviceId,
+                            'deviceName': freshName,
+                            'isHost': device.isHost,
+                          };
+                          onDeviceChatTap!(deviceMap);
+                        });
                       }
                     },
                     padding: EdgeInsets.all(8),
                     constraints: BoxConstraints(),
-                    tooltip: 'Chat with ${device.userName}',
+                    tooltip: 'Chat',
                   ),
                 ],
               ),
@@ -219,5 +228,21 @@ class ConnectedDevices extends StatelessWidget {
           )
           .toList(),
     );
+  }
+
+  /// Get fresh device display name from database (chat sessions)
+  /// This ensures name updates are reflected immediately in UI
+  static Future<String> _getDeviceDisplayNameStatic(DeviceModel device) async {
+    try {
+      final session = await ChatRepository.getSessionByDeviceId(
+        device.deviceId,
+      );
+      if (session != null && session.deviceName.isNotEmpty) {
+        return session.deviceName;
+      }
+    } catch (e) {
+      // Fallback to DeviceModel if database lookup fails
+    }
+    return device.userName;
   }
 }

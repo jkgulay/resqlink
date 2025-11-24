@@ -124,6 +124,11 @@ class GpsActionButtons extends StatelessWidget {
   }
 
   Widget _buildOfflineMapButton(GpsController controller) {
+    final isDownloading =
+        controller.isDownloadingMaps || controller.isDownloadingOfflineMap;
+    final downloadPercent = (controller.downloadProgress.clamp(0.0, 1.0) * 100)
+        .round();
+
     return Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -142,41 +147,84 @@ class GpsActionButtons extends StatelessWidget {
           ),
         ],
       ),
-      child: Stack(
-        children: [
-          IconButton(
-            onPressed: () => _showOfflineMapDialog(controller),
-            icon: Icon(
-              controller.hasOfflineMap ? Icons.offline_pin : Icons.download,
-              color: controller.hasOfflineMap
-                  ? ResQLinkTheme.safeGreen
-                  : Colors.purple,
-              size: 24,
-            ),
-            tooltip: controller.hasOfflineMap
-                ? 'Offline maps available'
-                : 'Download offline maps',
-          ),
-          // Status indicator dot
-          Positioned(
-            right: 8,
-            top: 8,
-            child: Container(
-              width: 12,
-              height: 12,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
+      child: SizedBox(
+        width: 60,
+        height: 60,
+        child: Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              onPressed: () => _showOfflineMapDialog(controller),
+              icon: Icon(
+                controller.hasOfflineMap ? Icons.offline_pin : Icons.download,
                 color: controller.hasOfflineMap
                     ? ResQLinkTheme.safeGreen
-                    : Colors.red,
-                border: Border.all(color: Colors.white, width: 1),
+                    : Colors.purple,
+                size: 24,
               ),
-              child: controller.hasOfflineMap
-                  ? Icon(Icons.check, size: 8, color: Colors.white)
-                  : Icon(Icons.close, size: 8, color: Colors.white),
+              tooltip: controller.hasOfflineMap
+                  ? 'Offline maps available'
+                  : 'Download offline maps',
             ),
-          ),
-        ],
+            // Status indicator dot
+            Positioned(
+              right: 8,
+              top: 8,
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: controller.hasOfflineMap
+                      ? ResQLinkTheme.safeGreen
+                      : Colors.red,
+                  border: Border.all(color: Colors.white, width: 1),
+                ),
+                child: controller.hasOfflineMap
+                    ? Icon(Icons.check, size: 8, color: Colors.white)
+                    : Icon(Icons.close, size: 8, color: Colors.white),
+              ),
+            ),
+            if (isDownloading)
+              IgnorePointer(
+                ignoring: true,
+                child: Container(
+                  width: double.infinity,
+                  height: double.infinity,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.black.withValues(alpha: 0.55),
+                  ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: CircularProgressIndicator(
+                          value: controller.downloadProgress.clamp(0.0, 1.0),
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            ResQLinkTheme.emergencyOrange,
+                          ),
+                          backgroundColor: Colors.white.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      Text(
+                        '$downloadPercent%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

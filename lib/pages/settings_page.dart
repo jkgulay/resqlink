@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 import 'package:resqlink/features/database/repositories/chat_repository.dart';
 import 'package:resqlink/features/database/repositories/location_repository.dart';
 import 'package:resqlink/pages/landing_page.dart';
@@ -210,7 +210,7 @@ class SettingsPageState extends State<SettingsPage> {
           backgroundColor: ResQLinkTheme.cardDark,
           title: Text(
             title,
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: Colors.white,
               fontWeight: FontWeight.w600,
               fontSize: 18,
@@ -218,7 +218,7 @@ class SettingsPageState extends State<SettingsPage> {
           ),
           content: Text(
             content,
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: Colors.white70,
               fontSize: 14,
               fontWeight: FontWeight.w400,
@@ -229,7 +229,7 @@ class SettingsPageState extends State<SettingsPage> {
               onPressed: () => Navigator.of(context).pop(false),
               child: Text(
                 'Cancel',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white70,
                   fontWeight: FontWeight.w500,
                 ),
@@ -239,7 +239,7 @@ class SettingsPageState extends State<SettingsPage> {
               onPressed: () => Navigator.of(context).pop(true),
               child: Text(
                 confirmText,
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: isDangerous
                       ? ResQLinkTheme.primaryRed
                       : ResQLinkTheme.orange,
@@ -273,7 +273,7 @@ class SettingsPageState extends State<SettingsPage> {
       SnackBar(
         content: Text(
           message,
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+          style: OfflineFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
           maxLines: 4,
           overflow: TextOverflow.ellipsis,
         ),
@@ -427,7 +427,7 @@ class SettingsPageState extends State<SettingsPage> {
                     SizedBox(width: 20),
                     Text(
                       'Logging out...',
-                      style: GoogleFonts.poppins(
+                      style: OfflineFonts.poppins(
                         color: Colors.white,
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
@@ -475,7 +475,7 @@ class SettingsPageState extends State<SettingsPage> {
           SizedBox(width: 12),
           Text(
             title,
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: Colors.white,
               fontSize: ResponsiveHelper.getTitleSize(context),
               fontWeight: FontWeight.w700,
@@ -535,7 +535,7 @@ class SettingsPageState extends State<SettingsPage> {
                 SizedBox(width: ResponsiveHelper.getContentSpacing(context)),
                 Text(
                   'App Statistics',
-                  style: GoogleFonts.poppins(
+                  style: OfflineFonts.poppins(
                     color: Colors.white,
                     fontSize: ResponsiveHelper.getTitleSize(context),
                     fontWeight: FontWeight.w600,
@@ -625,7 +625,7 @@ class SettingsPageState extends State<SettingsPage> {
         SizedBox(height: 8),
         Text(
           value,
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white,
             fontSize: ResponsiveHelper.getTitleSize(context),
             fontWeight: FontWeight.w700,
@@ -636,7 +636,7 @@ class SettingsPageState extends State<SettingsPage> {
         SizedBox(height: 4),
         Text(
           label,
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white.withValues(alpha: 0.8),
             fontSize: ResponsiveHelper.getSubtitleSize(context) - 2,
             fontWeight: FontWeight.w400,
@@ -690,7 +690,7 @@ class SettingsPageState extends State<SettingsPage> {
         ),
         title: Text(
           title,
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: isEnabled
                 ? Colors.white
                 : Colors.white.withValues(alpha: 0.5),
@@ -700,7 +700,7 @@ class SettingsPageState extends State<SettingsPage> {
         ),
         subtitle: Text(
           subtitle,
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: isEnabled
                 ? Colors.white.withValues(alpha: 0.7)
                 : Colors.white.withValues(alpha: 0.3),
@@ -779,7 +779,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'Location Permissions',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white,
                   fontWeight: FontWeight.w500,
                   fontSize: 16,
@@ -787,7 +787,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               subtitle: Text(
                 'Manage location access for the app',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white.withValues(alpha: 0.7),
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
@@ -934,7 +934,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'Merge Duplicate Sessions',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white,
                   fontWeight: FontWeight.w500,
                   fontSize: 16,
@@ -942,7 +942,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               subtitle: Text(
                 'Clean up and merge duplicate chat sessions',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white.withValues(alpha: 0.7),
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
@@ -983,7 +983,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'Clear Chat History',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white,
                   fontWeight: FontWeight.w500,
                   fontSize: 16,
@@ -991,7 +991,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               subtitle: Text(
                 'Delete all messages from device',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white.withValues(alpha: 0.7),
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
@@ -1061,7 +1061,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'About ResQLink',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white,
                   fontWeight: FontWeight.w500,
                   fontSize: 16,
@@ -1069,7 +1069,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               subtitle: Text(
                 'App version and information',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white.withValues(alpha: 0.7),
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
@@ -1095,7 +1095,7 @@ class SettingsPageState extends State<SettingsPage> {
                       child: Text(
                         'Offline emergency communication using Wi-Fi Direct and GPS.\n\n'
                         'Stay connected even when the internet is down.',
-                        style: GoogleFonts.poppins(
+                        style: OfflineFonts.poppins(
                           color: Colors.white70,
                           fontSize: 14,
                           fontWeight: FontWeight.w400,
@@ -1131,7 +1131,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               title: Text(
                 'Logout',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white,
                   fontWeight: FontWeight.w500,
                   fontSize: 16,
@@ -1139,7 +1139,7 @@ class SettingsPageState extends State<SettingsPage> {
               ),
               subtitle: Text(
                 'Sign out from the application',
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white.withValues(alpha: 0.7),
                   fontSize: 13,
                   fontWeight: FontWeight.w400,

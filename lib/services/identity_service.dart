@@ -91,19 +91,23 @@ class IdentityService {
     final deviceId = await getDeviceId();
     final displayName = await getDisplayName();
 
-    return {
-      'deviceId': deviceId,
-      'displayName': displayName,
-    };
+    return {'deviceId': deviceId, 'displayName': displayName};
   }
 
   /// Clear cached values (for testing or reset).
   void clearCache() {
     _cachedDeviceId = null;
     _cachedDisplayName = null;
+    debugPrint('🧹 IdentityService cache cleared');
   }
 
-  /// Reset identity (WARNING: will break existing conversations).
+  /// Force refresh display name from storage (bypasses cache)
+  Future<String> refreshDisplayName() async {
+    _cachedDisplayName = null;
+    return await getDisplayName();
+  }
+
+  /// Reset all identity data (for logout/testing)
   Future<void> resetIdentity() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_deviceIdKey);

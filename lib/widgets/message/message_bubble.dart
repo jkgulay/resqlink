@@ -272,7 +272,7 @@ class MessageBubble extends StatelessWidget {
                 ),
                 SizedBox(width: 6),
                 Text(
-                  'View on map',
+                  'View map',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.8),
                     fontSize: isNarrow ? 11 : 12,

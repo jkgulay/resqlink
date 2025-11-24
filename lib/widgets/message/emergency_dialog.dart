@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 import '../../utils/resqlink_theme.dart';
 
 class EmergencyDialog extends StatelessWidget {
@@ -16,7 +16,7 @@ class EmergencyDialog extends StatelessWidget {
           SizedBox(width: 8),
           Text(
             'Send Emergency SOS?',
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: Colors.white,
               fontWeight: FontWeight.w600,
               fontSize: 18,
@@ -26,7 +26,7 @@ class EmergencyDialog extends StatelessWidget {
       ),
       content: Text(
         'This will send an emergency SOS message to the selected device, including your location if available.',
-        style: GoogleFonts.poppins(
+        style: OfflineFonts.poppins(
           color: Colors.white70,
           fontWeight: FontWeight.w400,
           fontSize: 14,
@@ -37,7 +37,7 @@ class EmergencyDialog extends StatelessWidget {
           onPressed: () => Navigator.pop(context, false),
           child: Text(
             'Cancel',
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: Colors.white70,
               fontWeight: FontWeight.w500,
             ),
@@ -50,7 +50,7 @@ class EmergencyDialog extends StatelessWidget {
           onPressed: () => Navigator.pop(context, true),
           child: Text(
             'Send SOS',
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: Colors.white,
               fontWeight: FontWeight.w700,
             ),
@@ -70,7 +70,7 @@ class ClearChatDialog extends StatelessWidget {
       backgroundColor: ResQLinkTheme.cardDark,
       title: Text(
         'Clear Chat History?',
-        style: GoogleFonts.poppins(
+        style: OfflineFonts.poppins(
           color: Colors.white,
           fontWeight: FontWeight.w600,
           fontSize: 18,
@@ -78,7 +78,7 @@ class ClearChatDialog extends StatelessWidget {
       ),
       content: Text(
         'This will permanently delete all messages in this conversation.',
-        style: GoogleFonts.poppins(
+        style: OfflineFonts.poppins(
           color: Colors.white70,
           fontWeight: FontWeight.w400,
           fontSize: 14,
@@ -89,7 +89,7 @@ class ClearChatDialog extends StatelessWidget {
           onPressed: () => Navigator.pop(context, false),
           child: Text(
             'Cancel',
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: Colors.white70,
               fontWeight: FontWeight.w500,
             ),
@@ -102,7 +102,7 @@ class ClearChatDialog extends StatelessWidget {
           onPressed: () => Navigator.pop(context, true),
           child: Text(
             'Clear',
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: Colors.white,
               fontWeight: FontWeight.w700,
             ),

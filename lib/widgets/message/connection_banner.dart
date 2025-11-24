@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 import '../../utils/resqlink_theme.dart';
 
 class ConnectionBanner extends StatelessWidget {
@@ -20,7 +20,7 @@ class ConnectionBanner extends StatelessWidget {
           Expanded(
             child: Text(
               'Not connected to any devices. Messages will be saved locally.',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white,
                 fontWeight: FontWeight.w500,
               ),
@@ -31,7 +31,7 @@ class ConnectionBanner extends StatelessWidget {
             onPressed: onScanPressed,
             child: Text(
               'SCAN',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
               ),

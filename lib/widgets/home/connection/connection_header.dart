@@ -129,7 +129,7 @@ class ConnectionHeader extends StatelessWidget {
     }
 
     if (controller.isScanning) {
-      return '🔍 Scanning for groups (Client mode)...';
+      return 'Scanning for groups.';
     }
 
     return 'Ready to Connect';

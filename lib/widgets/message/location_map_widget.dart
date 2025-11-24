@@ -1,9 +1,12 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../../services/location_state_service.dart';
 import '../../utils/resqlink_theme.dart';
 import '../../services/map_service.dart';
 import 'location_preview_modal.dart';
+import 'shared_location_markers.dart';
 
 class LocationMapWidget extends StatelessWidget {
   final double latitude;
@@ -21,6 +24,35 @@ class LocationMapWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final currentLocation = LocationStateService().currentLocation;
+    final LatLng? myLatLng = currentLocation != null
+        ? LatLng(currentLocation.latitude, currentLocation.longitude)
+        : null;
+    final LatLng senderLatLng = LatLng(latitude, longitude);
+    final Distance distanceCalculator = const Distance();
+    final double? distanceMeters = myLatLng != null
+        ? distanceCalculator.as(LengthUnit.Meter, senderLatLng, myLatLng)
+        : null;
+
+    final markers = <Marker>[
+      Marker(
+        point: senderLatLng,
+        width: 90,
+        height: 90,
+        child: SenderLocationMarker(
+          isEmergency: isEmergency,
+          label: senderName,
+        ),
+      ),
+      if (myLatLng != null)
+        Marker(
+          point: myLatLng,
+          width: 80,
+          height: 80,
+          child: const UserLocationMarker(),
+        ),
+    ];
+
     return Container(
       height: 200,
       decoration: BoxDecoration(
@@ -35,7 +67,7 @@ class LocationMapWidget extends StatelessWidget {
         children: [
           FlutterMap(
             options: MapOptions(
-              initialCenter: LatLng(latitude, longitude),
+              initialCenter: senderLatLng,
               initialZoom: 15.0,
               interactionOptions: InteractionOptions(
                 flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
@@ -47,23 +79,40 @@ class LocationMapWidget extends StatelessWidget {
               PhilippinesMapService.instance.getTileLayer(
                 useOffline: !PhilippinesMapService.instance.isOnline,
               ),
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: LatLng(latitude, longitude),
-                    width: 40,
-                    height: 40,
-                    child: Icon(
-                      isEmergency ? Icons.warning : Icons.location_on,
-                      color: isEmergency
-                          ? ResQLinkTheme.primaryRed
-                          : Colors.red,
-                      size: 40,
+              MarkerLayer(markers: markers),
+              if (myLatLng != null)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: [senderLatLng, myLatLng],
+                      color: Colors.white.withValues(alpha: 0.6),
+                      strokeWidth: 3,
+                      borderColor: Colors.black.withValues(alpha: 0.3),
+                      borderStrokeWidth: 1,
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
             ],
+          ),
+          Positioned(
+            top: 8,
+            left: 8,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (myLatLng != null) ...[
+                  _LegendPill(
+                    distanceText: _formatDistance(distanceMeters),
+                    senderColor: isEmergency
+                        ? ResQLinkTheme.primaryRed
+                        : Colors.deepPurple,
+                    userColor: Colors.blueAccent,
+                  ),
+                  const SizedBox(height: 6),
+                ],
+                _OfflineStatusBadge(center: senderLatLng),
+              ],
+            ),
           ),
           // Overlay with coordinates info
           Positioned(
@@ -90,11 +139,26 @@ class LocationMapWidget extends StatelessWidget {
                     'Lat: ${latitude.toStringAsFixed(6)}, Lng: ${longitude.toStringAsFixed(6)}',
                     style: TextStyle(color: Colors.white70, fontSize: 10),
                   ),
+                  if (myLatLng != null) ...[
+                    SizedBox(height: 2),
+                    Text(
+                      'You: ${myLatLng.latitude.toStringAsFixed(6)}, ${myLatLng.longitude.toStringAsFixed(6)}',
+                      style: TextStyle(color: Colors.white70, fontSize: 10),
+                    ),
+                    if (distanceMeters != null)
+                      Text(
+                        'Distance apart: ${_formatDistance(distanceMeters)}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),
           ),
-          // "Open in Maps" button
           Positioned(
             top: 8,
             right: 8,
@@ -102,7 +166,12 @@ class LocationMapWidget extends StatelessWidget {
               color: Colors.black.withValues(alpha: 0.7),
               borderRadius: BorderRadius.circular(20),
               child: InkWell(
-                onTap: () => _openInMaps(context),
+                onTap: () => _openInMaps(
+                  context,
+                  myLatLng?.latitude,
+                  myLatLng?.longitude,
+                  distanceMeters,
+                ),
                 borderRadius: BorderRadius.circular(20),
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -130,7 +199,12 @@ class LocationMapWidget extends StatelessWidget {
     );
   }
 
-  void _openInMaps(BuildContext context) {
+  void _openInMaps(
+    BuildContext context,
+    double? myLatitude,
+    double? myLongitude,
+    double? distanceMeters,
+  ) {
     // Open inline modal with the full map preview instead of navigating
     showModalBottomSheet(
       context: context,
@@ -141,7 +215,170 @@ class LocationMapWidget extends StatelessWidget {
         longitude: longitude,
         senderName: senderName,
         isEmergency: isEmergency,
+        userLatitude: myLatitude,
+        userLongitude: myLongitude,
+        distanceMeters: distanceMeters,
       ),
+    );
+  }
+
+  String _formatDistance(double? meters) {
+    if (meters == null) return '--';
+    if (meters >= 1000) {
+      return '${(meters / 1000).toStringAsFixed(2)} km';
+    }
+    return '${meters.toStringAsFixed(0)} m';
+  }
+}
+
+class _LegendPill extends StatelessWidget {
+  final String distanceText;
+  final Color senderColor;
+  final Color userColor;
+
+  const _LegendPill({
+    required this.distanceText,
+    required this.senderColor,
+    required this.userColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _LegendDot(color: senderColor, label: 'Sender'),
+          SizedBox(width: 8),
+          _LegendDot(color: userColor, label: 'You'),
+          SizedBox(width: 8),
+          Text(
+            distanceText,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        SizedBox(width: 4),
+        Text(label, style: TextStyle(color: Colors.white70, fontSize: 11)),
+      ],
+    );
+  }
+}
+
+class _OfflineStatusBadge extends StatelessWidget {
+  final LatLng center;
+
+  const _OfflineStatusBadge({required this.center});
+
+  @override
+  Widget build(BuildContext context) {
+    final mapService = PhilippinesMapService.instance;
+    final bounds = _createBounds(center);
+
+    return FutureBuilder<bool>(
+      future: mapService.isAreaCached(bounds, 14),
+      builder: (context, snapshot) {
+        final isOnline = mapService.isOnline;
+        final hasResult = snapshot.connectionState == ConnectionState.done;
+        final cached = snapshot.data ?? false;
+
+        String label;
+        Color color;
+        IconData icon;
+
+        if (!hasResult) {
+          label = 'Checking tiles…';
+          color = Colors.blueGrey;
+          icon = Icons.sync;
+        } else if (isOnline && cached) {
+          label = 'Synced & cached';
+          color = ResQLinkTheme.safeGreen;
+          icon = Icons.cloud_done;
+        } else if (isOnline) {
+          label = 'Live tiles';
+          color = Colors.lightBlueAccent;
+          icon = Icons.wifi;
+        } else if (cached) {
+          label = 'Offline ready';
+          color = ResQLinkTheme.safeGreen;
+          icon = Icons.download_done;
+        } else {
+          label = 'Offline unavailable';
+          color = ResQLinkTheme.primaryRed;
+          icon = Icons.warning_amber_rounded;
+        }
+
+        return Container(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: color.withValues(alpha: 0.7), width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  LatLngBounds _createBounds(LatLng center) {
+    const double radiusKm = 2;
+    final latOffset = radiusKm / 111.0;
+    final cosLat = math.cos(center.latitude * math.pi / 180).abs();
+    final safeCos = cosLat < 0.1 ? 0.1 : cosLat;
+    final lngOffset = radiusKm / (111.0 * safeCos);
+
+    final south = center.latitude - latOffset;
+    final north = center.latitude + latOffset;
+    final west = center.longitude - lngOffset;
+    final east = center.longitude + lngOffset;
+
+    return LatLngBounds(
+      LatLng(math.min(south, north), math.min(west, east)),
+      LatLng(math.max(south, north), math.max(west, east)),
     );
   }
 }

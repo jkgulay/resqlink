@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../controllers/gps_controller.dart';
 import '../../pages/gps_page.dart';
@@ -230,7 +230,7 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
             ),
             child: Text(
               'SOS',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white,
                 fontSize: isNarrow ? 11 : 12,
                 fontWeight: FontWeight.w700,
@@ -276,7 +276,7 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
           const SizedBox(width: 4),
           Text(
             text,
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: color,
               fontSize: isNarrow ? 12 : 13,
               fontWeight: FontWeight.w600,
@@ -366,7 +366,7 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
           SizedBox(height: isNarrow ? 6 : 8),
           Text(
             value,
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: color,
               fontSize: isNarrow ? 12 : 13,
               fontWeight: FontWeight.w700,
@@ -378,7 +378,7 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
           const SizedBox(height: 2),
           Text(
             label,
-            style: GoogleFonts.poppins(
+            style: OfflineFonts.poppins(
               color: Colors.white.withValues(alpha: 0.7),
               fontSize: isNarrow ? 10 : 11,
               fontWeight: FontWeight.w500,
@@ -433,7 +433,7 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
           Expanded(
             child: Text(
               'EMERGENCY MODE ACTIVE',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white,
                 fontSize: isNarrow ? 12 : 13,
                 fontWeight: FontWeight.w700,
@@ -459,7 +459,7 @@ class _GpsStatsPanelState extends State<GpsStatsPanel>
             ),
             child: Text(
               'STOP',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white,
                 fontSize: isNarrow ? 11 : 12,
                 fontWeight: FontWeight.w700,

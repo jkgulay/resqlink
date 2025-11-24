@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// Widget for playing voice messages received through WiFi Direct
@@ -227,7 +227,7 @@ class _VoiceMessagePlayerState extends State<VoiceMessagePlayer> {
                     SizedBox(width: 4),
                     Text(
                       'Voice message',
-                      style: GoogleFonts.inter(
+                      style: OfflineFonts.inter(
                         color: Colors.white.withValues(alpha: 0.6),
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
@@ -268,7 +268,7 @@ class _VoiceMessagePlayerState extends State<VoiceMessagePlayer> {
                       : _formatDuration(
                           Duration(seconds: widget.durationSeconds),
                         ),
-                  style: GoogleFonts.jetBrainsMono(
+                  style: OfflineFonts.jetBrainsMono(
                     color: Colors.white.withValues(alpha: 0.7),
                     fontSize: 11,
                     fontWeight: FontWeight.w500,

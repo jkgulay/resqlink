@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 
 class ResponsiveText {
   static double _getScaleFactor(BuildContext context) {
@@ -231,14 +231,13 @@ class ResQLinkTheme {
   static const Color cardDark = Color(0xFF2C2C2C);
   static const Color locationBlue = Color(0xFF2196F3);
   static const Color orange = Color.fromARGB(255, 255, 128, 0);
-    static const Color primaryBlue = Color(0xFF2196F3);
+  static const Color primaryBlue = Color(0xFF2196F3);
 
-   // Primary Colors
+  // Primary Colors
   static const Color primaryColor = Color(0xFF2196F3);
   static const Color secondaryColor = Color(0xFF03DAC6);
   static const Color backgroundColor = Color(0xFF121212);
   static const Color surfaceColor = Color(0xFF1E1E1E);
-  
 
   static ThemeData get darkTheme => ThemeData(
     brightness: Brightness.dark,
@@ -269,7 +268,7 @@ class ResQLinkTheme {
       style: ElevatedButton.styleFrom(
         backgroundColor: primaryRed,
         foregroundColor: Colors.white,
-        textStyle: GoogleFonts.rajdhani(
+        textStyle: OfflineFonts.rajdhani(
           fontSize: 14,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.5,
@@ -285,19 +284,19 @@ class ResQLinkTheme {
 
   static TextTheme get textTheme => TextTheme(
     // Headlines
-    displayLarge: GoogleFonts.rajdhani(
+    displayLarge: OfflineFonts.rajdhani(
       fontSize: 32,
       fontWeight: FontWeight.w700,
       letterSpacing: -0.5,
       color: Colors.white,
     ),
-    displayMedium: GoogleFonts.rajdhani(
+    displayMedium: OfflineFonts.rajdhani(
       fontSize: 28,
       fontWeight: FontWeight.w700,
       letterSpacing: -0.3,
       color: Colors.white,
     ),
-    displaySmall: GoogleFonts.rajdhani(
+    displaySmall: OfflineFonts.rajdhani(
       fontSize: 24,
       fontWeight: FontWeight.w600,
       letterSpacing: -0.2,
@@ -305,19 +304,19 @@ class ResQLinkTheme {
     ),
 
     // Headlines
-    headlineLarge: GoogleFonts.rajdhani(
+    headlineLarge: OfflineFonts.rajdhani(
       fontSize: 22,
       fontWeight: FontWeight.w600,
       letterSpacing: 0,
       color: Colors.white,
     ),
-    headlineMedium: GoogleFonts.rajdhani(
+    headlineMedium: OfflineFonts.rajdhani(
       fontSize: 20,
       fontWeight: FontWeight.w600,
       letterSpacing: 0.1,
       color: Colors.white,
     ),
-    headlineSmall: GoogleFonts.rajdhani(
+    headlineSmall: OfflineFonts.rajdhani(
       fontSize: 18,
       fontWeight: FontWeight.w600,
       letterSpacing: 0.1,
@@ -325,19 +324,19 @@ class ResQLinkTheme {
     ),
 
     // Titles
-    titleLarge: GoogleFonts.inter(
+    titleLarge: OfflineFonts.inter(
       fontSize: 18,
       fontWeight: FontWeight.w600,
       letterSpacing: 0,
       color: Colors.white,
     ),
-    titleMedium: GoogleFonts.inter(
+    titleMedium: OfflineFonts.inter(
       fontSize: 16,
       fontWeight: FontWeight.w500,
       letterSpacing: 0.1,
       color: Colors.white,
     ),
-    titleSmall: GoogleFonts.inter(
+    titleSmall: OfflineFonts.inter(
       fontSize: 14,
       fontWeight: FontWeight.w500,
       letterSpacing: 0.1,
@@ -345,21 +344,21 @@ class ResQLinkTheme {
     ),
 
     // Body text
-    bodyLarge: GoogleFonts.inter(
+    bodyLarge: OfflineFonts.inter(
       fontSize: 16,
       fontWeight: FontWeight.w400,
       letterSpacing: 0.1,
       color: Colors.white,
       height: 1.5,
     ),
-    bodyMedium: GoogleFonts.inter(
+    bodyMedium: OfflineFonts.inter(
       fontSize: 14,
       fontWeight: FontWeight.w400,
       letterSpacing: 0.1,
       color: Colors.white,
       height: 1.5,
     ),
-    bodySmall: GoogleFonts.inter(
+    bodySmall: OfflineFonts.inter(
       fontSize: 12,
       fontWeight: FontWeight.w400,
       letterSpacing: 0.2,
@@ -368,19 +367,19 @@ class ResQLinkTheme {
     ),
 
     // Labels and captions
-    labelLarge: GoogleFonts.inter(
+    labelLarge: OfflineFonts.inter(
       fontSize: 14,
       fontWeight: FontWeight.w600,
       letterSpacing: 0.5,
       color: Colors.white,
     ),
-    labelMedium: GoogleFonts.inter(
+    labelMedium: OfflineFonts.inter(
       fontSize: 12,
       fontWeight: FontWeight.w500,
       letterSpacing: 0.5,
       color: Colors.white,
     ),
-    labelSmall: GoogleFonts.inter(
+    labelSmall: OfflineFonts.inter(
       fontSize: 10,
       fontWeight: FontWeight.w500,
       letterSpacing: 0.5,
@@ -390,7 +389,7 @@ class ResQLinkTheme {
 
   // Emergency-specific text styles
   static TextStyle emergencyTitle(BuildContext context) {
-    return GoogleFonts.rajdhani(
+    return OfflineFonts.rajdhani(
       fontSize: ResponsiveText._getScaleFactor(context) * 20,
       fontWeight: FontWeight.w700,
       letterSpacing: 0.8,
@@ -406,7 +405,7 @@ class ResQLinkTheme {
   }
 
   static TextStyle technicalData(BuildContext context) {
-    return GoogleFonts.jetBrainsMono(
+    return OfflineFonts.jetBrainsMono(
       fontSize: ResponsiveText._getScaleFactor(context) * 12,
       fontWeight: FontWeight.w400,
       letterSpacing: 0,
@@ -418,7 +417,7 @@ class ResQLinkTheme {
     BuildContext context, {
     required Color color,
   }) {
-    return GoogleFonts.rajdhani(
+    return OfflineFonts.rajdhani(
       fontSize: ResponsiveText._getScaleFactor(context) * 12,
       fontWeight: FontWeight.w600,
       letterSpacing: 0.5,
@@ -428,7 +427,7 @@ class ResQLinkTheme {
 
   // Additional utility methods for emergency app
   static TextStyle emergencyButton(BuildContext context) {
-    return GoogleFonts.rajdhani(
+    return OfflineFonts.rajdhani(
       fontSize: ResponsiveText._getScaleFactor(context) * 16,
       fontWeight: FontWeight.w700,
       letterSpacing: 1.0,
@@ -440,7 +439,7 @@ class ResQLinkTheme {
     BuildContext context, {
     required bool isConnected,
   }) {
-    return GoogleFonts.inter(
+    return OfflineFonts.inter(
       fontSize: ResponsiveText._getScaleFactor(context) * 12,
       fontWeight: FontWeight.w500,
       letterSpacing: 0.3,
@@ -449,7 +448,7 @@ class ResQLinkTheme {
   }
 
   static TextStyle deviceName(BuildContext context) {
-    return GoogleFonts.inter(
+    return OfflineFonts.inter(
       fontSize: ResponsiveText._getScaleFactor(context) * 14,
       fontWeight: FontWeight.w600,
       letterSpacing: 0.1,
@@ -458,7 +457,7 @@ class ResQLinkTheme {
   }
 
   static TextStyle timestamp(BuildContext context) {
-    return GoogleFonts.inter(
+    return OfflineFonts.inter(
       fontSize: ResponsiveText._getScaleFactor(context) * 11,
       fontWeight: FontWeight.w400,
       letterSpacing: 0.2,
@@ -470,7 +469,7 @@ class ResQLinkTheme {
     BuildContext context, {
     bool isEmergency = false,
   }) {
-    return GoogleFonts.inter(
+    return OfflineFonts.inter(
       fontSize: ResponsiveText._getScaleFactor(context) * 14,
       fontWeight: isEmergency ? FontWeight.w600 : FontWeight.w400,
       letterSpacing: 0.1,
@@ -480,7 +479,7 @@ class ResQLinkTheme {
   }
 
   static TextStyle coordinates(BuildContext context) {
-    return GoogleFonts.jetBrainsMono(
+    return OfflineFonts.jetBrainsMono(
       fontSize: ResponsiveText._getScaleFactor(context) * 11,
       fontWeight: FontWeight.w400,
       letterSpacing: 0,

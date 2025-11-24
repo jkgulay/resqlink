@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 import '../../models/message_model.dart';
 import '../../utils/resqlink_theme.dart';
 import '../../services/p2p/p2p_main_service.dart';
@@ -58,7 +58,7 @@ class ConversationList extends StatelessWidget {
             SizedBox(height: 16),
             Text(
               'No messages yet',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 fontSize: 18,
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
@@ -69,7 +69,7 @@ class ConversationList extends StatelessWidget {
               p2pService.connectedDevices.isEmpty
                   ? 'Connect to a device to start messaging'
                   : 'Select a device to start messaging',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white70,
                 fontWeight: FontWeight.w400,
               ),
@@ -172,7 +172,7 @@ class ConversationCard extends StatelessWidget {
                           Expanded(
                             child: Text(
                               conversation.deviceName,
-                              style: GoogleFonts.poppins(
+                              style: OfflineFonts.poppins(
                                 fontWeight: FontWeight.w700,
                                 fontSize: 16,
                                 color: Colors.white,
@@ -182,7 +182,7 @@ class ConversationCard extends StatelessWidget {
                           if (message != null)
                             Text(
                               _formatRelativeTime(message.dateTime),
-                              style: GoogleFonts.poppins(
+                              style: OfflineFonts.poppins(
                                 fontSize: 12,
                                 color: Colors.white54,
                                 fontWeight: FontWeight.w400,
@@ -194,7 +194,7 @@ class ConversationCard extends StatelessWidget {
                         SizedBox(height: 4),
                         Text(
                           message.message,
-                          style: GoogleFonts.poppins(
+                          style: OfflineFonts.poppins(
                             color: Colors.white70,
                             fontSize: 14,
                             fontWeight: FontWeight.w400,
@@ -216,7 +216,7 @@ class ConversationCard extends StatelessWidget {
                     ),
                     child: Text(
                       '${conversation.unreadCount}',
-                      style: GoogleFonts.poppins(
+                      style: OfflineFonts.poppins(
                         color: Colors.white,
                         fontSize: 12,
                         fontWeight: FontWeight.w700,

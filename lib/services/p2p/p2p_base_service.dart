@@ -244,9 +244,10 @@ abstract class P2PBaseService with ChangeNotifier {
       final identity = IdentityService();
       _deviceId = await identity.getDeviceId();
 
-      // Save display name to IdentityService
+      // Save display name to IdentityService and clear old cache
       _userName = userName;
       await identity.setDisplayName(userName);
+      debugPrint('✅ Display name saved to IdentityService: $userName');
 
       if (preferredRole != null) {
         _currentRole = _parseRole(preferredRole);
@@ -613,12 +614,15 @@ abstract class P2PBaseService with ChangeNotifier {
       );
     }
 
-    // Only call the connection callback for new connections
+    // Call the connection callback for new connections AND name changes
     if (isNewConnection) {
       onDeviceConnected?.call(normalizedId, userName);
       debugPrint('✅ NEW device connected: $userName ($normalizedId)');
     } else if (nameChanged) {
       debugPrint('🔄 Device name updated: $userName ($normalizedId)');
+      // CRITICAL FIX: Trigger callback for name changes so UI/chat sessions update
+      onDeviceConnected?.call(normalizedId, userName);
+      debugPrint('✅ Name change propagated to UI: $userName ($normalizedId)');
     }
 
     // Ensure mesh registry records the fresh direct connection

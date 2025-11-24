@@ -193,6 +193,28 @@ class ChatRepository {
     }
   }
 
+  /// Update device name for a chat session
+  static Future<void> updateDeviceName({
+    required String deviceId,
+    required String newName,
+  }) async {
+    try {
+      final db = await DatabaseManager.database;
+
+      // Update by device_address (UUID) which is the stable identifier
+      await db.update(
+        _tableName,
+        {'device_name': newName},
+        where: 'device_address = ? OR device_id = ?',
+        whereArgs: [deviceId, deviceId],
+      );
+
+      debugPrint('✅ Updated device name to "$newName" for device: $deviceId');
+    } catch (e) {
+      debugPrint('❌ Error updating device name: $e');
+    }
+  }
+
   /// Update metadata key/values for a chat session (merges with existing data)
   static Future<void> updateMetadata({
     required String sessionId,

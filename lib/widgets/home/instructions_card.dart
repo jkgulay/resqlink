@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 
 class InstructionsCard extends StatelessWidget {
   const InstructionsCard({super.key});
@@ -99,7 +99,7 @@ class InstructionsCard extends StatelessWidget {
               children: [
                 Text(
                   'How It Works',
-                  style: GoogleFonts.poppins(
+                  style: OfflineFonts.poppins(
                     fontWeight: FontWeight.w700,
                     fontSize: isNarrow ? 18 : 20,
                     color: Colors.white,
@@ -109,7 +109,7 @@ class InstructionsCard extends StatelessWidget {
                 SizedBox(height: 6),
                 Text(
                   'ResQLink Emergency Network',
-                  style: GoogleFonts.poppins(
+                  style: OfflineFonts.poppins(
                     color: Colors.orange,
                     fontSize: isNarrow ? 13 : 15,
                     fontWeight: FontWeight.w600,
