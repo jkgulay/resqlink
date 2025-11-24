@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:resqlink/features/chat/services/chat_service.dart';
+import 'package:resqlink/features/database/repositories/chat_repository.dart';
 
 import '../../controllers/gps_controller.dart';
 import '../../models/message_model.dart';
@@ -434,12 +435,34 @@ class _EmergencyActionsCardState extends State<EmergencyActionsCard>
     for (final entry in connectedDevices.entries) {
       final deviceId = entry.key;
       final device = entry.value;
-      final resolvedName = device.userName.isNotEmpty
-          ? device.userName
-          : (device.deviceInfo?['deviceName'] as String?)?.trim();
-      final deviceName = (resolvedName == null || resolvedName.isEmpty)
-          ? 'Unknown Device'
-          : resolvedName;
+
+      // Fetch fresh display name from database first
+      String deviceName = 'Unknown Device';
+      try {
+        final session = await ChatRepository.getSessionByDeviceId(deviceId);
+        if (session != null && session.deviceName.isNotEmpty) {
+          deviceName = session.deviceName;
+        } else {
+          // Fallback to cached name
+          final resolvedName = device.userName.isNotEmpty
+              ? device.userName
+              : (device.deviceInfo?['deviceName'] as String?)?.trim();
+          deviceName = (resolvedName == null || resolvedName.isEmpty)
+              ? 'Unknown Device'
+              : resolvedName;
+        }
+      } catch (e) {
+        debugPrint(
+          '⚠️ Failed to fetch display name for emergency broadcast to $deviceId: $e',
+        );
+        // Use cached name as fallback
+        final resolvedName = device.userName.isNotEmpty
+            ? device.userName
+            : (device.deviceInfo?['deviceName'] as String?)?.trim();
+        deviceName = (resolvedName == null || resolvedName.isEmpty)
+            ? 'Unknown Device'
+            : resolvedName;
+      }
 
       try {
         final sessionId = await chatService.createOrGetSession(

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 import 'package:resqlink/pages/gps_page.dart';
 import 'package:resqlink/services/messaging/message_sync_service.dart';
 import '../services/p2p/p2p_main_service.dart';
@@ -1007,6 +1007,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       _isChatView = true;
     });
     _loadMessagesForDevice(endpointId);
+    _refreshSelectedDeviceName(endpointId);
 
     // Refresh connectivity state when opening conversation
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1018,6 +1019,20 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
         });
       }
     });
+  }
+
+  Future<void> _refreshSelectedDeviceName(String deviceId) async {
+    try {
+      final session = await ChatRepository.getSessionByDeviceId(deviceId);
+      if (!mounted) return;
+      if (session != null && session.deviceName.isNotEmpty) {
+        setState(() {
+          _selectedDeviceName = session.deviceName;
+        });
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to refresh selected device name: $e');
+    }
   }
 
   void selectDevice(String deviceId, String deviceName) {
@@ -1104,7 +1119,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             SizedBox(width: 8),
             Text(
               message,
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
                 fontSize: 14,
@@ -1129,7 +1144,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
             Expanded(
               child: Text(
                 message,
-                style: GoogleFonts.poppins(
+                style: OfflineFonts.poppins(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
                   fontSize: 14,

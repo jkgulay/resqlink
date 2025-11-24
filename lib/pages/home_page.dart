@@ -15,6 +15,7 @@ import '../services/p2p/p2p_base_service.dart';
 import '../services/map_service.dart';
 import '../services/location_state_service.dart';
 import '../services/temporary_identity_service.dart';
+import '../services/identity_service.dart';
 import '../features/database/repositories/chat_repository.dart';
 import '../controllers/home_controller.dart';
 import '../helpers/chat_navigation_helper.dart';
@@ -62,6 +63,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   // Track recently connected devices to prevent duplicate processing
   final Map<String, DateTime> _recentlyConnectedDevices = {};
+  final Map<String, String> _lastKnownDeviceNames = {};
 
   @override
   void initState() {
@@ -736,8 +738,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeP2P() async {
-    String? displayName =
-        await TemporaryIdentityService.getTemporaryDisplayName();
+    // CRITICAL FIX: Get fresh username from IdentityService (not cached)
+    final identityService = IdentityService();
+    String? displayName = await identityService.refreshDisplayName();
+
+    // Fallback to temporary identity if IdentityService has no name
+    if (displayName == 'User') {
+      displayName = await TemporaryIdentityService.getTemporaryDisplayName();
+    }
+
     final userName =
         displayName ??
         "User_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
@@ -806,12 +815,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       "📝 Registered device: Display Name='$userName', UUID='$deviceId'",
     );
 
-    // Prevent duplicate connection processing for the same device
+    final lastKnownName = _lastKnownDeviceNames[deviceId];
+    bool isNameUpdate = lastKnownName != null && lastKnownName != userName;
+
     if (_recentlyConnectedDevices.containsKey(deviceId)) {
       final lastConnection = _recentlyConnectedDevices[deviceId]!;
       final timeSinceLastConnection = DateTime.now().difference(lastConnection);
-      if (timeSinceLastConnection.inSeconds < 30) {
-        // Increased from 10s to 30s
+
+      if (isNameUpdate) {
+        debugPrint(
+          "🔄 Processing name update for device: $userName ($deviceId)",
+        );
+      } else if (timeSinceLastConnection.inSeconds < 30) {
+        // Prevent duplicate connection processing for same device when name stays the same
         debugPrint(
           "⚠️ Ignoring duplicate connection for $userName ($deviceId) - connected ${timeSinceLastConnection.inSeconds}s ago",
         );
@@ -821,6 +837,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     // Mark device as recently connected
     _recentlyConnectedDevices[deviceId] = DateTime.now();
+    _lastKnownDeviceNames[deviceId] = userName;
 
     if (mounted) {
       // Create device map for navigation
@@ -831,22 +848,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         'isConnected': true,
       };
 
-      // Create persistent conversation for the device (uses MAC as identifier)
+      // Create/update persistent conversation for the device (uses UUID as identifier)
       try {
         await _createPersistentConversationForDevice(deviceId, userName);
+        if (isNameUpdate) {
+          debugPrint('✅ Chat session updated with new display name: $userName');
+        }
       } catch (e) {
-        debugPrint('❌ Error creating persistent conversation: $e');
+        debugPrint('❌ Error creating/updating persistent conversation: $e');
       }
 
-      // Show enhanced connection notification with display name
-      _showDisplayNameConnectedSnackBar(userName, device);
+      // Show connection notification (or name update notification)
+      if (!mounted) return;
+      if (isNameUpdate) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Device name updated: $userName'),
+            backgroundColor: Colors.blue,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        _showDisplayNameConnectedSnackBar(userName, device);
 
-      // Auto-navigate to chat after a brief delay
-      Timer(Duration(seconds: 2), () {
-        if (mounted) {
-          _onDeviceChatTap(device);
-        }
-      });
+        // Auto-navigate to chat after a brief delay (only for new connections)
+        Timer(Duration(seconds: 2), () {
+          if (mounted) {
+            _onDeviceChatTap(device);
+          }
+        });
+      }
     }
   }
 

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 import '../../controllers/gps_controller.dart';
 import '../../utils/resqlink_theme.dart';
 
@@ -174,7 +174,7 @@ class _GpsEmergencyButtonState extends State<GpsEmergencyButton>
             const SizedBox(width: 12),
             Text(
               'Activate SOS',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white,
                 fontSize: 20,
                 fontWeight: FontWeight.w600,
@@ -184,7 +184,7 @@ class _GpsEmergencyButtonState extends State<GpsEmergencyButton>
         ),
         content: Text(
           'This will continuously broadcast your location every 30 seconds to nearby devices and emergency services. Use only in actual emergencies.',
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white.withValues(alpha: 0.8),
             fontSize: 14,
             height: 1.5,
@@ -195,7 +195,7 @@ class _GpsEmergencyButtonState extends State<GpsEmergencyButton>
             onPressed: () => Navigator.pop(dialogContext),
             child: Text(
               'Cancel',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.grey,
                 fontWeight: FontWeight.w500,
               ),
@@ -216,7 +216,7 @@ class _GpsEmergencyButtonState extends State<GpsEmergencyButton>
             ),
             child: Text(
               'ACTIVATE SOS',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 fontWeight: FontWeight.w700,
                 fontSize: 14,
               ),
@@ -250,7 +250,7 @@ class _GpsEmergencyButtonState extends State<GpsEmergencyButton>
             const SizedBox(width: 12),
             Text(
               'Stop SOS',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.white,
                 fontSize: 20,
                 fontWeight: FontWeight.w600,
@@ -260,7 +260,7 @@ class _GpsEmergencyButtonState extends State<GpsEmergencyButton>
         ),
         content: Text(
           'Are you safe? This will stop emergency broadcasting.',
-          style: GoogleFonts.poppins(
+          style: OfflineFonts.poppins(
             color: Colors.white.withValues(alpha: 0.8),
             fontSize: 14,
             height: 1.5,
@@ -271,7 +271,7 @@ class _GpsEmergencyButtonState extends State<GpsEmergencyButton>
             onPressed: () => Navigator.pop(dialogContext),
             child: Text(
               'Keep SOS Active',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 color: Colors.grey,
                 fontWeight: FontWeight.w500,
               ),
@@ -292,7 +292,7 @@ class _GpsEmergencyButtonState extends State<GpsEmergencyButton>
             ),
             child: Text(
               'I\'M SAFE',
-              style: GoogleFonts.poppins(
+              style: OfflineFonts.poppins(
                 fontWeight: FontWeight.w700,
                 fontSize: 14,
               ),

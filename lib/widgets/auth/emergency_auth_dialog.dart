@@ -4,6 +4,7 @@ import '../../services/auth_service.dart';
 import '../../services/temporary_identity_service.dart';
 import '../../services/messaging/message_sync_service.dart';
 import '../../services/p2p/wifi_direct_service.dart';
+import '../../services/identity_service.dart';
 import '../../pages/home_page.dart';
 
 class EmergencyAuthDialog extends StatefulWidget {
@@ -78,6 +79,10 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
     setState(() => _isLoading = true);
 
     try {
+      // CRITICAL FIX: Clear old session data before creating new identity
+      await TemporaryIdentityService.clearTemporarySession();
+      debugPrint('🧹 Cleared old session data before new login');
+
       // Create temporary identity for emergency use
       final tempUser = await TemporaryIdentityService.createTemporaryIdentity(
         displayName,
@@ -107,6 +112,11 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
       } else {
         _showSnackBar('Failed to create emergency identity');
       }
+      // Persist new display name so IdentityService / P2P initialization picks it up
+      final identityService = IdentityService();
+      await identityService.setDisplayName(displayName);
+      identityService.clearCache();
+      debugPrint('💾 Stored new identity display name: $displayName');
     } catch (e) {
       _showSnackBar('Emergency setup failed: ${e.toString()}');
     } finally {

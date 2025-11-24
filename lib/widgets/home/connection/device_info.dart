@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/utils/responsive_helper.dart';
 import 'package:resqlink/widgets/home/connection/device_badges.dart';
-
+import 'package:resqlink/features/database/repositories/chat_repository.dart';
 
 class DeviceInfo extends StatelessWidget {
   final Map<String, dynamic> device;
@@ -17,8 +17,11 @@ class DeviceInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final avatarRadius = ResponsiveHelper.isDesktop(context) ? 28.0 : 
-                        ResponsiveHelper.isTablet(context) ? 26.0 : 24.0;
+    final avatarRadius = ResponsiveHelper.isDesktop(context)
+        ? 28.0
+        : ResponsiveHelper.isTablet(context)
+        ? 26.0
+        : 24.0;
     final spacing = ResponsiveHelper.getContentSpacing(context) * 0.75;
 
     return Row(
@@ -69,7 +72,9 @@ class DeviceInfo extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                         fontSize: nameSize,
                         color: isConnected ? Colors.green : Colors.white,
-                        decoration: isConnected ? TextDecoration.underline : null,
+                        decoration: isConnected
+                            ? TextDecoration.underline
+                            : null,
                       ),
                       overflow: TextOverflow.ellipsis,
                     );
@@ -105,6 +110,21 @@ class DeviceInfo extends StatelessWidget {
   }
 
   Future<String> _getDisplayName() async {
-   return device['deviceName'] ?? 'Unknown Device';
+    // CRITICAL FIX: Get fresh display name from database (chat sessions)
+    // This ensures name updates are reflected immediately in UI
+    final deviceId = device['deviceId'] ?? device['deviceAddress'];
+    if (deviceId != null && deviceId.toString().isNotEmpty) {
+      try {
+        final session = await ChatRepository.getSessionByDeviceId(
+          deviceId.toString(),
+        );
+        if (session != null && session.deviceName.isNotEmpty) {
+          return session.deviceName;
+        }
+      } catch (e) {
+        // Fallback to device map if database lookup fails
+      }
+    }
+    return device['deviceName'] ?? 'Unknown Device';
   }
 }

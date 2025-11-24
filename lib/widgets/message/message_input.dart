@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:resqlink/utils/offline_fonts.dart';
 import '../../models/message_model.dart';
 import '../../services/audio/voice_recorder_service.dart';
 
@@ -146,7 +146,7 @@ class _MessageInputState extends State<MessageInput> {
                     SizedBox(width: 8),
                     Text(
                       'Recording ${_formatRecordingTime()}',
-                      style: GoogleFonts.jetBrainsMono(
+                      style: OfflineFonts.jetBrainsMono(
                         color: Colors.white,
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
@@ -271,7 +271,7 @@ class _MessageInputState extends State<MessageInput> {
                     hintText: widget.enabled
                         ? 'Type a message...'
                         : 'Device offline',
-                    hintStyle: GoogleFonts.poppins(
+                    hintStyle: OfflineFonts.poppins(
                       color: Colors.white.withValues(alpha: 0.4),
                       fontSize: isNarrow ? 14 : 15,
                       fontWeight: FontWeight.w400,
@@ -282,7 +282,7 @@ class _MessageInputState extends State<MessageInput> {
                       vertical: 12,
                     ),
                   ),
-                  style: GoogleFonts.poppins(
+                  style: OfflineFonts.poppins(
                     color: Colors.white,
                     fontSize: isNarrow ? 14 : 15,
                     fontWeight: FontWeight.w400,

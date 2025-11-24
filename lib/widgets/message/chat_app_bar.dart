@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../services/p2p/p2p_main_service.dart';
 import '../../utils/resqlink_theme.dart';
+import '../../features/database/repositories/chat_repository.dart';
 
 class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool isChatView;
@@ -107,6 +108,8 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
         statusColor = Colors.grey;
       }
 
+      final displayNameFuture = _getDisplayName();
+
       return Row(
         children: [
           // Avatar
@@ -144,16 +147,24 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
             child: CircleAvatar(
               radius: 20,
               backgroundColor: Colors.transparent,
-              child: Text(
-                (selectedDeviceName?.isNotEmpty ?? false)
-                    ? selectedDeviceName![0].toUpperCase()
-                    : 'D',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  fontFamily: 'Poppins',
-                ),
+              child: FutureBuilder<String>(
+                future: displayNameFuture,
+                builder: (context, snapshot) {
+                  final resolvedName =
+                      snapshot.data ?? selectedDeviceName ?? 'Device';
+                  final initial = resolvedName.isNotEmpty
+                      ? resolvedName[0].toUpperCase()
+                      : 'D';
+                  return Text(
+                    initial,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      fontFamily: 'Poppins',
+                    ),
+                  );
+                },
               ),
             ),
           ),
@@ -164,7 +175,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 FutureBuilder<String>(
-                  future: _getDisplayName(),
+                  future: displayNameFuture,
                   builder: (context, snapshot) {
                     return ResponsiveTextWidget(
                       snapshot.data ?? selectedDeviceName ?? 'Unknown Device',
@@ -305,6 +316,20 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   Size get preferredSize => Size.fromHeight(kToolbarHeight);
 
   Future<String> _getDisplayName() async {
+    final deviceId = selectedEndpointId;
+    if (deviceId == null || deviceId.isEmpty) {
+      return selectedDeviceName ?? 'Unknown Device';
+    }
+
+    try {
+      final session = await ChatRepository.getSessionByDeviceId(deviceId);
+      if (session != null && session.deviceName.isNotEmpty) {
+        return session.deviceName;
+      }
+    } catch (e) {
+      // Fallback handled below
+    }
+
     return selectedDeviceName ?? 'Unknown Device';
   }
 }

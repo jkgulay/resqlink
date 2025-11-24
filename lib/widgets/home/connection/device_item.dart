@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resqlink/controllers/home_controller.dart';
 import 'package:resqlink/utils/resqlink_theme.dart';
+import 'package:resqlink/features/database/repositories/chat_repository.dart';
 import 'device_actions.dart';
 import 'device_info.dart';
 import 'connection_manager.dart';
@@ -141,7 +142,8 @@ class _DeviceItemState extends State<DeviceItem> {
         if (deviceId != myDeviceId && deviceId != targetDeviceId) {
           result.add({
             'deviceId': deviceId,
-            'deviceName': device.userName,
+            'deviceName':
+                device.userName, // Will be refreshed by FutureBuilder in UI
             'deviceAddress': deviceId,
             'isHost': device.isHost,
             'isConnected': true,
@@ -207,7 +209,8 @@ class _DeviceItemState extends State<DeviceItem> {
     BuildContext context,
     Map<String, dynamic> device,
   ) {
-    final deviceName = device['deviceName'] ?? 'Unknown Device';
+    final deviceId = device['deviceId'] as String?;
+    final fallbackName = device['deviceName'] ?? 'Unknown Device';
 
     return Padding(
       padding: EdgeInsets.symmetric(vertical: ResponsiveSpacing.xs(context)),
@@ -216,33 +219,64 @@ class _DeviceItemState extends State<DeviceItem> {
           Icon(Icons.wifi_tethering, size: 14, color: ResQLinkTheme.safeGreen),
           SizedBox(width: ResponsiveSpacing.sm(context)),
           Expanded(
-            child: Text(
-              deviceName,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.9),
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-              overflow: TextOverflow.ellipsis,
+            child: FutureBuilder<String>(
+              future: _getMeshDeviceDisplayName(deviceId, fallbackName),
+              builder: (context, snapshot) {
+                final displayName = snapshot.data ?? fallbackName;
+                return Text(
+                  displayName,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                );
+              },
             ),
           ),
-          IconButton(
-            icon: Icon(
-              Icons.chat_bubble_outline,
-              color: Color(0xFFFF6500),
-              size: 16,
-            ),
-            onPressed: () {
-              if (widget.onDeviceChatTap != null) {
-                widget.onDeviceChatTap!(device);
-              }
+          FutureBuilder<String>(
+            future: _getMeshDeviceDisplayName(deviceId, fallbackName),
+            builder: (context, snapshot) {
+              final displayName = snapshot.data ?? fallbackName;
+              return IconButton(
+                icon: Icon(
+                  Icons.chat_bubble_outline,
+                  color: Color(0xFFFF6500),
+                  size: 16,
+                ),
+                onPressed: () {
+                  if (widget.onDeviceChatTap != null) {
+                    widget.onDeviceChatTap!(device);
+                  }
+                },
+                padding: EdgeInsets.all(8),
+                constraints: BoxConstraints(),
+                tooltip: 'Chat with $displayName',
+              );
             },
-            padding: EdgeInsets.all(8),
-            constraints: BoxConstraints(),
-            tooltip: 'Chat with $deviceName',
           ),
         ],
       ),
     );
+  }
+
+  /// Fetch fresh display name for mesh device from database
+  static Future<String> _getMeshDeviceDisplayName(
+    String? deviceId,
+    String fallback,
+  ) async {
+    if (deviceId == null || deviceId.isEmpty) return fallback;
+
+    try {
+      final session = await ChatRepository.getSessionByDeviceId(deviceId);
+      if (session != null && session.deviceName.isNotEmpty) {
+        return session.deviceName;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to fetch mesh device name for $deviceId: $e');
+    }
+
+    return fallback;
   }
 }
