@@ -163,7 +163,7 @@ class ConnectedDevices extends StatelessWidget {
                   SizedBox(width: spacing),
                   Expanded(
                     child: FutureBuilder<String>(
-                      future: _getDeviceDisplayNameStatic(device),
+                      future: _getDeviceDisplayName(device),
                       builder: (context, snapshot) {
                         return Text(
                           snapshot.data ?? device.userName,
@@ -208,7 +208,7 @@ class ConnectedDevices extends StatelessWidget {
                     onPressed: () {
                       if (onDeviceChatTap != null) {
                         // CRITICAL: Get fresh device name before navigation
-                        _getDeviceDisplayNameStatic(device).then((freshName) {
+                        _getDeviceDisplayName(device).then((freshName) {
                           final deviceMap = {
                             'deviceId': device.deviceId,
                             'deviceName': freshName,
@@ -230,9 +230,32 @@ class ConnectedDevices extends StatelessWidget {
     );
   }
 
-  /// Get fresh device display name from database (chat sessions)
-  /// This ensures name updates are reflected immediately in UI
-  static Future<String> _getDeviceDisplayNameStatic(DeviceModel device) async {
+  /// Get fresh device display name from various sources for consistency
+  /// Priority: Connected Devices > Discovered Devices > Chat Session DB
+  Future<String> _getDeviceDisplayName(DeviceModel device) async {
+    // 1. Prioritize live connection name
+    if (controller.p2pService.connectedDevices.containsKey(device.deviceId)) {
+      final connectedDevice =
+          controller.p2pService.connectedDevices[device.deviceId]!;
+      if (connectedDevice.userName.isNotEmpty) {
+        return connectedDevice.userName;
+      }
+    }
+
+    // 2. Check discovered devices list
+    try {
+      final discovered =
+          controller.p2pService.discoveredResQLinkDevices.firstWhere(
+        (d) => d.deviceId == device.deviceId,
+      );
+      if (discovered.userName.isNotEmpty) {
+        return discovered.userName;
+      }
+    } catch (e) {
+      // Device not in discovered list, proceed to database
+    }
+
+    // 3. Fallback to database session
     try {
       final session = await ChatRepository.getSessionByDeviceId(
         device.deviceId,
@@ -241,8 +264,10 @@ class ConnectedDevices extends StatelessWidget {
         return session.deviceName;
       }
     } catch (e) {
-      // Fallback to DeviceModel if database lookup fails
+      // Fallback to the original device name if DB lookup fails
     }
+
+    // 4. Last resort, the name from the initial device model
     return device.userName;
   }
 }

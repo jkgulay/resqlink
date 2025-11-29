@@ -96,9 +96,31 @@ class _ChatListPageState extends State<ChatListPage>
 
     try {
       final sessions = await ChatRepository.getChatSessions();
+      final connectedDevices = widget.p2pService.connectedDevices;
+      final discoveredDevices = widget.p2pService.discoveredResQLinkDevices;
+
+      final updatedSessions = sessions.map((session) {
+        String updatedName = session.deviceName;
+        // Check connected devices first for the most accurate name
+        if (connectedDevices.containsKey(session.deviceId)) {
+          updatedName = connectedDevices[session.deviceId]!.userName;
+        } else {
+          // Fallback to discovered devices
+          try {
+            final discovered = discoveredDevices.firstWhere(
+              (d) => d.deviceId == session.deviceId,
+            );
+            updatedName = discovered.userName;
+          } catch (e) {
+            // Device not found in discovered list, keep existing name
+          }
+        }
+        return session.copyWith(deviceName: updatedName);
+      }).toList();
+
       if (mounted) {
         setState(() {
-          _chatSessions = sessions;
+          _chatSessions = updatedSessions;
           _isLoading = false;
         });
       }

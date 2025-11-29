@@ -206,6 +206,28 @@ class ChatSessionSummary {
     }
     return 'Offline';
   }
+
+  ChatSessionSummary copyWith({
+    String? sessionId,
+    String? deviceId,
+    String? deviceName,
+    String? lastMessage,
+    DateTime? lastMessageTime,
+    int? unreadCount,
+    bool? isOnline,
+    ConnectionType? connectionType,
+  }) {
+    return ChatSessionSummary(
+      sessionId: sessionId ?? this.sessionId,
+      deviceId: deviceId ?? this.deviceId,
+      deviceName: deviceName ?? this.deviceName,
+      lastMessage: lastMessage ?? this.lastMessage,
+      lastMessageTime: lastMessageTime ?? this.lastMessageTime,
+      unreadCount: unreadCount ?? this.unreadCount,
+      isOnline: isOnline ?? this.isOnline,
+      connectionType: connectionType ?? this.connectionType,
+    );
+  }
 }
 
 extension ConnectionTypeExtension on ConnectionType {

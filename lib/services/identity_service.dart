@@ -4,32 +4,41 @@ import 'package:uuid/uuid.dart';
 
 /// Central identity service for the app.
 ///
-/// Manages a single persistent UUID that identifies this device across:
-/// - P2P connections
-/// - Chat sessions
-/// - Database records
-/// - WiFi Direct handshakes
-///
-/// This replaces all previous identifier schemes (MAC addresses, ANDROID_ID, temp IDs).
-class IdentityService {
+/// Manages a single persistent UUID and the user's current display name.
+/// It acts as a ChangeNotifier to notify listeners when the display name changes.
+class IdentityService extends ChangeNotifier {
   static final IdentityService _instance = IdentityService._internal();
   factory IdentityService() => _instance;
-  IdentityService._internal();
+
+  IdentityService._internal() {
+    loadDisplayName();
+  }
 
   // Keys for SharedPreferences
   static const String _deviceIdKey = 'device_uuid';
   static const String _displayNameKey = 'display_name';
 
-  // Cached values
+  // State
   String? _cachedDeviceId;
-  String? _cachedDisplayName;
+  String _displayName = 'User';
+
+  /// The current display name for the user.
+  String get displayName => _displayName;
+
+  /// Loads the display name from persistent storage.
+  Future<void> loadDisplayName() async {
+    final prefs = await SharedPreferences.getInstance();
+    final storedName = prefs.getString(_displayNameKey);
+    if (storedName != null && storedName.isNotEmpty) {
+      if (_displayName != storedName) {
+        _displayName = storedName;
+        notifyListeners();
+      }
+    }
+  }
 
   /// Get the persistent device UUID.
-  ///
-  /// Generated once on first app launch, then persists forever.
-  /// This is the PRIMARY identifier for this device.
   Future<String> getDeviceId() async {
-    // Return cached value if available
     if (_cachedDeviceId != null) {
       return _cachedDeviceId!;
     }
@@ -39,15 +48,11 @@ class IdentityService {
 
     if (storedId != null && storedId.isNotEmpty) {
       _cachedDeviceId = storedId;
-      debugPrint('📱 Device UUID (cached): $_cachedDeviceId');
       return storedId;
     }
 
-    // Generate new UUID
     const uuid = Uuid();
     final newId = uuid.v4();
-
-    // Store persistently
     await prefs.setString(_deviceIdKey, newId);
     _cachedDeviceId = newId;
 
@@ -55,64 +60,26 @@ class IdentityService {
     return newId;
   }
 
-  /// Get the user's display name.
-  ///
-  /// This is shown in WiFi Direct peer lists and chat UI.
-  /// Separate from deviceId - user can change this anytime.
-  Future<String> getDisplayName() async {
-    if (_cachedDisplayName != null) {
-      return _cachedDisplayName!;
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    String? storedName = prefs.getString(_displayNameKey);
-
-    if (storedName != null && storedName.isNotEmpty) {
-      _cachedDisplayName = storedName;
-      return storedName;
-    }
-
-    // Default if not set
-    return 'User';
-  }
-
-  /// Set the user's display name.
+  /// Set the user's display name, persist it, and notify listeners.
   Future<void> setDisplayName(String name) async {
+    if (name.isEmpty) return;
+    
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_displayNameKey, name);
-    _cachedDisplayName = name;
-    debugPrint('👤 Display name updated: $name');
+
+    if (_displayName != name) {
+      _displayName = name;
+      debugPrint('👤 Display name updated: $name');
+      notifyListeners();
+    }
   }
 
-  /// Get both deviceId and displayName together.
-  ///
-  /// Useful for handshakes and initialization.
-  Future<Map<String, String>> getIdentity() async {
-    final deviceId = await getDeviceId();
-    final displayName = await getDisplayName();
-
-    return {'deviceId': deviceId, 'displayName': displayName};
-  }
-
-  /// Clear cached values (for testing or reset).
-  void clearCache() {
-    _cachedDeviceId = null;
-    _cachedDisplayName = null;
-    debugPrint('🧹 IdentityService cache cleared');
-  }
-
-  /// Force refresh display name from storage (bypasses cache)
-  Future<String> refreshDisplayName() async {
-    _cachedDisplayName = null;
-    return await getDisplayName();
-  }
-
-  /// Reset all identity data (for logout/testing)
+  /// Reset the display name to default and clear from storage.
   Future<void> resetIdentity() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_deviceIdKey);
     await prefs.remove(_displayNameKey);
-    clearCache();
-    debugPrint('⚠️ Identity reset - new UUID will be generated');
+    _displayName = 'User';
+    debugPrint('⚠️ Display name reset');
+    notifyListeners();
   }
 }

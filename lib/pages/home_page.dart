@@ -642,6 +642,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       try {
         debugPrint('🔍 Checking for existing connections...');
 
+        await _p2pService.refreshIdentity(); // Refresh P2P service identity
+        _gpsController.setUserId(_p2pService.userName); // Update GPS controller with new userId
+
         await _p2pService.checkForExistingConnections();
         await _p2pService.checkForSystemConnections();
 
@@ -738,44 +741,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeP2P() async {
-    // CRITICAL FIX: Get fresh username from IdentityService (not cached)
+    // Fetch the displayName first
     final identityService = IdentityService();
-    String? displayName = await identityService.refreshDisplayName();
-
-    // Fallback to temporary identity if IdentityService has no name
+    String? displayName = identityService.displayName;
     if (displayName == 'User') {
-      displayName = await TemporaryIdentityService.getTemporaryDisplayName();
+      displayName = await TemporaryIdentityService.getTemporaryDisplayName() ??
+          "User_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
     }
 
-    final userName =
-        displayName ??
-        "User_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
-
-    debugPrint('🆔 Initializing P2P with username: $userName');
-
-    // CRITICAL FIX: Don't auto-select role - let user choose explicitly via UI
-    // Random role selection was causing unpredictable behavior
-    const String? preferredRole = null;
-
     final success = await _p2pService.initialize(
-      userName,
-      preferredRole: preferredRole,
+      displayName, // Pass the fetched or generated name
+      preferredRole: null,
     );
 
     if (success) {
       setState(() => _isP2PInitialized = true);
 
-      // Note: Message handling is centralized in P2PMainService and MessageRouter
-      // Individual pages should use event listeners instead of overriding onMessageReceived
+      // Refresh identity in case it changed during initialization
+      await _p2pService.refreshIdentity();
+      _gpsController.setUserId(_p2pService.userName); // Update GPS controller
+
       _p2pService.onDeviceConnected = _onDeviceConnected;
       _p2pService.onDeviceDisconnected = _onDeviceDisconnected;
       _p2pService.addListener(_updateUI);
 
-      // Message queue service initialization removed
-      debugPrint('✅ P2P Service initialized without message queue');
-
-      // Clean up and merge any duplicate chat sessions based on deviceAddress
-      // This runs on every startup to consolidate sessions from display name changes
+      debugPrint('✅ P2P Service initialized');
       try {
         final duplicatesRemoved =
             await ChatRepository.cleanupDuplicateSessions();
@@ -791,8 +781,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       setState(() => _isP2PInitialized = false);
       debugPrint("❌ Failed to initialize P2P service");
     }
-
-    // Set loading to false after initialization completes
     setState(() => _isLoading = false);
   }
 

@@ -41,6 +41,14 @@ class SocketProtocol {
     debugPrint('🔧 Socket protocol initialized with UUID: $deviceId');
   }
 
+  /// Update the user's display name
+  void updateUserName(String newUserName) {
+    if (_userName != newUserName) {
+      _userName = newUserName;
+      debugPrint('🔄 SocketProtocol userName updated to: $newUserName');
+    }
+  }
+
   /// Update device ID (called after MAC address is stored)
   void updateDeviceId(String newDeviceId) {
     final oldDeviceId = _deviceId;

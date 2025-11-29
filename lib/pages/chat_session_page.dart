@@ -539,19 +539,15 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       );
       final timestamp = DateTime.now();
 
-      // CRITICAL: Use the stable session ID from the widget (MAC address-based)
-      // DO NOT regenerate from display names - that causes duplicate sessions!
       String chatSessionId = widget.sessionId;
 
-      // Check reachability BEFORE creating message (for correct initial status)
       final isReachable = widget.p2pService.isDeviceReachable(targetDeviceId);
       final initialStatus = isReachable
           ? MessageStatus.pending
           : MessageStatus.failed;
 
-      // CRITICAL FIX: Get fresh username from IdentityService
       final identityService = IdentityService();
-      final currentUserName = await identityService.getDisplayName();
+      final currentUserName = identityService.displayName;
 
       // Create message with chat session ID
       final message = MessageModel(
@@ -595,7 +591,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
       try {
         // CRITICAL FIX: Get fresh username for senderName parameter
         final identityService = IdentityService();
-        final currentUserName = await identityService.getDisplayName();
+        final currentUserName = identityService.displayName;
 
         await widget.p2pService.sendMessage(
           message: messageText.trim(),
@@ -707,7 +703,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
 
       // CRITICAL FIX: Get fresh username from IdentityService
       final identityService = IdentityService();
-      final currentUserName = await identityService.getDisplayName();
+      final currentUserName = identityService.displayName;
 
       final message = MessageModel(
         messageId: messageId,
@@ -741,7 +737,7 @@ class _ChatSessionPageState extends State<ChatSessionPage>
         try {
           // CRITICAL FIX: Get fresh username for senderName parameter
           final identityService = IdentityService();
-          final currentUserName = await identityService.getDisplayName();
+          final currentUserName = identityService.displayName;
 
           await widget.p2pService.sendMessage(
             id: messageId,
