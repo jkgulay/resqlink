@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:english_words/english_words.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:resqlink/features/database/core/database_manager.dart';
 import 'package:resqlink/features/database/repositories/chat_repository.dart';
 import 'package:resqlink/pages/landing_page.dart';
@@ -17,6 +18,9 @@ import 'widgets/auth/auth_wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Load environment variables
+  await dotenv.load(fileName: ".env");
 
   try {
     debugPrint('🔥 Initializing Firebase...');

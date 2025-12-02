@@ -75,6 +75,16 @@ app.*.map.json
 # local.properties (sdk paths etc, do not commit)
 /android/local.properties
 
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Firebase config files with secrets
+# android/app/google-services.json
+# ios/Runner/GoogleService-Info.plist
+
 # FMTC cache files
 *.mbtiles
 *.sqlite

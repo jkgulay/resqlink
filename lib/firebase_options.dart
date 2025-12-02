@@ -3,6 +3,7 @@
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
@@ -43,8 +44,8 @@ class DefaultFirebaseOptions {
     }
   }
 
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyChIntQ7ZsE7MVBWzwUrz7qa538QGaV55Q',
+  static FirebaseOptions get web => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_API_KEY_WEB'] ?? '',
     appId: '1:1056797390668:web:your_web_app_id_here',
     messagingSenderId: '1056797390668',
     projectId: 'resqlink-2e060',
@@ -52,8 +53,8 @@ class DefaultFirebaseOptions {
     storageBucket: 'resqlink-2e060.appspot.com',
   );
 
-  static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyChIntQ7ZsE7MVBWzwUrz7qa538QGaV55Q',
+  static FirebaseOptions get android => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_API_KEY_ANDROID'] ?? '',
     appId: '1:1056797390668:android:74c09cc7186b11c0aa81e9',
     messagingSenderId: '1056797390668',
     projectId: 'resqlink-2e060',
@@ -61,8 +62,8 @@ class DefaultFirebaseOptions {
     storageBucket: 'resqlink-2e060.appspot.com',
   );
 
-  static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyChIntQ7ZsE7MVBWzwUrz7qa538QGaV55Q',
+  static FirebaseOptions get ios => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_API_KEY_IOS'] ?? '',
     appId: '1:1056797390668:ios:your_ios_app_id_here',
     messagingSenderId: '1056797390668',
     projectId: 'resqlink-2e060',
@@ -71,8 +72,8 @@ class DefaultFirebaseOptions {
     iosBundleId: 'com.example.resqlink',
   );
 
-  static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyChIntQ7ZsE7MVBWzwUrz7qa538QGaV55Q',
+  static FirebaseOptions get macos => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_API_KEY_IOS'] ?? '',
     appId: '1:1056797390668:ios:your_ios_app_id_here',
     messagingSenderId: '1056797390668',
     projectId: 'resqlink-2e060',
