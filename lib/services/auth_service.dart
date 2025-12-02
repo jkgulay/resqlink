@@ -8,6 +8,8 @@ import '../features/database/repositories/user_repository.dart';
 import '../features/database/core/database_manager.dart';
 import '../firebase_auth_helper.dart';
 import '../models/user_model.dart';
+import 'identity_service.dart';
+import 'temporary_identity_service.dart';
 
 class AuthService {
   static const String _currentUserKey = 'current_user_id';
@@ -96,6 +98,12 @@ class AuthService {
       await _secureStorage.delete(key: 'refreshToken');
       await _secureStorage.delete(key: 'expiresAt');
 
+      // Clear the temporary identity as well
+      await TemporaryIdentityService.clearTemporarySession();
+
+      // Clear the user's display name
+      await IdentityService().resetIdentity();
+
       print('User logged out successfully');
     } catch (e) {
       print('Error during logout: $e');
@@ -152,6 +160,7 @@ class AuthService {
 
         if (localUser != null) {
           await _setCurrentUser(localUser);
+          await IdentityService().setDisplayName(localUser.name);
           return localUser;
         }
       }
@@ -166,6 +175,7 @@ class AuthService {
     final user = await getCurrentUser();
     if (user != null) {
       print('Found existing logged-in user: ${user.email}');
+      await IdentityService().setDisplayName(user.name);
       return user;
     }
 
@@ -184,6 +194,7 @@ class AuthService {
 
       if (localUser != null) {
         await _setCurrentUser(localUser);
+        await IdentityService().setDisplayName(localUser.name);
         print('Offline login successful with cached Firebase UID');
         return localUser;
       }
@@ -240,11 +251,12 @@ class AuthService {
           localUser ??= await UserRepository.create(
             email: email,
             password: firebaseUser?.uid ?? password,
-            name: 'User',
+            name: email.split('@').first,
           );
 
           if (localUser != null) {
             await _setCurrentUser(localUser);
+            await IdentityService().setDisplayName(localUser.name);
             return AuthResult.success(localUser, AuthMethod.online);
           }
         } catch (e) {
@@ -269,6 +281,7 @@ class AuthService {
 
       if (localUser != null) {
         await _setCurrentUser(localUser);
+        await IdentityService().setDisplayName(localUser.name);
         print('Offline login successful');
         return AuthResult.success(localUser, AuthMethod.offline);
       }
@@ -311,11 +324,12 @@ class AuthService {
           final localUser = await UserRepository.create(
             email: email,
             password: firebaseUser?.uid ?? password,
-            name: 'User',
+            name: email.split('@').first,
           );
 
           if (localUser != null) {
             await _setCurrentUser(localUser);
+            await IdentityService().setDisplayName(localUser.name);
             return AuthResult.success(localUser, AuthMethod.online);
           }
         } catch (e) {
@@ -329,11 +343,12 @@ class AuthService {
       final localUser = await UserRepository.create(
         email: email,
         password: password,
-        name: 'User',
+        name: email.split('@').first,
       );
 
       if (localUser != null) {
         await _setCurrentUser(localUser);
+        await IdentityService().setDisplayName(localUser.name);
         print('Offline registration successful');
         return AuthResult.success(localUser, AuthMethod.offline);
       }

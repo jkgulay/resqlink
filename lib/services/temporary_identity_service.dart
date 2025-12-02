@@ -1,4 +1,3 @@
-import 'package:resqlink/features/database/core/database_manager.dart';
 import 'package:resqlink/features/database/repositories/user_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
@@ -47,7 +46,7 @@ class TemporaryIdentityService {
 
       if (tempUser != null) {
         // Store temporary session info
-        await prefs.setInt(_tempUserKey, tempUser.id!);
+        await prefs.setString(_tempUserKey, tempUser.userId);
         await prefs.setString(_tempDisplayNameKey, displayName);
         await prefs.setString(_tempIdentifierKey, tempId);
         await prefs.setBool(_tempSessionKey, true);
@@ -70,21 +69,11 @@ class TemporaryIdentityService {
 
       if (!isActive) return null;
 
-      final userId = prefs.getInt(_tempUserKey);
+      final userId = prefs.getString(_tempUserKey);
       if (userId == null) return null;
 
-      final db = await DatabaseManager.database;
-      final result = await db.query(
-        'users',
-        where: 'id = ?',
-        whereArgs: [userId],
-      );
-
-      if (result.isNotEmpty) {
-        return UserModel.fromMap(result.first);
-      }
-
-      return null;
+      // Use the string userId to get the user from the repository
+      return await UserRepository.getUserById(userId);
     } catch (e) {
       debugPrint('Error getting temporary user: $e');
       return null;
@@ -131,6 +120,12 @@ class TemporaryIdentityService {
   static Future<void> clearTemporarySession() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString(_tempUserKey);
+
+      if (userId != null) {
+        await UserRepository.deleteUser(userId);
+        debugPrint('🧹 Deleted temporary user from database (ID: $userId)');
+      }
 
       await prefs.remove(_tempUserKey);
       await prefs.remove(_tempDisplayNameKey);

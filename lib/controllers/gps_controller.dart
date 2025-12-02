@@ -16,7 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class GpsController extends ChangeNotifier {
   final P2PMainService p2pService;
-  final String? userId;
+  String? _userId; // Make it private and non-final
   final Function(LocationModel)? onLocationShare;
   final LocationStateService _locationStateService = LocationStateService();
   late PhilippinesMapService _mapService;
@@ -25,24 +25,41 @@ class GpsController extends ChangeNotifier {
   static GpsController? _instance;
   static bool _isInitialized = false;
 
+  String? get userId => _userId; // Public getter for userId
+
+  void setUserId(String? newUserId) {
+    if (_userId != newUserId) {
+      _userId = newUserId;
+      notifyListeners();
+      debugPrint('🔄 GPS Controller userId updated to: $newUserId');
+    }
+  }
+
   factory GpsController(
     P2PConnectionService p2pService, {
     String? userId,
     Function(LocationModel)? onLocationShare,
   }) {
-    _instance ??= GpsController._internal(
-      p2pService,
-      userId: userId,
-      onLocationShare: onLocationShare,
-    );
+    if (_instance == null) {
+      _instance = GpsController._internal(
+        p2pService,
+        userId: userId,
+        onLocationShare: onLocationShare,
+      );
+    } else {
+      // If instance already exists, update its userId if provided and different
+      if (userId != null && _instance!._userId != userId) {
+        _instance!.setUserId(userId);
+      }
+    }
     return _instance!;
   }
 
   GpsController._internal(
     this.p2pService, {
-    this.userId,
+    String? userId,
     this.onLocationShare,
-  }) {
+  }) : _userId = userId {
     if (!_isInitialized) {
       _initialize();
       _isInitialized = true;

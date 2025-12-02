@@ -173,6 +173,15 @@ abstract class P2PBaseService with ChangeNotifier {
   bool get emergencyMode => _emergencyMode;
   bool get isDisposed => _isDisposed;
 
+  // Protected setter for userName (for subclasses to update)
+  @protected
+  void setUserName(String? name) {
+    if (_userName != name) {
+      _userName = name;
+      notifyListeners();
+    }
+  }
+
   Map<String, DeviceModel> get connectedDevices => Map.from(_connectedDevices);
   List<DeviceModel> get discoveredResQLinkDevices =>
       List.from(_discoveredResQLinkDevices);

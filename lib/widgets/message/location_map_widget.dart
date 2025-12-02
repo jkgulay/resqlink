@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -74,8 +73,6 @@ class LocationMapWidget extends StatelessWidget {
               ),
             ),
             children: [
-              // CRITICAL FIX: Use PhilippinesMapService for offline map support
-              // This allows maps to load even when offline if tiles are cached
               PhilippinesMapService.instance.getTileLayer(
                 useOffline: !PhilippinesMapService.instance.isOnline,
               ),
@@ -110,7 +107,6 @@ class LocationMapWidget extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                 ],
-                _OfflineStatusBadge(center: senderLatLng),
               ],
             ),
           ),
@@ -290,95 +286,6 @@ class _LegendDot extends StatelessWidget {
         SizedBox(width: 4),
         Text(label, style: TextStyle(color: Colors.white70, fontSize: 11)),
       ],
-    );
-  }
-}
-
-class _OfflineStatusBadge extends StatelessWidget {
-  final LatLng center;
-
-  const _OfflineStatusBadge({required this.center});
-
-  @override
-  Widget build(BuildContext context) {
-    final mapService = PhilippinesMapService.instance;
-    final bounds = _createBounds(center);
-
-    return FutureBuilder<bool>(
-      future: mapService.isAreaCached(bounds, 14),
-      builder: (context, snapshot) {
-        final isOnline = mapService.isOnline;
-        final hasResult = snapshot.connectionState == ConnectionState.done;
-        final cached = snapshot.data ?? false;
-
-        String label;
-        Color color;
-        IconData icon;
-
-        if (!hasResult) {
-          label = 'Checking tiles…';
-          color = Colors.blueGrey;
-          icon = Icons.sync;
-        } else if (isOnline && cached) {
-          label = 'Synced & cached';
-          color = ResQLinkTheme.safeGreen;
-          icon = Icons.cloud_done;
-        } else if (isOnline) {
-          label = 'Live tiles';
-          color = Colors.lightBlueAccent;
-          icon = Icons.wifi;
-        } else if (cached) {
-          label = 'Offline ready';
-          color = ResQLinkTheme.safeGreen;
-          icon = Icons.download_done;
-        } else {
-          label = 'Offline unavailable';
-          color = ResQLinkTheme.primaryRed;
-          icon = Icons.warning_amber_rounded;
-        }
-
-        return Container(
-          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.6),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: color.withValues(alpha: 0.7), width: 1),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 14, color: color),
-              SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  LatLngBounds _createBounds(LatLng center) {
-    const double radiusKm = 2;
-    final latOffset = radiusKm / 111.0;
-    final cosLat = math.cos(center.latitude * math.pi / 180).abs();
-    final safeCos = cosLat < 0.1 ? 0.1 : cosLat;
-    final lngOffset = radiusKm / (111.0 * safeCos);
-
-    final south = center.latitude - latOffset;
-    final north = center.latitude + latOffset;
-    final west = center.longitude - lngOffset;
-    final east = center.longitude + lngOffset;
-
-    return LatLngBounds(
-      LatLng(math.min(south, north), math.min(west, east)),
-      LatLng(math.max(south, north), math.max(west, east)),
     );
   }
 }

@@ -321,6 +321,14 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
       return selectedDeviceName ?? 'Unknown Device';
     }
 
+    // Prioritize name from a live connection
+    if (p2pService.connectedDevices.containsKey(deviceId)) {
+      final deviceName = p2pService.connectedDevices[deviceId]!.userName;
+      if (deviceName.isNotEmpty) {
+        return deviceName;
+      }
+    }
+
     try {
       final session = await ChatRepository.getSessionByDeviceId(deviceId);
       if (session != null && session.deviceName.isNotEmpty) {

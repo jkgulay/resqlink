@@ -19,6 +19,7 @@ import 'monitoring/reconnection_manager.dart';
 import 'monitoring/device_prioritization.dart';
 import 'monitoring/timeout_manager.dart';
 import 'managers/identifier_resolver.dart';
+import '../identity_service.dart';
 
 class P2PMainService extends P2PBaseService {
   // Core service components
@@ -797,6 +798,19 @@ ${_messageHandler.getMessageTrace().take(5).join('\n')}
   /// Register device with identifier resolver (UUID + display name)
   void registerDevice(String deviceId, String displayName) {
     _identifierResolver.registerDevice(deviceId, displayName);
+  }
+
+  /// Refreshes the internal userName from the IdentityService.
+  /// This should be called when the user's display name might have changed.
+  Future<void> refreshIdentity() async {
+    final identityService = IdentityService();
+    final name = identityService.displayName;
+    if (name != userName) {
+      setUserName(name); // Use the protected setter from P2PBaseService
+      _socketProtocol.updateUserName(name); // Update SocketProtocol's userName
+      debugPrint('🔄 P2P Main Service userName refreshed to: $name');
+      // notifyListeners() is called by setUserName now
+    }
   }
 
   @override

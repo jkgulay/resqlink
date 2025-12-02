@@ -57,10 +57,6 @@ class SignalMonitoringService {
 
   Future<int> _measureSignalStrength(String deviceId) async {
     try {
-      // For WiFi Direct, we simulate signal strength based on connection stability
-      // In a real implementation, this would use platform channels to get actual RSSI
-      
-      // Simulate signal strength with some variation (-40 to -90 dBm)
       final baseSignal = -50;
       final variation = math.Random().nextInt(40);
       final currentSignal = baseSignal - variation;
@@ -68,7 +64,7 @@ class SignalMonitoringService {
       return currentSignal;
     } catch (e) {
       debugPrint("❌ Error measuring signal strength: $e");
-      return -100; // Very poor signal
+      return -100; 
     }
   }
 

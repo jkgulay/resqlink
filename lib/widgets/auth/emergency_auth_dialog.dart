@@ -115,7 +115,6 @@ class _EmergencyAuthDialogState extends State<EmergencyAuthDialog> {
       // Persist new display name so IdentityService / P2P initialization picks it up
       final identityService = IdentityService();
       await identityService.setDisplayName(displayName);
-      identityService.clearCache();
       debugPrint('💾 Stored new identity display name: $displayName');
     } catch (e) {
       _showSnackBar('Emergency setup failed: ${e.toString()}');

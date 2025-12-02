@@ -1111,7 +1111,7 @@ class SettingsPageState extends State<SettingsPage> {
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
-                  color: Color(0xFFFF6500).withValues(alpha: 0.1),
+                  color: Color(0xFF1E3A5F).withValues(alpha: 0.15),
                   width: 1,
                 ),
               ),

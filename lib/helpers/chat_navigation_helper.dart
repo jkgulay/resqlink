@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../features/database/repositories/chat_repository.dart';
 import '../services/p2p/p2p_main_service.dart';
-import '../services/temporary_identity_service.dart';
+import '../services/identity_service.dart';
 import '../pages/chat_session_page.dart';
 import '../pages/message_page.dart';
 import '../models/chat_session_model.dart';
@@ -478,7 +478,7 @@ class ChatNavigationHelper {
   }) async {
     try {
       // Get current user's display name
-      final currentUserName = await TemporaryIdentityService.getTemporaryDisplayName();
+      final currentUserName = IdentityService().displayName;
 
       // CRITICAL: deviceId should be the MAC address from WiFi Direct
       return await ChatRepository.createOrUpdate(
