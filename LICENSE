@@ -1,0 +1,129 @@
+ResQLink - Proprietary Non-Commercial License
+Copyright (c) 2024-2026 ResQLink Development Team. All Rights Reserved.
+
+================================================================================
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+================================================================================
+
+1. DEFINITIONS
+
+"Software" refers to the ResQLink application, including but not limited to
+source code, object code, documentation, design patterns, algorithms, user
+interfaces, and all associated materials.
+
+"Commercial Use" means any use of the Software that is primarily intended for
+or directed toward commercial advantage or monetary compensation, including but
+not limited to:
+
+- Selling, licensing, or sublicensing the Software or derivatives
+- Using the Software in a commercial product or service
+- Using the Software to provide paid services
+- Incorporating the Software into commercial applications
+
+"Derivative Work" means any work based upon the Software or any portion thereof,
+including modifications, adaptations, or works containing recognizable elements
+of the Software's architecture, algorithms, or design patterns.
+
+"Academic Use" means use for educational, research, or thesis purposes within
+accredited educational institutions without commercial intent.
+
+2. GRANT OF LIMITED LICENSE
+
+Subject to the terms of this License, you are granted a limited, non-exclusive,
+non-transferable, revocable license to:
+
+a) View and study the source code for academic and educational purposes
+b) Run the Software for personal, non-commercial disaster preparedness
+c) Reference the Software in academic publications with proper attribution
+
+3. RESTRICTIONS
+
+You may NOT:
+
+a) Use the Software or any part thereof for Commercial Use
+b) Sell, rent, lease, sublicense, or distribute the Software
+c) Create Derivative Works based on the Software
+d) Copy, modify, adapt, translate, or reverse engineer the Software
+e) Remove or alter any copyright notices, trademarks, or proprietary legends
+f) Use the Software's algorithms, design patterns, or architectural concepts
+in other projects without explicit written permission
+g) Extract, reuse, or reimagine core features including but not limited to: - WiFi Direct peer-to-peer communication protocols - Dual-layer messaging architecture - Mesh networking implementation - Offline-first database synchronization patterns - Device identification and routing systems - Connection quality monitoring algorithms
+
+4. INTELLECTUAL PROPERTY PROTECTION
+
+All rights, title, and interest in and to the Software, including all
+intellectual property rights, remain exclusively with the copyright holders.
+
+This includes but is not limited to:
+
+- Original software architecture and design patterns
+- Algorithms for offline peer-to-peer communication
+- Database schema and synchronization mechanisms
+- User interface designs and workflows
+- Documentation and technical specifications
+- Novel implementations of WiFi Direct mesh networking
+
+5. ATTRIBUTION REQUIREMENTS
+
+If you reference this Software in academic work, publications, or research,
+you MUST provide clear attribution including:
+
+- Project name: "ResQLink"
+- Copyright notice as stated in Section 1
+- Link to the original repository (if publicly available)
+- Description that the work is proprietary and non-commercial
+
+6. ACADEMIC AND THESIS USE
+
+Students and researchers may:
+
+- Study the codebase for educational purposes
+- Reference the architecture in academic papers with proper citation
+- Discuss the technical approaches in thesis work
+
+Students and researchers may NOT:
+
+- Copy code or algorithms into their own projects
+- Use the Software as a foundation for commercial products
+- Submit any portion of this code as their own academic work
+
+7. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+8. TERMINATION
+
+This license is effective until terminated. Your rights under this license
+will terminate automatically without notice if you fail to comply with any
+of its terms. Upon termination, you must destroy all copies of the Software
+in your possession.
+
+9. REQUESTS FOR COMMERCIAL USE
+
+Organizations interested in commercial licensing should contact the copyright
+holders. Commercial licenses may be negotiated on a case-by-case basis.
+
+10. GOVERNING LAW
+
+This License shall be governed by and construed in accordance with the laws
+of the jurisdiction in which the copyright holder resides, without regard to
+its conflict of law provisions.
+
+11. MODIFICATIONS TO LICENSE
+
+The copyright holders reserve the right to modify this license at any time.
+Continued use of the Software constitutes acceptance of any modifications.
+
+================================================================================
+
+For permissions beyond the scope of this license, please contact:
+gulayjunkyle@gmail.com
+
+ResQLink is a thesis/research project focused on disaster response communication.
+This license protects the intellectual property while supporting academic research.
