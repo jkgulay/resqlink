@@ -1,7 +1,15 @@
 name: resqlink
-description: "A new Flutter project."
+description: "Offline emergency communication system for disaster response. Proprietary software - see LICENSE for terms."
 publish_to: "none"
 version: 0.1.0
+homepage: https://github.com/yourusername/resqlink
+repository: https://github.com/yourusername/resqlink
+issue_tracker: https://github.com/yourusername/resqlink/issues
+
+# PROPRIETARY SOFTWARE - NON-COMMERCIAL LICENSE
+# Copyright (c) 2024-2026 ResQLink Development Team
+# Commercial use, modification, and distribution prohibited without permission
+# See LICENSE file for complete terms
 
 environment:
   sdk: ^3.8.0

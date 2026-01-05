@@ -1,3 +1,12 @@
+/*
+ * ResQLink - Offline Emergency Communication System
+ * Copyright (c) 2024-2026 ResQLink Development Team. All Rights Reserved.
+ * 
+ * This software is proprietary and confidential. Unauthorized copying,
+ * modification, distribution, or commercial use is strictly prohibited.
+ * See LICENSE file for complete terms and conditions.
+ */
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';

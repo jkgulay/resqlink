@@ -32,6 +32,21 @@
 
 ---
 
+## 📜 License
+
+**ResQLink is proprietary software with a non-commercial license.**
+
+- ❌ **No commercial use** — Cannot be used in commercial products or services
+- ❌ **No derivatives** — Cannot create modified versions or extract core features
+- ✅ **Academic study** — May be studied for educational/research purposes with proper attribution
+- ✅ **Personal use** — Can be used for personal disaster preparedness (non-commercial)
+
+See the [LICENSE](LICENSE) file for complete terms and conditions.
+
+All intellectual property rights, including the WiFi Direct mesh networking implementation, dual-layer messaging architecture, and offline-first design patterns, are fully protected.
+
+---
+
 ## 📂 Project Structure (Simplified)
 
 ```
